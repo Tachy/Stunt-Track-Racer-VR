@@ -52,6 +52,9 @@ var _chase := OS.get_cmdline_user_args().has("--chase")
 var _overview := OS.get_cmdline_user_args().has("--overview")
 
 var _fallback_yaw := 0.0
+## Pose the crane holds the car in. While held the view uses it instead of the
+## interpolated transform, which lags a few frames behind a teleport.
+var _held_xf := Transform3D()
 var _rng := RandomNumberGenerator.new()
 var _pause_panel: Panel3D
 var _pause_sel := 0
@@ -137,6 +140,7 @@ func _ready() -> void:
 	car.teleport(xf)
 	car.hold(true)
 	crane.hold(xf)
+	_held_xf = xf
 	ptrack = CarTracker.new(path, car, START_S)
 	_reset_view_yaw()
 	if autopilot:
@@ -303,6 +307,7 @@ func _crane_reposition() -> void:
 	car.teleport(xf)
 	car.hold(true)
 	crane.hold(xf)
+	_held_xf = xf
 	_reset_view_yaw()
 	Sfx.play("clank")
 	state = "craned"
@@ -439,7 +444,7 @@ func _process(delta: float) -> void:
 
 
 func _update_view() -> void:
-	var xf := car.get_global_transform_interpolated()
+	var xf := _held_xf if car.freeze else car.get_global_transform_interpolated()
 	var eye := CarModel.SEAT_EYE
 	if _chase:
 		eye = Vector3(-2.6, 1.6, 6.5)   # debug: external view, behind-left
@@ -472,7 +477,7 @@ func _piece_desc(pi_: int) -> String:
 
 ## Heading reference for the view after the car was placed (start, crane).
 func _reset_view_yaw() -> void:
-	_fallback_yaw = car.global_transform.basis.get_euler(EULER_ORDER_YXZ).y
+	_fallback_yaw = _held_xf.basis.get_euler(EULER_ORDER_YXZ).y
 
 
 # --- input / pause ----------------------------------------------------------------

@@ -13,7 +13,7 @@ func _init() -> void:
 		"test_recenter", "test_tracks_closed", "test_track_heights", "test_track_mesh",
 		"test_lap_tracker", "test_recovery", "test_bridge", "test_damage", "test_league",
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
-		"test_custom1_layout", "test_loop_geometry", "test_loop_view_rule", "test_shifted_loop_view",
+		"test_custom1_layout", "test_loop_geometry", "test_loop_view_rule", "test_shifted_loop_view", "test_view_heading_after_teleport",
 		"test_league_track_features", "test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
 	]
 	for t in tests:
@@ -412,6 +412,22 @@ func test_shifted_loop_view() -> void:
 		check(near(best["down"][1], 45.0, 1.5), "loop %d: nose down -> view 45 above nose (got %.1f)" % [loops, best["down"][1]])
 		check(max_jump < 0.1, "loop %d: no jump in view (view faster than 1.5x car by %.2f deg/sample)" % [loops, max_jump])
 	check(loops == 2, "two loops checked")
+
+
+func test_view_heading_after_teleport() -> void:
+	# a stale heading reference (car was upside down / turned before the crane
+	# put it back) must not leave the view looking backwards
+	var yaw := 0.3
+	var placed := Basis(Vector3.UP, yaw)
+	for stale in [yaw + PI, yaw + 2.0, yaw - 2.0, yaw + PI * 0.6]:
+		var prev: float = stale
+		for k in 3:
+			var view := CockpitMath.view_basis(placed, 0.5, prev)
+			prev = CockpitMath.view_yaw(placed, prev)
+			check(view.is_equal_approx(placed), "stale yaw %.2f: view follows the placed car (frame %d)" % [stale, k])
+	# right side up, nose not vertical: heading is always the nose heading
+	var tilted := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, 0.6) * Basis(Vector3.BACK, 0.4)
+	check(near(angle_difference(CockpitMath.view_yaw(tilted, yaw + PI), yaw), 0.0, 1e-3), "upright car: heading from the nose")
 
 
 func test_league_track_features() -> void:

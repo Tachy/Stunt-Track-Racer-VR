@@ -16,9 +16,15 @@ static func _wrap(a: float) -> float:
 
 ## Car orientation as (pitch, yaw, roll) in YXZ order. Of the two equivalent
 ## decompositions the one whose yaw is closest to prev_yaw is chosen, so the
-## heading stays continuous when the nose passes vertical (loops).
+## heading stays continuous when the nose passes vertical (flips). A car that
+## is right side up with its nose clearly off vertical always gets the heading
+## of its nose, so a wrong prev_yaw (e.g. after a teleport) cannot leave the
+## view looking backwards.
 static func car_euler(car_basis: Basis, prev_yaw: float) -> Vector3:
-	var e := car_basis.orthonormalized().get_euler(EULER_ORDER_YXZ)
+	var b := car_basis.orthonormalized()
+	var e := b.get_euler(EULER_ORDER_YXZ)
+	if b.y.y > 0.5 and absf(b.z.y) < 0.7:
+		return e
 	var alt := Vector3(_wrap(PI - e.x), _wrap(e.y + PI), _wrap(e.z + PI))
 	if absf(angle_difference(prev_yaw, alt.y)) < absf(angle_difference(prev_yaw, e.y)):
 		return alt
