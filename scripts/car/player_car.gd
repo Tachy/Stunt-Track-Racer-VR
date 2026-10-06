@@ -224,10 +224,11 @@ func _physics_process(dt: float) -> void:
 		wheel_comp[w] = comp
 		wheel_contact[w] = true
 
-		var fs := tuning.spring * comp + tuning.damping * comp_vel
+		var damp := tuning.damping if comp_vel > 0.0 else tuning.damping_rebound
+		var fs := tuning.spring * comp + damp * comp_vel
 		var stop_start := tuning.suspension_rest * 0.85
 		if comp > stop_start:
-			fs += tuning.bump_stop * (comp - stop_start)
+			fs += tuning.bump_stop * (comp - stop_start) * (1.0 if comp_vel > 0.0 else tuning.bump_stop_return)
 		fs = maxf(fs, 0.0)
 		var f_susp := up * fs
 

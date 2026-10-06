@@ -14,8 +14,14 @@ extends Resource
 
 @export var suspension_rest := 0.5
 @export var spring := 17000.0
-@export var damping := 1700.0
+@export var damping := 1700.0           # compression (bump), N per m/s
+## Rebound is damped harder than compression, as on real dampers, so a hard
+## landing does not throw the car back up.
+@export var damping_rebound := 4000.0
 @export var bump_stop := 120000.0
+## Share of the bump stop force while extending again: the rubber stop eats
+## most of the energy instead of acting like a trampoline.
+@export var bump_stop_return := 0.25
 @export var anti_roll := 7000.0
 
 @export var grip := 1.35                 # friction coefficient

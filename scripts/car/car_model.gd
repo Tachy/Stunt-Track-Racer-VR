@@ -12,6 +12,16 @@ const WHEEL_POS := [Vector3(-0.98, 0.0, -1.75), Vector3(0.98, 0.0, -1.75),
 const WHEEL_R := [0.42, 0.42, 0.48, 0.48]
 const WHEEL_W := [0.30, 0.30, 0.44, 0.44]
 const WHEEL_RADIUS := 0.42
+## Tyre spikes (visual only): edge of the square base, height above the
+## tyre, spacing around the tyre and across its width.
+## Visual roundness of tyre and rim (the physics wheel is an exact circle:
+## a ray of length WHEEL_R).
+const TYRE_SEGMENTS := 48
+const RIM_SEGMENTS := 32
+const SPIKE_SIZE := 0.05
+const SPIKE_HEIGHT := 0.035
+const SPIKE_PITCH := 0.15
+const SPIKE_ROW_PITCH := 0.14
 ## Mount height above the road at rest (rest length - static sag + radius).
 const RIDE_HEIGHT := 0.80
 
@@ -196,15 +206,24 @@ func _build_wheels() -> void:
 		var spinner := Node3D.new()
 		pivot.add_child(spinner)
 		var kit := MeshKit.new()
-		kit.cylinder(Vector3.ZERO, Vector3.RIGHT, r, width, 12, Palette.TYRE, Palette.TYRE.lightened(0.1))
+		kit.cylinder(Vector3.ZERO, Vector3.RIGHT, r, width, TYRE_SEGMENTS, Palette.TYRE, Palette.TYRE.lightened(0.1))
 		# rim and hub
 		var side := signf(pos.x)
-		kit.cylinder(Vector3(side * (width * 0.5 + 0.005), 0, 0), Vector3.RIGHT, r * 0.6, 0.02, 10, Palette.HUB)
+		kit.cylinder(Vector3(side * (width * 0.5 + 0.005), 0, 0), Vector3.RIGHT, r * 0.6, 0.02, RIM_SEGMENTS, Palette.HUB)
 		kit.cylinder(Vector3(side * (width * 0.5 + 0.02), 0, 0), Vector3.RIGHT, r * 0.18, 0.04, 6, Palette.HUB.darkened(0.3))
-		# tread blocks so rotation is visible
-		for k in 6:
-			var a := TAU * k / 6.0
-			kit.box(Vector3(0, cos(a) * (r - 0.015), sin(a) * (r - 0.015)), Vector3(width + 0.01, 0.05, 0.09), Palette.TYRE.lightened(0.25), Basis(Vector3.RIGHT, -a))
+		# spikes: radial boxes in staggered rows (visual only - the wheel's
+		# physics radius is the bare tyre, the spikes have no hitbox)
+		var rows := maxi(2, int(round(width / SPIKE_ROW_PITCH)))
+		var per_row := int(round(TAU * r / SPIKE_PITCH))
+		var base := r * cos(PI / TYRE_SEGMENTS) - 0.005   # just inside the tyre's flats
+		var top := r + SPIKE_HEIGHT
+		for j in rows:
+			var x := (float(j) - (rows - 1) * 0.5) * width / rows
+			for k in per_row:
+				var a := TAU * (float(k) + 0.5 * (j % 2)) / per_row
+				var mid := (base + top) * 0.5
+				kit.box(Vector3(x, cos(a) * mid, sin(a) * mid), Vector3(SPIKE_SIZE, top - base, SPIKE_SIZE),
+					Palette.TYRE.lightened(0.25), Basis(Vector3.RIGHT, a))
 		spinner.add_child(kit.build_instance())
 		wheel_pivots.append(pivot)
 		wheel_spinners.append(spinner)
