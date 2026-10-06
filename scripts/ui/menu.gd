@@ -119,7 +119,7 @@ func _refresh() -> void:
 		"result":
 			_screen_result(sc)
 	_draw_items(sc)
-	sc.text_centered(PX.y - 40, "LENKEN=WÄHLEN  GAS/ENTER=OK  BREMSE/ESC=ZURÜCK  F12=VR ZENTRIEREN", Palette.ROAD_DARK, 2.4)
+	sc.text_centered(PX.y - 40, Lang.t("STEER=SELECT  GAS/ENTER=OK  BRAKE/ESC=BACK  F12=RECENTER VR"), Palette.ROAD_DARK, 2.4)
 	sc.commit()
 
 
@@ -137,23 +137,23 @@ func _draw_items(sc: PixelScreen) -> void:
 
 
 func _screen_main(sc: PixelScreen) -> void:
-	sc.text_centered(90, "INSPIRIERT VON STUNT CAR RACER (1989)", Palette.LIGHT_BLUE, 3.0)
+	sc.text_centered(90, Lang.t("INSPIRED BY STUNT CAR RACER (1989)"), Palette.LIGHT_BLUE, 3.0)
 	var dev := InputManager.current_device_name()
-	sc.text_centered(140, "EINGABE: " + dev.left(40), Palette.WHITE, 3.0)
+	sc.text_centered(140, Lang.t("INPUT: ") + dev.left(40), Palette.WHITE, 3.0)
 	if InputManager.device >= 0 and not InputManager.calibrated:
-		sc.text_centered(180, "BITTE ZUERST LENKRAD KALIBRIEREN!", Palette.RED, 3.0)
+		sc.text_centered(180, Lang.t("PLEASE CALIBRATE THE WHEEL FIRST!"), Palette.RED, 3.0)
 	elif not InputManager.pedals_ready():
-		sc.text_centered(180, "BITTE GAS UND BREMSE EINMAL KURZ TRETEN", Palette.RED, 3.0)
+		sc.text_centered(180, Lang.t("PLEASE PRESS GAS AND BRAKE ONCE"), Palette.RED, 3.0)
 	if XrManager.xr_active:
-		sc.text_centered(220, "VR-MODUS", Palette.GREEN, 3.0)
+		sc.text_centered(220, Lang.t("VR MODE"), Palette.GREEN, 3.0)
 	else:
-		sc.text_centered(220, "DESKTOP-MODUS", Palette.YELLOW, 3.0)
+		sc.text_centered(220, Lang.t("DESKTOP MODE"), Palette.YELLOW, 3.0)
 	items = [
-		{"label": "LIGA", "do": func(): open("league")},
-		{"label": "ÜBUNGSFAHRT", "do": func(): open("practice")},
-		{"label": "LENKRAD KALIBRIEREN", "do": func(): open("calibrate")},
-		{"label": "EINSTELLUNGEN", "do": func(): open("settings")},
-		{"label": "BEENDEN", "do": func(): get_tree().quit()},
+		{"label": Lang.t("LEAGUE"), "do": func(): open("league")},
+		{"label": Lang.t("PRACTICE"), "do": func(): open("practice")},
+		{"label": Lang.t("CALIBRATE WHEEL"), "do": func(): open("calibrate")},
+		{"label": Lang.t("SETTINGS"), "do": func(): open("settings")},
+		{"label": Lang.t("QUIT"), "do": func(): get_tree().quit()},
 	]
 
 
@@ -165,7 +165,7 @@ func _screen_league(sc: PixelScreen) -> void:
 		lg.finish_season()
 		GameState.save_game()
 	var div := lg.player_division()
-	var title := "SAISON %d  -  DIVISION %d" % [lg.season, div]
+	var title := Lang.t("SEASON %d  -  DIVISION %d") % [lg.season, div]
 	if lg.super_league:
 		title += "  (SUPER LEAGUE)"
 	sc.text_centered(90, title, Palette.LIGHT_BLUE, 4.0)
@@ -184,123 +184,124 @@ func _screen_league(sc: PixelScreen) -> void:
 		y += 40
 	var race := lg.next_race()
 	if not race.is_empty():
-		sc.text_centered(330, "RENNEN %d/4: %s GEGEN %s" % [lg.race_index + 1,
+		sc.text_centered(330, Lang.t("RACE %d/4: %s VS %s") % [lg.race_index + 1,
 			TrackLibrary.display_name(race["track"]), League.driver_name(race["opponent"])], Palette.WHITE, 3.0)
 	if lg.holes > 0:
-		sc.text_centered(370, "LÖCHER IM RAHMEN: %d" % lg.holes, Palette.RED, 3.0)
+		sc.text_centered(370, Lang.t("HOLES IN THE FRAME: %d") % lg.holes, Palette.RED, 3.0)
 	if lg.last_season_report != "":
 		sc.text_centered(410, lg.last_season_report, Palette.YELLOW, 3.0)
 	items = [
-		{"label": "RENNEN STARTEN", "do": func(): start_race.emit(GameState.league_request())},
-		{"label": "NEUE LIGA BEGINNEN", "do": _act_new_league},
-		{"label": "ZURÜCK", "do": func(): open("main")},
+		{"label": Lang.t("START RACE"), "do": func(): start_race.emit(GameState.league_request())},
+		{"label": Lang.t("NEW LEAGUE"), "do": _act_new_league},
+		{"label": Lang.t("BACK"), "do": func(): open("main")},
 	]
 
 
 func _screen_practice(sc: PixelScreen) -> void:
-	sc.text_centered(90, "ÜBUNGSFAHRT", Palette.LIGHT_BLUE, 4.0)
+	sc.text_centered(90, Lang.t("PRACTICE"), Palette.LIGHT_BLUE, 4.0)
 	var id: String = _practice_ids()[_practice_track]
 	sc.text_centered(160, "DIVISION %d" % TrackLibrary.division_of(id), Palette.WHITE, 3.0)
 	items = [
-		{"label": "STRECKE: " + TrackLibrary.display_name(id), "side": _side_track},
-		{"label": "GEGNER: " + ("JA" if _practice_opponent else "NEIN"), "side": _side_opponent},
+		{"label": Lang.t("TRACK: ") + TrackLibrary.display_name(id), "side": _side_track},
+		{"label": Lang.t("OPPONENT: ") + (Lang.t("YES") if _practice_opponent else Lang.t("NO")), "side": _side_opponent},
 		{"label": "START", "do": _act_practice_start},
-		{"label": "ZURÜCK", "do": func(): open("main")},
+		{"label": Lang.t("BACK"), "do": func(): open("main")},
 	]
 
 
 func _screen_settings(sc: PixelScreen) -> void:
-	sc.text_centered(90, "EINSTELLUNGEN", Palette.LIGHT_BLUE, 4.0)
-	sc.text_centered(140, "BLICK-NEIGUNG: ANTEIL DER FAHRZEUGNEIGUNG IM BLICK", Palette.ROAD_DARK, 2.0)
+	sc.text_centered(90, Lang.t("SETTINGS"), Palette.LIGHT_BLUE, 4.0)
+	sc.text_centered(140, Lang.t("VIEW TILT: SHARE OF THE CAR'S PITCH/ROLL IN THE VIEW"), Palette.ROAD_DARK, 2.0)
 	items = [
-		{"label": "BLICK-NEIGUNG: %d%%" % int(round(Settings.tilt_follow * 100.0)), "side": _side_tilt},
-		{"label": "LENKRADBEREICH: %d GRAD" % int(Settings.wheel_range_deg), "side": _side_range},
-		{"label": "MAX. RADEINSCHLAG: %d GRAD" % int(Settings.max_wheel_angle_deg), "side": _side_lock},
-		{"label": "SITZHÖHE: %+.2f M" % Settings.seat_height, "side": _side_seat},
-		{"label": "TACHO: " + ("KMH" if Settings.speed_kmh else "MPH"), "side": _side_units},
-		{"label": "SCHATTEN: " + ("AN" if Settings.shadows else "AUS"), "side": _side_shadows},
-		{"label": "LAUTSTÄRKE: %d" % Settings.volume, "side": _side_volume},
-		{"label": "ZURÜCK", "do": _act_settings_back},
+		{"label": Lang.t("VIEW TILT: %d%%") % int(round(Settings.tilt_follow * 100.0)), "side": _side_tilt},
+		{"label": Lang.t("WHEEL RANGE: %d DEG") % int(Settings.wheel_range_deg), "side": _side_range},
+		{"label": Lang.t("MAX. STEERING ANGLE: %d DEG") % int(Settings.max_wheel_angle_deg), "side": _side_lock},
+		{"label": Lang.t("SEAT HEIGHT: %+.2f M") % Settings.seat_height, "side": _side_seat},
+		{"label": Lang.t("SPEEDO: ") + ("KMH" if Settings.speed_kmh else "MPH"), "side": _side_units},
+		{"label": Lang.t("SHADOWS: ") + (Lang.t("ON") if Settings.shadows else Lang.t("OFF")), "side": _side_shadows},
+		{"label": Lang.t("VOLUME: %d") % Settings.volume, "side": _side_volume},
+		{"label": Lang.t("LANGUAGE: %s") % ("DEUTSCH" if Lang.current == "de" else "ENGLISH"), "side": _side_language},
+		{"label": Lang.t("BACK"), "do": _act_settings_back},
 	]
 
 
 func _screen_result(sc: PixelScreen) -> void:
 	var r: Dictionary = GameState.last_result
-	var title := "ERGEBNIS"
+	var title := Lang.t("RESULT")
 	var col := Palette.WHITE
 	if r.get("wrecked", false):
-		title = "WAGEN SCHROTT - RENNEN VERLOREN"
+		title = Lang.t("CAR WRECKED - RACE LOST")
 		col = Palette.RED
 	elif r.get("retired", false):
-		title = "AUFGEGEBEN"
+		title = Lang.t("RETIRED")
 		col = Palette.RED
 	elif r.get("won", false):
-		title = "SIEG!"
+		title = Lang.t("YOU WIN!")
 		col = Palette.GREEN
 	else:
-		title = "VERLOREN"
+		title = Lang.t("YOU LOSE")
 		col = Palette.RED
 	sc.text_centered(100, title, col, 6.0)
 	sc.text_centered(180, TrackLibrary.display_name(r.get("track", "first_flight")), Palette.LIGHT_BLUE, 4.0)
-	sc.text_centered(240, "DEINE BESTE RUNDE: " + Dashboard.fmt_time(r.get("player_best", -1.0)), Palette.WHITE, 3.0)
+	sc.text_centered(240, Lang.t("YOUR BEST LAP: ") + Dashboard.fmt_time(r.get("player_best", -1.0)), Palette.WHITE, 3.0)
 	if r.get("opponent_name", "") != "":
 		sc.text_centered(280, "%s: %s" % [str(r["opponent_name"]).to_upper(), Dashboard.fmt_time(r.get("opp_best", -1.0))], Palette.WHITE, 3.0)
-		sc.text_centered(320, "SCHNELLSTE RUNDE: " + ("DU" if r.get("player_fastest", false) else "GEGNER"), Palette.YELLOW, 3.0)
+		sc.text_centered(320, Lang.t("FASTEST LAP: ") + (Lang.t("YOU") if r.get("player_fastest", false) else Lang.t("OPPONENT")), Palette.YELLOW, 3.0)
 	if r.has("season_report"):
 		sc.text_centered(380, str(r["season_report"]), Palette.YELLOW, 3.0)
 	var is_league: bool = GameState.request.get("league", false)
 	items = [
-		{"label": "WEITER", "do": func(): open("league" if is_league else "main")},
+		{"label": Lang.t("CONTINUE"), "do": func(): open("league" if is_league else "main")},
 	]
 
 
 # --- calibration -------------------------------------------------------------------
 
 const CAL_TEXT := {
-	"wake": "LENKRAD BEWEGEN, BEIDE PEDALE EINMAL TRETEN (ODER ENTER)",
-	"rest": "JETZT ALLES LOSLASSEN UND RUHIG HALTEN ...",
-	"left": "LENKRAD GANZ NACH LINKS DREHEN UND HALTEN",
-	"right": "LENKRAD GANZ NACH RECHTS DREHEN UND HALTEN",
-	"center": "LENKRAD IN DIE MITTE",
-	"gas": "GASPEDAL VOLL DURCHTRETEN UND HALTEN",
-	"gas_release": "GASPEDAL LOSLASSEN",
-	"brake": "BREMSPEDAL VOLL DURCHTRETEN UND HALTEN",
-	"brake_release": "BREMSPEDAL LOSLASSEN",
-	"btn_boost": "TASTE FÜR BOOST DRÜCKEN",
-	"btn_accept": "TASTE FÜR MENÜ-OK DRÜCKEN (ENTER = KEINE)",
-	"btn_back": "TASTE FÜR ZURÜCK/PAUSE DRÜCKEN (ENTER = KEINE)",
-	"btn_recenter": "TASTE FÜR VR-ZENTRIEREN DRÜCKEN (ENTER = KEINE)",
-	"done": "FERTIG! KALIBRIERUNG GESPEICHERT.",
+	"wake": "TURN THE WHEEL, PRESS BOTH PEDALS ONCE (OR ENTER)",
+	"rest": "NOW RELEASE EVERYTHING AND KEEP STILL ...",
+	"left": "TURN THE WHEEL FULLY LEFT AND HOLD",
+	"right": "TURN THE WHEEL FULLY RIGHT AND HOLD",
+	"center": "CENTRE THE WHEEL",
+	"gas": "PRESS THE GAS PEDAL FULLY AND HOLD",
+	"gas_release": "RELEASE THE GAS PEDAL",
+	"brake": "PRESS THE BRAKE PEDAL FULLY AND HOLD",
+	"brake_release": "RELEASE THE BRAKE PEDAL",
+	"btn_boost": "PRESS THE BUTTON FOR BOOST",
+	"btn_accept": "PRESS THE BUTTON FOR MENU OK (ENTER = NONE)",
+	"btn_back": "PRESS THE BUTTON FOR BACK/PAUSE (ENTER = NONE)",
+	"btn_recenter": "PRESS THE BUTTON FOR VR RECENTER (ENTER = NONE)",
+	"done": "DONE! CALIBRATION SAVED.",
 }
 const CAL_ORDER := ["wake", "rest", "left", "right", "center", "gas", "gas_release", "brake", "brake_release",
 	"btn_boost", "btn_accept", "btn_back", "btn_recenter", "done"]
 
 
 func _screen_calibrate(sc: PixelScreen) -> void:
-	sc.text_centered(90, "LENKRAD KALIBRIEREN", Palette.LIGHT_BLUE, 4.0)
+	sc.text_centered(90, Lang.t("CALIBRATE WHEEL"), Palette.LIGHT_BLUE, 4.0)
 	if InputManager.device < 0:
-		sc.text_centered(200, "KEIN LENKRAD / JOYPAD GEFUNDEN", Palette.RED, 4.0)
-		sc.text_centered(250, "USB PRÜFEN, DANN GERÄT SUCHEN", Palette.WHITE, 3.0)
+		sc.text_centered(200, Lang.t("NO WHEEL / JOYPAD FOUND"), Palette.RED, 4.0)
+		sc.text_centered(250, Lang.t("CHECK USB, THEN SEARCH AGAIN"), Palette.WHITE, 3.0)
 		items = [
-			{"label": "GERÄT SUCHEN", "do": _act_find_device},
-			{"label": "ZURÜCK", "do": func(): open("main")},
+			{"label": Lang.t("SEARCH DEVICE"), "do": _act_find_device},
+			{"label": Lang.t("BACK"), "do": func(): open("main")},
 		]
 		return
 	sc.text_centered(140, InputManager.current_device_name().left(48), Palette.WHITE, 3.0)
 	var step: String = _cal.get("step", "wake")
-	sc.text_centered(200, CAL_TEXT.get(step, ""), Palette.YELLOW, 2.6)
+	sc.text_centered(200, Lang.t(CAL_TEXT.get(step, "")), Palette.YELLOW, 2.6)
 	# live axis bars
 	var y := 260
 	for a in InputManager.AXES:
 		var v := InputManager.raw_axis(a)
 		var tag := ""
 		if a == InputManager.steer_axis and _cal.has("steer_done"):
-			tag = "LENKUNG"
+			tag = Lang.t("STEERING")
 		if a == InputManager.gas_axis and _cal.has("gas_done"):
-			tag += " GAS"
+			tag += Lang.t(" THROTTLE")
 		if a == InputManager.brake_axis and _cal.has("brake_done"):
-			tag += " BREMSE"
-		sc.text(80, y, "ACHSE %d" % a, Palette.WHITE, 2.0)
+			tag += Lang.t(" BRAKE")
+		sc.text(80, y, Lang.t("AXIS %d") % a, Palette.WHITE, 2.0)
 		var bar := Rect2(200, y - 2, 420, 16)
 		sc.rect(bar, Palette.BLACK)
 		var x := bar.position.x + (v + 1.0) * 0.5 * bar.size.x
@@ -309,11 +310,11 @@ func _screen_calibrate(sc: PixelScreen) -> void:
 		sc.text(640, y, "%+.2f %s" % [v, tag], Palette.WHITE, 2.0)
 		y += 26
 	var pb := InputManager.pressed_button()
-	sc.text(80, y + 6, "TASTE: " + (str(pb) if pb >= 0 else "-"), Palette.WHITE, 2.0)
+	sc.text(80, y + 6, Lang.t("BUTTON: ") + (str(pb) if pb >= 0 else "-"), Palette.WHITE, 2.0)
 	if step == "done":
 		items = [{"label": "OK", "do": func(): open("main")}]
 	else:
-		items = [{"label": "ABBRECHEN (ESC)", "do": func(): open("main")}]
+		items = [{"label": Lang.t("CANCEL (ESC)"), "do": func(): open("main")}]
 
 
 func _cal_next() -> void:
@@ -531,6 +532,11 @@ func _side_lock(d: int) -> void:
 
 func _side_seat(d: int) -> void:
 	Settings.seat_height = clampf(snappedf(Settings.seat_height + 0.05 * d, 0.05), -0.4, 0.4)
+
+
+func _side_language(_d: int) -> void:
+	Settings.language = "de" if Lang.current == "en" else "en"
+	Lang.current = Settings.language
 
 
 func _side_shadows(_d: int) -> void:

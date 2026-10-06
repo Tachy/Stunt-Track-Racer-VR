@@ -15,6 +15,7 @@ extends Node
 ##   --vr-bench          render 2 off-screen Pimax-size eyes and log GPU time
 ##   --fps               log frame rate every second
 ##   --joydump           print joypad axes/buttons twice a second
+##   --lang=<en|de>      UI language for this run (not saved)
 
 var current: Node
 var _args := {}
@@ -27,6 +28,8 @@ func _ready() -> void:
 		if a.begins_with("--"):
 			var kv := a.substr(2).split("=", true, 1)
 			_args[kv[0]] = kv[1] if kv.size() > 1 else "1"
+	if _args.get("lang", "") in Lang.LANGUAGES:
+		Lang.current = _args["lang"]
 	if _args.has("render-scale"):
 		# benchmark: render the 3D scene at a multiple of the window size
 		get_viewport().scaling_3d_scale = float(_args["render-scale"])

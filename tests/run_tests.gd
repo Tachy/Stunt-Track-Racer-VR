@@ -14,7 +14,7 @@ func _init() -> void:
 		"test_lap_tracker", "test_recovery", "test_bridge", "test_damage", "test_league",
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_loop_view_rule",
-		"test_league_track_features", "test_no_unintended_crossings", "test_legacy_save_ids",
+		"test_league_track_features", "test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
 	]
 	for t in tests:
 		_current = t
@@ -393,3 +393,26 @@ func test_legacy_save_ids() -> void:
 	d["schedule"] = [{"track": "little_ramp", "opponent": 9}, {"track": "hump_back", "opponent": 10}]
 	var l := League.from_dict(d)
 	check(l.schedule[0]["track"] == "first_flight" and l.schedule[1]["track"] == "camel_back", "old save track ids are translated")
+
+
+func test_translations() -> void:
+	# every UI text passed to Lang.t() has a German entry
+	var re := RegEx.create_from_string("Lang\\.t\\(\"((?:[^\"\\\\]|\\\\.)*)\"\\)")
+	var missing := []
+	var count := 0
+	for dir in ["res://scripts/ui", "res://scripts/race", "res://scripts/hud", "res://scripts/league", "res://scripts/autoload"]:
+		for f in DirAccess.get_files_at(dir):
+			if not f.ends_with(".gd"):
+				continue
+			var text := FileAccess.get_file_as_string(dir.path_join(f))
+			for m in re.search_all(text):
+				var key := m.get_string(1).c_unescape()
+				count += 1
+				if not Lang.DE.has(key):
+					missing.append(key)
+	check(count > 60, "UI texts found (%d)" % count)
+	check(missing.is_empty(), "German translation for every UI text, missing: %s" % [missing])
+	Lang.current = "de"
+	check(Lang.t("PRACTICE") == "ÜBUNGSFAHRT", "German lookup")
+	Lang.current = "en"
+	check(Lang.t("PRACTICE") == "PRACTICE", "English default")

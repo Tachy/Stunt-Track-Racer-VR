@@ -13,6 +13,8 @@ var max_wheel_angle_deg := 32.0
 var speed_kmh := false
 var volume := 8
 var shadows := true
+## UI language: "en" (default) or "de".
+var language := "en"
 var seat_height := 0.0
 var recenter_offset := Transform3D.IDENTITY
 var has_recenter := false
@@ -20,6 +22,7 @@ var has_recenter := false
 
 func _ready() -> void:
 	load_settings()
+	Lang.current = language
 
 
 func load_settings() -> void:
@@ -35,6 +38,7 @@ func load_settings() -> void:
 	speed_kmh = cfg.get_value("game", "speed_kmh", speed_kmh)
 	volume = cfg.get_value("game", "volume", volume)
 	shadows = cfg.get_value("view", "shadows", shadows)
+	language = cfg.get_value("game", "language", language)
 	apply_volume()
 
 
@@ -49,6 +53,7 @@ func save_settings() -> void:
 	cfg.set_value("game", "speed_kmh", speed_kmh)
 	cfg.set_value("game", "volume", volume)
 	cfg.set_value("view", "shadows", shadows)
+	cfg.set_value("game", "language", language)
 	cfg.save(PATH)
 
 

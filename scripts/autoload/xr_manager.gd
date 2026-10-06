@@ -83,10 +83,7 @@ func _ready() -> void:
 		var want_desktop := OS.get_cmdline_user_args().has("--no-xr") or DisplayServer.get_name() == "headless"
 		if not want_desktop:
 			# VR start without a usable headset: no silent fallback to desktop
-			OS.alert("Kein VR-Headset gefunden.
-
-Headset einschalten und Pimax-Software starten,
-oder die Desktop-Version starten (Start-Desktop.cmd).", "Stunt Track Racer VR")
+			OS.alert(Lang.t("No VR headset found.\n\nSwitch the headset on and start its runtime software,\nor start the desktop version (Start-Desktop.cmd)."), "Stunt Track Racer VR")
 			get_tree().quit(1)
 			return
 		get_viewport().use_xr = false

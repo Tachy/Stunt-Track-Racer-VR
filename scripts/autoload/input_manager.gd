@@ -110,7 +110,7 @@ func cycle_device() -> void:
 
 
 func current_device_name() -> String:
-	return Input.get_joy_name(device) if device >= 0 else "TASTATUR"
+	return Input.get_joy_name(device) if device >= 0 else Lang.t("KEYBOARD")
 
 
 # --- raw access (also used by calibration) -----------------------------------

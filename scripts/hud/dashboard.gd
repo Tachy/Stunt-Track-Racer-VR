@@ -56,8 +56,8 @@ func _redraw() -> void:
 		# leader flag
 		sc.rect(Rect2(580, 12, 42, 30), col)
 		sc.rect(Rect2(576, 12, 4, 44), Palette.WHITE)
-	sc.text(16, 64, "ZEIT " + fmt_time(d.get("lap_time", 0.0)), Palette.WHITE, s)
-	sc.text_right(624, 64, "BEST " + fmt_time(d.get("best", -1.0)), Palette.WHITE, s)
+	sc.text(16, 64, Lang.t("TIME ") + fmt_time(d.get("lap_time", 0.0)), Palette.WHITE, s)
+	sc.text_right(624, 64, Lang.t("BEST ") + fmt_time(d.get("best", -1.0)), Palette.WHITE, s)
 
 	# speed bar
 	var speed_ms: float = d.get("speed", 0.0)

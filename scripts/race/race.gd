@@ -60,7 +60,7 @@ var _ap: AiDriver
 var _ground_dist := 0.0   # debug: path distance driven with wheel 0 on the ground
 var _accept_pressed := false
 
-const PAUSE_ITEMS := ["WEITER", "AUFGEBEN"]
+const PAUSE_ITEMS := ["CONTINUE", "RETIRE"]
 
 
 func _init(request: Dictionary) -> void:
@@ -183,7 +183,7 @@ func _physics_process(dt: float) -> void:
 		"hold":
 			if not autopilot and not InputManager.pedals_ready():
 				# pedal values unknown until moved once - wait for them
-				message = "GAS + BREMSE TRETEN"
+				message = Lang.t("PRESS GAS + BRAKE")
 				drop_at = maxf(drop_at, state_time + 2.0)
 			elif state_time > 1.5:
 				message = "DROP START"
@@ -293,7 +293,7 @@ func _lap_completed() -> void:
 	else:
 		Sfx.play("beep")
 		if ptrack.laps_done() == LAPS - 1:
-			_flash("LETZTE RUNDE")
+			_flash(Lang.t("FINAL LAP"))
 
 
 func _crane_reposition() -> void:
@@ -307,7 +307,7 @@ func _crane_reposition() -> void:
 	Sfx.play("clank")
 	state = "craned"
 	state_time = 0.0
-	message = "GAS = ABSETZEN"
+	message = Lang.t("GAS = DROP")
 	_update_view()
 	XrManager.fade_to(0.0, 0.35)
 
@@ -331,9 +331,9 @@ func _finish(retired: bool) -> void:
 		"opponent_name": opp_driver.get("name", ""),
 	}
 	if retired:
-		message = "AUFGEGEBEN"
+		message = Lang.t("RETIRED")
 	else:
-		message = "SIEG!" if won else "VERLOREN"
+		message = Lang.t("YOU WIN!") if won else Lang.t("YOU LOSE")
 		Sfx.play("beep_low" if not won else "beep", 0.0, 1.0 if won else 0.8)
 	_flash(message)
 
@@ -345,8 +345,8 @@ func _on_wrecked() -> void:
 	state_time = 0.0
 	car.controls_enabled = false
 	Sfx.play("wreck")
-	message = "SCHROTT!"
-	_flash("WAGEN SCHROTT!")
+	message = Lang.t("WRECKED!")
+	_flash(Lang.t("CAR WRECKED!"))
 	result = {
 		"won": false, "player_fastest": false, "wrecked": true, "retired": false,
 		"holes": car.damage.holes, "player_best": ptrack.best_lap, "opp_best": opp_track.best_lap if opp_track else -1.0,
@@ -362,7 +362,7 @@ func _on_opponent_lap() -> void:
 		opp_state = "finished"
 		if state == "racing" or state == "falling" or state == "craned":
 			opp_finished_first = true
-			_flash("GEGNER IM ZIEL")
+			_flash(Lang.t("OPPONENT FINISHED"))
 
 
 func _on_opponent_wrecked() -> void:
@@ -370,7 +370,7 @@ func _on_opponent_wrecked() -> void:
 	opp_car.controls_enabled = false
 	print("[Race] opponent wrecked")
 	if state == "racing" or state == "falling" or state == "craned":
-		_flash("GEGNER SCHROTT!")
+		_flash(Lang.t("OPPONENT WRECKED!"))
 
 
 func _on_landed(strength: float) -> void:
@@ -505,10 +505,10 @@ func _draw_pause() -> void:
 	var sc := _pause_panel.screen
 	sc.clear()
 	sc.frame(Rect2(0, 0, 512, 256), Palette.YELLOW, 4)
-	sc.text_centered(24, "PAUSE", Palette.YELLOW, 6.0)
+	sc.text_centered(24, Lang.t("PAUSE"), Palette.YELLOW, 6.0)
 	for i in PAUSE_ITEMS.size():
 		var col := Palette.WHITE if i == _pause_sel else Palette.ROAD_DARK
-		var label: String = ("> " if i == _pause_sel else "  ") + PAUSE_ITEMS[i]
+		var label: String = ("> " if i == _pause_sel else "  ") + Lang.t(PAUSE_ITEMS[i])
 		sc.text(120, 110 + i * 56, label, col, 5.0)
 	sc.commit()
 
@@ -516,6 +516,6 @@ func _draw_pause() -> void:
 func _pause_action() -> void:
 	var item: String = PAUSE_ITEMS[_pause_sel]
 	_set_paused(false)
-	if item == "AUFGEBEN":
+	if item == "RETIRE":
 		_finish(true)
 		state_time = END_DELAY - 1.0

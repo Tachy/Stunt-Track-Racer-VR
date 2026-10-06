@@ -72,7 +72,7 @@ func next_race() -> Dictionary:
 
 
 static func driver_name(id: int) -> String:
-	return "DU" if id == PLAYER else Drivers.get_driver(id)["name"]
+	return Lang.t("YOU") if id == PLAYER else Drivers.get_driver(id)["name"]
 
 
 ## result: {won: bool, player_fastest: bool}
@@ -152,15 +152,15 @@ func finish_season(rng: RandomNumberGenerator = null) -> String:
 		new_divs[d][2] = top_lower
 		new_divs[d + 1][0] = bottom_upper
 	var player_pos: int = table[pdiv].find(PLAYER) + 1
-	report = "SAISON %d: PLATZ %d IN DIVISION %d" % [season, player_pos, pdiv + 1]
+	report = Lang.t("SEASON %d: PLACE %d IN DIVISION %d") % [season, player_pos, pdiv + 1]
 	if player_won_div1:
 		if not super_league:
-			report += " - SUPER LEAGUE FREIGESCHALTET!"
+			report += Lang.t(" - SUPER LEAGUE UNLOCKED!")
 		super_league = true
 	elif player_pos == 1 and pdiv > 0:
-		report += " - AUFSTIEG!"
+		report += Lang.t(" - PROMOTED!")
 	elif player_pos == 3 and pdiv < 3:
-		report += " - ABSTIEG"
+		report += Lang.t(" - RELEGATED")
 	divisions = new_divs
 	season += 1
 	last_season_report = report
