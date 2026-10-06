@@ -71,6 +71,9 @@ func check_off(dt: float) -> bool:
 	var below := path.height_above(pos, idx) < -1.2 and path.loop_mask[idx] == 0
 	if path.loop_mask[idx] == 1 and absf(lateral()) > path.half_width[idx] + 2.0:
 		below = true
+	# over the edge in the air: from here on it falls freely
+	if below or car.on_ground_plane or car.grounded == 0 and absf(lateral()) > path.half_width[idx] + 1.0:
+		car.off_road = true
 	if car.on_ground_plane or below:
 		off_timer += dt
 	else:

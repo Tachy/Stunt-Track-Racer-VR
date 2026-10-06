@@ -1,98 +1,55 @@
 class_name CockpitMath
 ## Pure math for the VR viewpoint.
 ##
-## The base view follows the car's heading (yaw) completely. Pitch and roll
-## are followed only by a share (tilt_follow, 0.5 by default), with a folding
-## rule so loops and roll-overs never make the view jump:
-##   |angle| <= 90 deg : view = share * angle
-##   |angle| >  90 deg : view = share * (180 - |angle|)  (back to level when upside down)
-## With share 0.5 the view stays within +-45 deg of straight ahead in pitch and
-## roll. The HMD pose (6DOF) is then applied relative to that base pose.
+## The view sits in the cockpit and depends only on the car's attitude in
+## space, never on the track (loops, flips and roll-overs are all the same):
+## let tilt be the angle between the car's roof (up axis) and world up. The
+## view is the car's orientation turned back towards level about the
+## horizontal tilt axis by (1 - share) * smooth_triangle(tilt):
+##   tilt   0 deg (upright)     : view = car
+##   tilt  30 deg (e.g. ramp)   : view tilted 15 deg (share 0.5)
+##   tilt  90 deg (nose up/side): view tilted 50 deg (lags the car by 40)
+##   tilt 180 deg (upside down) : view = car again (upside down with it)
+## For pure pitch or pure roll the heading is kept exactly; with both combined
+## it shifts slightly (<= 2 deg on all tracks). No state is needed, so the view
+## can never get stuck facing backwards. The HMD pose (6DOF) is then applied
+## relative to that base pose.
 
 
-static func _wrap(a: float) -> float:
-	return wrapf(a, -PI, PI)
+## Half width of the rounded corner of the tilt triangle.
+const TILT_CORNER := deg_to_rad(20.0)
 
 
-## Car orientation as (pitch, yaw, roll) in YXZ order. Of the two equivalent
-## decompositions the one whose yaw is closest to prev_yaw is chosen, so the
-## heading stays continuous when the nose passes vertical (flips). A car that
-## is right side up with its nose clearly off vertical always gets the heading
-## of its nose, so a wrong prev_yaw (e.g. after a teleport) cannot leave the
-## view looking backwards.
-static func car_euler(car_basis: Basis, prev_yaw: float) -> Vector3:
+## Triangle 0 -> 90 deg (at 90) -> 0 (at 180), odd, with its corners at
+## +-90 deg replaced by a parabola that meets the straight parts tangentially
+## (C1), so the view's turn rate changes smoothly. Peak 90 - TILT_CORNER / 2.
+static func smooth_triangle(angle: float) -> float:
+	var a := wrapf(angle, -PI, PI)
+	var x := absf(a) - PI * 0.5   # distance from the corner
+	var d := absf(x)
+	if d < TILT_CORNER:
+		d = (x * x / TILT_CORNER + TILT_CORNER) * 0.5
+	return signf(a) * (PI * 0.5 - d)
+
+
+## How far the view lags behind the car for a given tilt (0..PI).
+static func tilt_lag(tilt: float, tilt_follow: float) -> float:
+	return (1.0 - clampf(tilt_follow, 0.0, 1.0)) * smooth_triangle(tilt)
+
+
+static func view_basis(car_basis: Basis, tilt_follow: float) -> Basis:
 	var b := car_basis.orthonormalized()
-	var e := b.get_euler(EULER_ORDER_YXZ)
-	if b.y.y > 0.5 and absf(b.z.y) < 0.7:
-		return e
-	var alt := Vector3(_wrap(PI - e.x), _wrap(e.y + PI), _wrap(e.z + PI))
-	if absf(angle_difference(prev_yaw, alt.y)) < absf(angle_difference(prev_yaw, e.y)):
-		return alt
-	return e
-
-
-## The folding rule for one angle.
-static func fold(angle: float, share: float) -> float:
-	var a := _wrap(angle)
-	if absf(a) <= PI * 0.5:
-		return a * share
-	return signf(a) * (PI - absf(a)) * share
-
-
-static func view_basis(car_basis: Basis, tilt_follow: float, prev_yaw := 0.0) -> Basis:
-	var e := car_euler(car_basis, prev_yaw)
-	var share := clampf(tilt_follow, 0.0, 1.0)
-	return Basis.from_euler(Vector3(fold(e.x, share), e.y, fold(e.z, share)), EULER_ORDER_YXZ)
-
-
-## Car orientation inside a loop, relative to the loop's entry heading, as
-## (pitch, yaw, roll) with R = Rx(pitch) * Ry(yaw) * Rz(roll). Pitch runs
-## through the full circle; yaw and roll stay small (sideways shift and twist
-## of the loop), so unlike car_euler there is no gimbal lock at vertical.
-static func loop_euler(car_basis: Basis, entry_yaw: float) -> Vector3:
-	var local := Basis(Vector3.UP, -entry_yaw) * car_basis.orthonormalized()
-	return local.get_euler(EULER_ORDER_XYZ)
-
-
-## View inside a loop: the view stays with the cockpit and only pitches
-## relative to the car, never rolls. The offset from the driving direction
-## is a triangle over the loop angle (share 0.5):
-##   nose 0 -> 90 deg up    : offset 0 -> -45 (view below the nose)
-##   90 -> 180 (upside down): offset -45 -> 0 (view along the driving direction)
-##   180 -> 270 (nose down) : offset 0 -> +45 (view above the nose)
-##   270 -> 360 (exit)      : offset +45 -> 0
-## At entry and exit this equals view_basis (no jump).
-static func loop_view_basis(car_basis: Basis, tilt_follow: float, entry_yaw: float) -> Basis:
-	var e := loop_euler(car_basis, entry_yaw)
-	var share := clampf(tilt_follow, 0.0, 1.0)
-	var offset := -(1.0 - share) * fold(e.x, 1.0)
-	# pitch about the car's own cross axis (it is turned by the loop's sideways shift)
-	return Basis(Vector3.UP, entry_yaw) * Basis(Vector3.RIGHT, e.x) * Basis(Vector3.UP, e.y) 		* Basis(Vector3.RIGHT, offset) * Basis(Vector3.BACK, fold(e.z, share))
-
-
-## Heading inside a loop, used as prev_yaw for the next frame.
-static func loop_view_yaw(car_basis: Basis, entry_yaw: float) -> float:
-	return entry_yaw + loop_euler(car_basis, entry_yaw).y
-
-
-## Heading used as prev_yaw for the next frame.
-static func view_yaw(car_basis: Basis, prev_yaw := 0.0) -> float:
-	return car_euler(car_basis, prev_yaw).y
-
-
-## Kept for callers/tests: base view basis (same as view_basis).
-static func base_basis(car_basis: Basis, tilt_follow: float, prev_yaw := 0.0) -> Basis:
-	return view_basis(car_basis, tilt_follow, prev_yaw)
-
-
-## Yaw-only basis for a vehicle basis (Godot: -Z is forward).
-static func level_yaw(car_basis: Basis, prev_yaw := 0.0) -> float:
-	return view_yaw(car_basis, prev_yaw)
+	var axis := b.y.cross(Vector3.UP)   # turning about it brings the roof up
+	var s := axis.length()
+	if s < 1e-6:
+		return b    # upright or exactly upside down: lag is zero
+	var tilt := atan2(s, b.y.y)
+	return Basis(axis / s, tilt_lag(tilt, tilt_follow)) * b
 
 
 ## Eye point = car transform applied to the seat offset, oriented by the base view.
-static func base_transform(car_xform: Transform3D, seat_offset: Vector3, tilt_follow: float, prev_yaw := 0.0) -> Transform3D:
-	return Transform3D(view_basis(car_xform.basis, tilt_follow, prev_yaw), car_xform * seat_offset)
+static func base_transform(car_xform: Transform3D, seat_offset: Vector3, tilt_follow: float) -> Transform3D:
+	return Transform3D(view_basis(car_xform.basis, tilt_follow), car_xform * seat_offset)
 
 
 ## Recenter offset from the HMD pose relative to the XR origin. Only yaw and
@@ -109,9 +66,20 @@ static func origin_transform(base: Transform3D, recenter: Transform3D) -> Transf
 	return base * recenter.affine_inverse()
 
 
+## Angle between a basis' up axis and world up (0 upright, PI upside down).
+static func tilt_of(b: Basis) -> float:
+	var u := b.orthonormalized().y
+	return atan2(u.cross(Vector3.UP).length(), u.y)
+
+
 static func pitch_of(b: Basis) -> float:
 	return asin(clampf((-b.z).y, -1.0, 1.0))
 
 
 static func roll_of(b: Basis) -> float:
 	return asin(clampf(b.x.y, -1.0, 1.0))
+
+
+static func yaw_of(b: Basis) -> float:
+	var f := -b.z
+	return atan2(-f.x, -f.z)

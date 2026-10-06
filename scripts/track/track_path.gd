@@ -412,12 +412,6 @@ func height_above(pos: Vector3, i: int) -> float:
 	return (pos - center[i]).dot(up[i])
 
 
-## Heading (yaw) of a loop piece's entry, for the cockpit view rule.
-func loop_entry_yaw(i: int) -> float:
-	var d: Vector2 = pieces[piece_of[i]]["dir"]
-	return atan2(-d.x, -d.y)
-
-
 func lateral(pos: Vector3, i: int) -> float:
 	return (pos - center[i]).dot(right_flat[i])
 

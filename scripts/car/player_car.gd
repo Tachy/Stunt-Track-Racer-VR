@@ -30,6 +30,8 @@ var speed := 0.0
 var grounded := 0
 var on_ground_plane := false
 var airtime := 0.0
+## Fell off the road: no flight alignment, the car tumbles as it comes.
+var off_road := false
 var engine_load := 0.0
 
 var wheel_comp := PackedFloat32Array([0, 0, 0, 0])
@@ -99,6 +101,7 @@ func teleport(xform: Transform3D) -> void:
 	_prev_vel = Vector3.ZERO
 	_expected_dv = Vector3.ZERO
 	_skip_impact = 3
+	off_road = false
 	for w in 4:
 		wheel_comp[w] = 0.0
 		wheel_contact[w] = false
@@ -270,7 +273,8 @@ func _physics_process(dt: float) -> void:
 	grounded = new_grounded
 	if grounded == 0:
 		airtime += dt
-		_align_to_flight(b, dt)
+		if not off_road:
+			_align_to_flight(b, dt)
 	else:
 		airtime = 0.0
 

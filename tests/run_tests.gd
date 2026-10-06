@@ -13,7 +13,7 @@ func _init() -> void:
 		"test_recenter", "test_tracks_closed", "test_track_heights", "test_track_mesh",
 		"test_lap_tracker", "test_recovery", "test_bridge", "test_damage", "test_league",
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
-		"test_custom1_layout", "test_loop_geometry", "test_loop_view_rule", "test_shifted_loop_view", "test_view_heading_after_teleport",
+		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view",
 		"test_league_track_features", "test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
 	]
 	for t in tests:
@@ -40,26 +40,26 @@ func near(a: float, b: float, eps := 1e-3) -> bool:
 func test_cockpit_half_pitch() -> void:
 	var yaw := 0.7
 	var car := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, deg_to_rad(20.0))
-	var b := CockpitMath.base_basis(car, 0.5)
+	var b := CockpitMath.view_basis(car, 0.5)
 	check(near(rad_to_deg(CockpitMath.pitch_of(b)), 10.0, 0.05), "pitch 20 -> 10 (got %f)" % rad_to_deg(CockpitMath.pitch_of(b)))
-	check(near(CockpitMath.level_yaw(b), yaw, 1e-3), "yaw preserved")
+	check(near(CockpitMath.yaw_of(b), yaw, 1e-3), "yaw preserved")
 
 
 func test_cockpit_half_roll() -> void:
 	var car := Basis(Vector3.UP, -1.2) * Basis(Vector3.FORWARD, deg_to_rad(30.0))
-	var b := CockpitMath.base_basis(car, 0.5)
+	var b := CockpitMath.view_basis(car, 0.5)
 	check(near(absf(rad_to_deg(CockpitMath.roll_of(b))), 15.0, 0.05), "roll 30 -> 15 (got %f)" % rad_to_deg(CockpitMath.roll_of(b)))
 
 
 func test_cockpit_extremes() -> void:
 	var car := Basis(Vector3.UP, 0.3) * Basis(Vector3.RIGHT, 0.4) * Basis(Vector3.FORWARD, 0.2)
-	var b0 := CockpitMath.base_basis(car, 0.0)
+	var b0 := CockpitMath.view_basis(car, 0.0)
 	check(near(CockpitMath.pitch_of(b0), 0.0) and near(CockpitMath.roll_of(b0), 0.0), "tilt 0 is level")
-	var b1 := CockpitMath.base_basis(car, 1.0)
+	var b1 := CockpitMath.view_basis(car, 1.0)
 	check(b1.is_equal_approx(car.orthonormalized()), "tilt 1 follows car")
 	# nose straight up must not produce NaN
 	var vertical := Basis(Vector3.RIGHT, PI * 0.5)
-	var bv := CockpitMath.base_basis(vertical, 0.5, 1.0)
+	var bv := CockpitMath.view_basis(vertical, 0.5)
 	check(not is_nan(bv.x.x), "vertical car no NaN")
 	var xf := Transform3D(car, Vector3(5, 6, 7))
 	var bt := CockpitMath.base_transform(xf, Vector3(0, 1, 0.3), 0.5)
@@ -67,13 +67,13 @@ func test_cockpit_extremes() -> void:
 
 
 func test_recenter() -> void:
-	var base := Transform3D(CockpitMath.base_basis(Basis(Vector3.UP, 0.4) * Basis(Vector3.RIGHT, 0.2), 0.5), Vector3(10, 5, -3))
+	var base := Transform3D(CockpitMath.view_basis(Basis(Vector3.UP, 0.4) * Basis(Vector3.RIGHT, 0.2), 0.5), Vector3(10, 5, -3))
 	var head := Transform3D(Basis(Vector3.UP, 0.9) * Basis(Vector3.RIGHT, -0.15), Vector3(0.2, 1.1, 0.4))
 	var off := CockpitMath.recenter_offset(head)
 	var origin := CockpitMath.origin_transform(base, off)
 	var cam := origin * head
 	check(cam.origin.is_equal_approx(base.origin), "head at eye point after recenter")
-	check(near(CockpitMath.level_yaw(cam.basis), CockpitMath.level_yaw(base.basis), 1e-3), "head yaw matches base yaw")
+	check(near(CockpitMath.yaw_of(cam.basis), CockpitMath.yaw_of(base.basis), 1e-3), "head yaw matches base yaw")
 	# moving the head 10 cm to the left moves the camera 10 cm along base -X
 	var head2 := Transform3D(head.basis, head.origin + Basis(Vector3.UP, 0.9) * Vector3(-0.1, 0, 0))
 	var cam2 := origin * head2
@@ -310,54 +310,107 @@ func test_loop_geometry() -> void:
 	check(p.height_above(probe, mid) > 0.5, "height above surface upside down")
 
 
-func test_loop_view_rule() -> void:
-	check(near(CockpitMath.fold(deg_to_rad(60.0), 0.5), deg_to_rad(30.0)), "fold: below 90 deg follows half")
-	check(near(CockpitMath.fold(deg_to_rad(90.0), 0.5), deg_to_rad(45.0)), "fold: 90 -> 45")
-	check(near(CockpitMath.fold(deg_to_rad(135.0), 0.5), deg_to_rad(22.5)), "fold: 135 -> 22.5")
-	check(near(CockpitMath.fold(deg_to_rad(180.0), 0.5), 0.0), "fold: upside down -> level")
-	check(near(CockpitMath.fold(deg_to_rad(-120.0), 0.5), deg_to_rad(-30.0)), "fold: negative side")
-	# drive through a full loop: view pitch follows the triangle, no jumps
-	var yaw := 0.4
-	var entry := Basis(Vector3.UP, yaw)
-	var prev_yaw := yaw
-	var last_dir := Vector3.ZERO
-	var max_jump := 0.0
-	var max_abs := 0.0
-	for k in 361:
-		var car := entry * Basis(Vector3.RIGHT, deg_to_rad(float(k)))
-		var view := CockpitMath.view_basis(car, 0.5, prev_yaw)
-		prev_yaw = CockpitMath.view_yaw(car, prev_yaw)
-		var dir := -view.z
-		if k > 0:
-			max_jump = maxf(max_jump, rad_to_deg(dir.angle_to(last_dir)))
-		last_dir = dir
-		max_abs = maxf(max_abs, absf(rad_to_deg(CockpitMath.pitch_of(view))))
-		if k == 180:
-			check(near(CockpitMath.pitch_of(view), 0.0, 1e-2) and near(CockpitMath.roll_of(view), 0.0, 1e-2), "loop top: view level")
-			check(near(angle_difference(CockpitMath.view_yaw(car, prev_yaw), yaw), 0.0, 1e-2), "loop top: heading = entry heading")
-	check(max_jump < 2.0, "loop: no jump in view direction (max %.2f deg/step)" % max_jump)
-	check(near(max_abs, 45.0, 0.6), "loop: view pitch within +-45 (max %.1f)" % max_abs)
-	# roll-over: full roll, view roll folds back, no jumps
-	prev_yaw = yaw
-	max_jump = 0.0
-	var last_up := Vector3.UP
-	for k in 361:
-		var car := entry * Basis(Vector3.FORWARD, deg_to_rad(float(k)))
-		var view := CockpitMath.view_basis(car, 0.5, prev_yaw)
-		prev_yaw = CockpitMath.view_yaw(car, prev_yaw)
-		if k > 0:
-			max_jump = maxf(max_jump, rad_to_deg(view.y.angle_to(last_up)))
-		last_up = view.y
-		if k == 180:
-			check(near(CockpitMath.roll_of(view), 0.0, 1e-2), "roll-over: upside down -> level view")
-	check(max_jump < 2.0, "roll-over: no jump (max %.2f deg/step)" % max_jump)
+## Runs the car through a sequence of orientations and returns the largest
+## amount (deg) by which the view turned faster than 1.5x the car per step.
+func _view_overspeed(cars: Array) -> float:
+	var worst := 0.0
+	for k in range(1, cars.size()):
+		var v0 := Quaternion(CockpitMath.view_basis(cars[k - 1], 0.5))
+		var v1 := Quaternion(CockpitMath.view_basis(cars[k], 0.5))
+		var dc := Quaternion(cars[k - 1]).angle_to(Quaternion(cars[k]))
+		worst = maxf(worst, rad_to_deg(v0.angle_to(v1) - 1.5 * dc))
+	return worst
+
+
+## Lag of the view behind the car as a signed angle about the given car axis
+## (checks that it is a pure rotation about that axis).
+func _lag_about(car: Basis, view: Basis, axis: Vector3, what: String, min_dot := 0.999) -> float:
+	var rel := Quaternion(car.inverse() * view)
+	if rel.get_angle() < deg_to_rad(0.5):
+		return 0.0
+	var ax := rel.get_axis().normalized()
+	check(absf(ax.dot(axis)) > min_dot, "%s: view only turns about the car axis %s (axis %s)" % [what, axis, ax])
+	return rad_to_deg(rel.get_angle()) * signf(ax.dot(axis))
+
+
+func test_tilt_rule() -> void:
+	# rounded triangle
+	var max_kink := 0.0
+	var h := deg_to_rad(0.5)
+	for k in range(-720, 720):
+		var a := float(k) * h
+		var s0 := (CockpitMath.smooth_triangle(a) - CockpitMath.smooth_triangle(a - h)) / h
+		var s1 := (CockpitMath.smooth_triangle(a + h) - CockpitMath.smooth_triangle(a)) / h
+		max_kink = maxf(max_kink, absf(s1 - s0))
+	check(max_kink < 0.06, "smooth triangle: slope changes gradually (max step %.3f)" % max_kink)
+	check(near(rad_to_deg(CockpitMath.smooth_triangle(PI * 0.5)), 80.0, 1e-3), "smooth triangle: peak 80 (lag 40 at share 0.5)")
+	check(near(CockpitMath.smooth_triangle(deg_to_rad(30.0)), deg_to_rad(30.0), 1e-4), "smooth triangle: straight away from the corner")
+	# pure pitch through a full circle (like a loop) and pure roll (roll-over),
+	# at any heading: lag 0 -> 40 -> 0 -> 40 -> 0, only about the car's own axis
+	for yaw in [0.0, 0.4, -2.5]:
+		var entry := Basis(Vector3.UP, yaw)
+		for mode in ["pitch", "roll"]:
+			var axis := Vector3.RIGHT if mode == "pitch" else Vector3.FORWARD
+			var cars := []
+			for k in 361:
+				var car := entry * Basis(axis, deg_to_rad(float(k)))
+				cars.append(car)
+				var view := CockpitMath.view_basis(car, 0.5)
+				var lag := _lag_about(car, view, Vector3.RIGHT if mode == "pitch" else Vector3.BACK, "%s %d" % [mode, k])
+				var expect := {0: 0.0, 30: 15.0, 90: 40.0, 180: 0.0, 270: 40.0, 330: 15.0}
+				if expect.has(k):
+					check(near(absf(lag), expect[k], 0.05), "%s %d deg: lag %.1f (got %.2f)" % [mode, k, expect[k], lag])
+				if k == 180:
+					check(view.is_equal_approx(car), "%s: upside down the view is with the car" % mode)
+			check(_view_overspeed(cars) < 0.1, "%s: no jumps (%.2f)" % [mode, _view_overspeed(cars)])
+	# upright car on a ramp / banked curve: heading kept, tilt halved
+	var tilted := Basis(Vector3.UP, 0.3) * Basis(Vector3.RIGHT, 0.6) * Basis(Vector3.BACK, 0.4)
+	var tv := CockpitMath.view_basis(tilted, 0.5)
+	check(near(CockpitMath.tilt_of(tv), CockpitMath.tilt_of(tilted) * 0.5, 1e-3), "small tilt: view follows half")
+	# combined pitch + roll shifts the heading slightly: small on every track
+	for id in TrackLibrary.TRACKS:
+		var p := TrackPath.new(TrackLibrary.get_def(id))
+		var worst := 0.0
+		for i in p.n:
+			if p.loop_mask[i] == 0:
+				var car := Basis(p.right[i], p.up[i], -p.forward[i]).orthonormalized()
+				var v := CockpitMath.view_basis(car, 0.5)
+				worst = maxf(worst, absf(angle_difference(CockpitMath.yaw_of(v), CockpitMath.yaw_of(car))))
+		check(rad_to_deg(worst) < 2.5, "%s: view heading within 2.5 deg of the car (max %.2f)" % [id, rad_to_deg(worst)])
+
+
+func test_tumble_view() -> void:
+	# a car tumbling freely about mixed axes (fell off the road): the view is
+	# defined for every attitude, never NaN, and never jumps
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	for run in 5:
+		var car := Basis(Vector3.UP, rng.randf() * TAU)
+		var w := Vector3(rng.randf_range(-6, 6), rng.randf_range(-6, 6), rng.randf_range(-6, 6))
+		var cars := []
+		for k in 600:
+			car = (Basis(w.normalized(), w.length() / 240.0) * car).orthonormalized()
+			cars.append(car)
+			var view := CockpitMath.view_basis(car, 0.5)
+			if is_nan(view.x.x) or is_nan(view.y.y):
+				check(false, "tumble %d: NaN at step %d" % [run, k])
+				break
+			# view tilt = car tilt - lag
+			var lag := CockpitMath.tilt_lag(CockpitMath.tilt_of(car), 0.5)
+			if not near(CockpitMath.tilt_of(view), CockpitMath.tilt_of(car) - lag, 1e-3):
+				check(false, "tumble %d step %d: view tilt %.2f vs %.2f" % [run, k, CockpitMath.tilt_of(view), CockpitMath.tilt_of(car) - lag])
+				break
+		check(_view_overspeed(cars) < 0.5, "tumble %d: no jumps (%.2f deg/step)" % [run, _view_overspeed(cars)])
+	# exactly upright / upside down
+	check(CockpitMath.view_basis(Basis(), 0.5).is_equal_approx(Basis()), "upright: view = car")
+	var flipped := Basis(Vector3.FORWARD, PI)
+	check(CockpitMath.view_basis(flipped, 0.5).is_equal_approx(flipped), "upside down: view = car")
 
 
 func test_shifted_loop_view() -> void:
-	# real loops are shifted sideways: inside the loop the view stays with the
-	# cockpit and only pitches relative to the car (never rolls); the offset is
-	# a triangle 0 -> -45 (nose up) -> 0 (top) -> +45 (nose down) -> 0, and the
-	# view must not jump at entry or exit
+	# real loops are shifted sideways: through the whole loop the view only
+	# pitches relative to the car (no roll), lag -40 (nose up) -> 0 (top) ->
+	# +40 (nose down), and it does not jump at entry or exit
 	var p := TrackPath.new(TrackLibrary.get_def("loop_and_jump"))
 	var loops := 0
 	for pc in p.pieces:
@@ -366,68 +419,32 @@ func test_shifted_loop_view() -> void:
 		loops += 1
 		var i0: int = pc["i0"]
 		var i1: int = pc["i1"]
-		var entry_yaw := p.loop_entry_yaw(i0)
-		var prev_yaw := CockpitMath.view_yaw(Basis(p.right[i0 - 20], p.up[i0 - 20], -p.forward[i0 - 20]), entry_yaw)
-		var max_axis_err := 0.0
-		var max_offset := 0.0
-		var max_jump := 0.0
+		var cars := []
 		var best := {"up": [INF, 0.0], "top": [INF, 0.0], "down": [INF, 0.0]}
-		var last := Basis()
-		var last_car := Basis()
+		var max_lag := 0.0
 		for i in range(i0 - 20, i1 + 20):
 			var car := Basis(p.right[i], p.up[i], -p.forward[i]).orthonormalized()
-			var view: Basis
-			if p.loop_mask[i] == 1:
-				view = CockpitMath.loop_view_basis(car, 0.5, entry_yaw)
-				prev_yaw = CockpitMath.loop_view_yaw(car, entry_yaw)
-			else:
-				view = CockpitMath.view_basis(car, 0.5, prev_yaw)
-				prev_yaw = CockpitMath.view_yaw(car, prev_yaw)
-			if i > i0 - 20:
-				# no jumps: the view turns at most 1.5x as fast as the car (the
-				# offset unwinds from -45 to 0 while the car goes 90 -> 180)
-				var dv := Quaternion(last).angle_to(Quaternion(view))
-				var dc := Quaternion(last_car).angle_to(Quaternion(car))
-				max_jump = maxf(max_jump, rad_to_deg(dv - 1.5 * dc))
-			last = view
-			last_car = car
-			if p.loop_mask[i] == 1:
-				# view relative to the car: a pure pitch (rotation about the car's x axis)
-				var rel := Quaternion(car.inverse() * view)
-				var ang := rel.get_angle()
-				var signed := ang * signf(rel.get_axis().x)
-				if ang > deg_to_rad(1.0):
-					max_axis_err = maxf(max_axis_err, rad_to_deg(rel.get_axis().angle_to(Vector3.RIGHT * signf(rel.get_axis().x))))
-				max_offset = maxf(max_offset, rad_to_deg(ang))
-				var nose := (-car.z).y   # +1 nose up, -1 nose down
-				for key in best:
-					var target: float = {"up": 1.0, "top": 0.0, "down": -1.0}[key]
-					var d := absf(nose - target) + (0.0 if key != "top" else (0.0 if car.y.y < 0.0 else 9.0))
-					if d < best[key][0]:
-						best[key] = [d, rad_to_deg(signed)]
-		check(max_axis_err < 1.0, "loop %d: view only pitches relative to the car, no roll (axis err %.2f deg)" % [loops, max_axis_err])
-		check(max_offset < 45.5, "loop %d: offset to driving direction within 45 deg (max %.1f)" % [loops, max_offset])
-		check(near(best["up"][1], -45.0, 1.5), "loop %d: nose up -> view 45 below nose (got %.1f)" % [loops, best["up"][1]])
+			cars.append(car)
+			# the lag turns about the horizontal tilt axis; the shifted loop's
+			# surface banks up to ~10 deg sideways, so that axis is up to ~20 deg
+			# off the car's cross axis (the view levels part of that real roll)
+			var view := CockpitMath.view_basis(car, 0.5)
+			var lag := _lag_about(car, view, Vector3.RIGHT, "loop %d sample %d" % [loops, i], 0.94)
+			var rel := (car.inverse() * view).get_euler(EULER_ORDER_YXZ)
+			check(absf(rad_to_deg(rel.z)) < 9.0, "loop %d sample %d: view roll relative to the car below 9 deg (%.1f)" % [loops, i, rad_to_deg(rel.z)])
+			max_lag = maxf(max_lag, absf(lag))
+			var nose := (-car.z).y   # +1 nose up, -1 nose down
+			for key in best:
+				var target: float = {"up": 1.0, "top": 0.0, "down": -1.0}[key]
+				var d := absf(nose - target) + (0.0 if key != "top" or car.y.y < 0.0 else 9.0)
+				if d < best[key][0]:
+					best[key] = [d, lag]
+		check(max_lag < 40.3, "loop %d: lag within 40 deg (max %.1f)" % [loops, max_lag])
+		check(near(best["up"][1], -40.0, 1.0), "loop %d: nose up -> view 40 below nose (got %.1f)" % [loops, best["up"][1]])
 		check(near(best["top"][1], 0.0, 1.5), "loop %d: upside down -> view along driving direction (got %.1f)" % [loops, best["top"][1]])
-		check(near(best["down"][1], 45.0, 1.5), "loop %d: nose down -> view 45 above nose (got %.1f)" % [loops, best["down"][1]])
-		check(max_jump < 0.1, "loop %d: no jump in view (view faster than 1.5x car by %.2f deg/sample)" % [loops, max_jump])
+		check(near(best["down"][1], 40.0, 1.0), "loop %d: nose down -> view 40 above nose (got %.1f)" % [loops, best["down"][1]])
+		check(_view_overspeed(cars) < 0.1, "loop %d: no jumps (%.2f)" % [loops, _view_overspeed(cars)])
 	check(loops == 2, "two loops checked")
-
-
-func test_view_heading_after_teleport() -> void:
-	# a stale heading reference (car was upside down / turned before the crane
-	# put it back) must not leave the view looking backwards
-	var yaw := 0.3
-	var placed := Basis(Vector3.UP, yaw)
-	for stale in [yaw + PI, yaw + 2.0, yaw - 2.0, yaw + PI * 0.6]:
-		var prev: float = stale
-		for k in 3:
-			var view := CockpitMath.view_basis(placed, 0.5, prev)
-			prev = CockpitMath.view_yaw(placed, prev)
-			check(view.is_equal_approx(placed), "stale yaw %.2f: view follows the placed car (frame %d)" % [stale, k])
-	# right side up, nose not vertical: heading is always the nose heading
-	var tilted := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, 0.6) * Basis(Vector3.BACK, 0.4)
-	check(near(angle_difference(CockpitMath.view_yaw(tilted, yaw + PI), yaw), 0.0, 1e-3), "upright car: heading from the nose")
 
 
 func test_league_track_features() -> void:

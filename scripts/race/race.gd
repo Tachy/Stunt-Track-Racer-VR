@@ -51,7 +51,6 @@ var autopilot := false
 var _chase := OS.get_cmdline_user_args().has("--chase")
 var _overview := OS.get_cmdline_user_args().has("--overview")
 
-var _fallback_yaw := 0.0
 ## Pose the crane holds the car in. While held the view uses it instead of the
 ## interpolated transform, which lags a few frames behind a teleport.
 var _held_xf := Transform3D()
@@ -142,7 +141,6 @@ func _ready() -> void:
 	crane.hold(xf)
 	_held_xf = xf
 	ptrack = CarTracker.new(path, car, START_S)
-	_reset_view_yaw()
 	if autopilot:
 		_ap = AiDriver.new(ptrack, profile, floors, 0.95, [])
 	drop_at = 2.0 + _rng.randf_range(1.0, 3.0)
@@ -308,7 +306,6 @@ func _crane_reposition() -> void:
 	car.hold(true)
 	crane.hold(xf)
 	_held_xf = xf
-	_reset_view_yaw()
 	Sfx.play("clank")
 	state = "craned"
 	state_time = 0.0
@@ -456,17 +453,8 @@ func _update_view() -> void:
 		var cam_pos := Vector3(c.x, size * 0.75, c.z + size * 0.55)
 		XrManager.set_base(Transform3D(Basis.looking_at(c - cam_pos, Vector3.UP), cam_pos))
 		return
-	# folding rule for pitch and roll (loops, roll-overs), continuous heading;
-	# inside a loop the heading is the loop's entry heading and the view never
-	# rolls (Euler angles gimbal-lock on the sideways-shifted loops)
-	var view: Basis
-	if path.loop_mask[ptrack.idx] == 1:
-		var entry_yaw := path.loop_entry_yaw(ptrack.idx)
-		view = CockpitMath.loop_view_basis(xf.basis, Settings.tilt_follow, entry_yaw)
-		_fallback_yaw = CockpitMath.loop_view_yaw(xf.basis, entry_yaw)
-	else:
-		view = CockpitMath.view_basis(xf.basis, Settings.tilt_follow, _fallback_yaw)
-		_fallback_yaw = CockpitMath.view_yaw(xf.basis, _fallback_yaw)
+	# view from the car's attitude in space only (loops, flips, roll-overs alike)
+	var view := CockpitMath.view_basis(xf.basis, Settings.tilt_follow)
 	XrManager.set_base(Transform3D(view, xf * eye))
 
 
@@ -474,10 +462,6 @@ func _piece_desc(pi_: int) -> String:
 	var pc: Dictionary = path.pieces[pi_]
 	return "%s%s h%.0f->%.0f bank%.0f%s" % [pc["type"], (" l%.0f" % pc["length"]), pc["h0"], pc["h1"], rad_to_deg(pc["bank"]), " pit" if pc["no_crane"] else ""]
 
-
-## Heading reference for the view after the car was placed (start, crane).
-func _reset_view_yaw() -> void:
-	_fallback_yaw = _held_xf.basis.get_euler(EULER_ORDER_YXZ).y
 
 
 # --- input / pause ----------------------------------------------------------------
