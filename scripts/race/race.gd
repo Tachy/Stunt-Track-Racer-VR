@@ -451,9 +451,17 @@ func _update_view() -> void:
 		var cam_pos := Vector3(c.x, size * 0.75, c.z + size * 0.55)
 		XrManager.set_base(Transform3D(Basis.looking_at(c - cam_pos, Vector3.UP), cam_pos))
 		return
-	# folding rule for pitch and roll (loops, roll-overs), continuous heading
-	var view := CockpitMath.view_basis(xf.basis, Settings.tilt_follow, _fallback_yaw)
-	_fallback_yaw = CockpitMath.view_yaw(xf.basis, _fallback_yaw)
+	# folding rule for pitch and roll (loops, roll-overs), continuous heading;
+	# inside a loop the heading is the loop's entry heading and the view never
+	# rolls (Euler angles gimbal-lock on the sideways-shifted loops)
+	var view: Basis
+	if path.loop_mask[ptrack.idx] == 1:
+		var entry_yaw := path.loop_entry_yaw(ptrack.idx)
+		view = CockpitMath.loop_view_basis(xf.basis, Settings.tilt_follow, entry_yaw)
+		_fallback_yaw = CockpitMath.loop_view_yaw(xf.basis, entry_yaw)
+	else:
+		view = CockpitMath.view_basis(xf.basis, Settings.tilt_follow, _fallback_yaw)
+		_fallback_yaw = CockpitMath.view_yaw(xf.basis, _fallback_yaw)
 	XrManager.set_base(Transform3D(view, xf * eye))
 
 

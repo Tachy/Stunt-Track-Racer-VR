@@ -13,7 +13,7 @@ func _init() -> void:
 		"test_recenter", "test_tracks_closed", "test_track_heights", "test_track_mesh",
 		"test_lap_tracker", "test_recovery", "test_bridge", "test_damage", "test_league",
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
-		"test_custom1_layout", "test_loop_geometry", "test_loop_view_rule",
+		"test_custom1_layout", "test_loop_geometry", "test_loop_view_rule", "test_shifted_loop_view",
 		"test_league_track_features", "test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
 	]
 	for t in tests:
@@ -351,6 +351,67 @@ func test_loop_view_rule() -> void:
 		if k == 180:
 			check(near(CockpitMath.roll_of(view), 0.0, 1e-2), "roll-over: upside down -> level view")
 	check(max_jump < 2.0, "roll-over: no jump (max %.2f deg/step)" % max_jump)
+
+
+func test_shifted_loop_view() -> void:
+	# real loops are shifted sideways: inside the loop the view stays with the
+	# cockpit and only pitches relative to the car (never rolls); the offset is
+	# a triangle 0 -> -45 (nose up) -> 0 (top) -> +45 (nose down) -> 0, and the
+	# view must not jump at entry or exit
+	var p := TrackPath.new(TrackLibrary.get_def("loop_and_jump"))
+	var loops := 0
+	for pc in p.pieces:
+		if pc["type"] != "O":
+			continue
+		loops += 1
+		var i0: int = pc["i0"]
+		var i1: int = pc["i1"]
+		var entry_yaw := p.loop_entry_yaw(i0)
+		var prev_yaw := CockpitMath.view_yaw(Basis(p.right[i0 - 20], p.up[i0 - 20], -p.forward[i0 - 20]), entry_yaw)
+		var max_axis_err := 0.0
+		var max_offset := 0.0
+		var max_jump := 0.0
+		var best := {"up": [INF, 0.0], "top": [INF, 0.0], "down": [INF, 0.0]}
+		var last := Basis()
+		var last_car := Basis()
+		for i in range(i0 - 20, i1 + 20):
+			var car := Basis(p.right[i], p.up[i], -p.forward[i]).orthonormalized()
+			var view: Basis
+			if p.loop_mask[i] == 1:
+				view = CockpitMath.loop_view_basis(car, 0.5, entry_yaw)
+				prev_yaw = CockpitMath.loop_view_yaw(car, entry_yaw)
+			else:
+				view = CockpitMath.view_basis(car, 0.5, prev_yaw)
+				prev_yaw = CockpitMath.view_yaw(car, prev_yaw)
+			if i > i0 - 20:
+				# no jumps: the view turns at most 1.5x as fast as the car (the
+				# offset unwinds from -45 to 0 while the car goes 90 -> 180)
+				var dv := Quaternion(last).angle_to(Quaternion(view))
+				var dc := Quaternion(last_car).angle_to(Quaternion(car))
+				max_jump = maxf(max_jump, rad_to_deg(dv - 1.5 * dc))
+			last = view
+			last_car = car
+			if p.loop_mask[i] == 1:
+				# view relative to the car: a pure pitch (rotation about the car's x axis)
+				var rel := Quaternion(car.inverse() * view)
+				var ang := rel.get_angle()
+				var signed := ang * signf(rel.get_axis().x)
+				if ang > deg_to_rad(1.0):
+					max_axis_err = maxf(max_axis_err, rad_to_deg(rel.get_axis().angle_to(Vector3.RIGHT * signf(rel.get_axis().x))))
+				max_offset = maxf(max_offset, rad_to_deg(ang))
+				var nose := (-car.z).y   # +1 nose up, -1 nose down
+				for key in best:
+					var target: float = {"up": 1.0, "top": 0.0, "down": -1.0}[key]
+					var d := absf(nose - target) + (0.0 if key != "top" else (0.0 if car.y.y < 0.0 else 9.0))
+					if d < best[key][0]:
+						best[key] = [d, rad_to_deg(signed)]
+		check(max_axis_err < 1.0, "loop %d: view only pitches relative to the car, no roll (axis err %.2f deg)" % [loops, max_axis_err])
+		check(max_offset < 45.5, "loop %d: offset to driving direction within 45 deg (max %.1f)" % [loops, max_offset])
+		check(near(best["up"][1], -45.0, 1.5), "loop %d: nose up -> view 45 below nose (got %.1f)" % [loops, best["up"][1]])
+		check(near(best["top"][1], 0.0, 1.5), "loop %d: upside down -> view along driving direction (got %.1f)" % [loops, best["top"][1]])
+		check(near(best["down"][1], 45.0, 1.5), "loop %d: nose down -> view 45 above nose (got %.1f)" % [loops, best["down"][1]])
+		check(max_jump < 0.1, "loop %d: no jump in view (view faster than 1.5x car by %.2f deg/sample)" % [loops, max_jump])
+	check(loops == 2, "two loops checked")
 
 
 func test_league_track_features() -> void:
