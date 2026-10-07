@@ -46,6 +46,7 @@ func setup(positional: bool, volume_db := 0.0) -> DirtSynth:
 		p2.stream = gen
 		p2.volume_db = volume_db
 		_player = p2
+	_player.bus = &"Vehicles"   # Sfx.VEHICLE_BUS (tunnel echo)
 	add_child(_player)
 	return self
 

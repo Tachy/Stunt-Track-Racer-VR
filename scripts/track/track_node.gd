@@ -133,8 +133,8 @@ func _emit_tunnel_segment(kit: MeshKit, road_faces: PackedVector3Array, wall_fac
 	var rj := path.center[j] + path.right[j] * path.half_width[j]
 	var col := _road_color(i).darkened(dim)
 	kit.quad(li, lj, rj, ri, col)
-	kit.quad(ci[0], cj[0], lj, li, Palette.WALL_EDGE.darkened(dim))
-	kit.quad(ri, rj, cj[1], ci[1], Palette.WALL_EDGE.darkened(dim))
+	kit.quad(ci[0], cj[0], lj, li, Palette.WALL_EDGE)   # pure white, also inside
+	kit.quad(ri, rj, cj[1], ci[1], Palette.WALL_EDGE)   # pure white, also inside
 	road_faces.append_array([li, lj, rj, li, rj, ri, ci[0], cj[0], lj, ci[0], lj, li, ri, rj, cj[1], ri, cj[1], ci[1]])
 	if inside:
 		var wall := Palette.WALL.darkened(TUNNEL_DIM)

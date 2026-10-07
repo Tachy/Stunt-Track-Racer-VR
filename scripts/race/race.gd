@@ -224,6 +224,7 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	get_tree().paused = false
+	Sfx.set_tunnel_echo(0.0)
 	if online:
 		Net.leave()
 		Net.start_at.disconnect(_on_net_start)
@@ -667,11 +668,19 @@ static func _lit_by_tunnel_lamps(node: Node) -> void:
 
 
 ## Deep in a tunnel daylight fades: less sky light, and without shadows
-## (which would keep the sun out by themselves) less sun as well.
+## (which would keep the sun out by themselves) less sun as well. The
+## vehicle sounds echo: fully in the tunnel, in the cut rising smoothly with
+## the depth below the ground up to the portal.
 func _update_tunnel_light() -> void:
 	var f := 0.0
-	if path.tunnel.size() == path.n and path.tunnel[ptrack.idx] == 1:
-		f = smoothstep(2.0, 25.0, path.tunnel_depth[ptrack.idx])
+	var echo := 0.0
+	var i := ptrack.idx
+	if path.tunnel.size() == path.n and path.tunnel[i] == 1:
+		f = smoothstep(2.0, 25.0, path.tunnel_depth[i])
+		echo = 1.0
+	elif path.cut.size() == path.n and path.cut[i] == 1:
+		echo = clampf(-path.center[i].y / (TrackPath.TUNNEL_HEIGHT + TrackPath.TUNNEL_ROOF), 0.0, 1.0)
+	Sfx.set_tunnel_echo(echo)
 	_world_env.ambient_light_energy = _ambient_energy * (1.0 - 0.55 * f)
 	_sun.light_energy = _sun_energy * (1.0 - (0.0 if Settings.shadows else 0.85) * f)
 
