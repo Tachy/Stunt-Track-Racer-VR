@@ -16,9 +16,9 @@ var shadows := true
 ## UI language: "en" (default) or "de".
 var language := "en"
 var seat_height := 0.0
-## Online race server (docs/net-protocol.md) and how the others see us.
-var server_host := "127.0.0.1"
-var server_port := 27015
+## Online race server: "host" or "host:port" (default port 27015), set in
+## the ONLINE menu, as are the player's name and car colour.
+var server_address := ""
 var player_name := OS.get_environment("USERNAME").to_upper().left(16) if OS.get_environment("USERNAME") != "" else "PLAYER"
 var player_color := Palette.PLAYER_BODY
 var recenter_offset := Transform3D.IDENTITY
@@ -44,8 +44,7 @@ func load_settings() -> void:
 	volume = cfg.get_value("game", "volume", volume)
 	shadows = cfg.get_value("view", "shadows", shadows)
 	language = cfg.get_value("game", "language", language)
-	server_host = cfg.get_value("online", "server_host", server_host)
-	server_port = cfg.get_value("online", "server_port", server_port)
+	server_address = cfg.get_value("online", "server", server_address)
 	player_name = cfg.get_value("online", "player_name", player_name)
 	player_color = cfg.get_value("online", "player_color", player_color)
 	apply_volume()
@@ -63,8 +62,7 @@ func save_settings() -> void:
 	cfg.set_value("game", "volume", volume)
 	cfg.set_value("view", "shadows", shadows)
 	cfg.set_value("game", "language", language)
-	cfg.set_value("online", "server_host", server_host)
-	cfg.set_value("online", "server_port", server_port)
+	cfg.set_value("online", "server", server_address)
 	cfg.set_value("online", "player_name", player_name)
 	cfg.set_value("online", "player_color", player_color)
 	cfg.save(PATH)

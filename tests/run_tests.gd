@@ -600,3 +600,8 @@ func test_net_roundtrip() -> void:
 	check(near(d["steer"], 1.0) and near(d["brake"], 1.0) and near(d["crack"], 1.0), "inputs")
 	check(NetCodec.seq_newer(2, 65534) and not NetCodec.seq_newer(65534, 2) and not NetCodec.seq_newer(5, 5), "sequence wrap-around")
 	check(NetCodec.parse(PackedByteArray([1, 2, 3])).is_empty(), "short packet rejected")
+	check(NetCodec.parse_address("1.2.3.4") == ["1.2.3.4", 27015], "address without port")
+	check(NetCodec.parse_address(" racer.example.org:4000 ") == ["racer.example.org", 4000], "address with port")
+	check(NetCodec.parse_address("1.2.3.4:abc") == ["1.2.3.4", 27015], "bad port -> default")
+	check(NetCodec.parse_address("udp://host/") == ["host", 27015], "scheme and slash stripped")
+	check(NetCodec.parse_address("")[0] == "", "empty address")

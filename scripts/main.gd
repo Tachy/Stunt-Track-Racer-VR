@@ -16,7 +16,7 @@ extends Node
 ##   --fps               log frame rate every second
 ##   --joydump           print joypad axes/buttons twice a second
 ##   --lang=<en|de>      UI language for this run (not saved)
-##   --online=<host:port> quick match on that server (with --track=<id>)
+##   --online=<host[:port]> quick match on that server (with --track=<id>)
 ##   --name=<name>       online player name for this run
 
 var current: Node
@@ -71,12 +71,10 @@ func _process(delta: float) -> void:
 
 ## Command line: connect, quick match, race (testing without the menu).
 func _start_online() -> void:
-	var hp: PackedStringArray = _args["online"].split(":")
-	var port := int(hp[1]) if hp.size() > 1 else Settings.server_port
 	var nm: String = _args.get("name", Settings.player_name)
 	Net.matched.connect(func(info: Dictionary): _start_race(GameState.online_request(info)))
 	Net.welcomed.connect(func(): Net.join(NetCodec.JOIN_QUICK, "", _args.get("track", "first_flight"), _args.has("super")), CONNECT_ONE_SHOT)
-	if not Net.connect_to(hp[0], port, nm, Settings.player_color):
+	if not Net.connect_to(_args["online"], nm, Settings.player_color):
 		push_error("[Main] cannot connect to %s" % _args["online"])
 		get_tree().quit(1)
 

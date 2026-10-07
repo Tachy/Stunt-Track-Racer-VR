@@ -23,12 +23,13 @@ var _time := 0.0
 var _pedals_shown := true
 # online screen
 var _online_track := 0
-var _code := "AAAA"
-var _code_pos := 0
 var _online_msg := ""
-var _online_room := ""
 var _searching := false
-const CODE_LETTERS := "ABCDEFGHJKLMNPQRSTUVWXYZ"   # as the server's (no I/O)
+# text entry ("edit" screen): {title, value, chars, max, done: Callable}
+var _edit := {}
+const NAME_CHARS := "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_"
+const ADDRESS_CHARS := "0123456789.:abcdefghijklmnopqrstuvwxyz-"
+const CAR_COLORS := ["#cc2222", "#2266dd", "#22aa44", "#ee9911", "#aa33cc", "#11aaaa", "#dddd22", "#eeeeee"]
 
 
 func _init(start_screen := "main") -> void:
@@ -69,7 +70,6 @@ func _ready() -> void:
 	InputManager.back.connect(_on_back)
 	InputManager.device_changed.connect(_refresh)
 	Net.welcomed.connect(_on_net_change)
-	Net.room_created.connect(_on_net_room)
 	Net.matched.connect(_on_net_matched)
 	Net.failed.connect(_on_net_failed)
 	Net.disconnected.connect(_on_net_lost)
@@ -85,7 +85,6 @@ func _exit_tree() -> void:
 	InputManager.back.disconnect(_on_back)
 	InputManager.device_changed.disconnect(_refresh)
 	Net.welcomed.disconnect(_on_net_change)
-	Net.room_created.disconnect(_on_net_room)
 	Net.matched.disconnect(_on_net_matched)
 	Net.failed.disconnect(_on_net_failed)
 	Net.disconnected.disconnect(_on_net_lost)
@@ -99,7 +98,7 @@ func _process(delta: float) -> void:
 	if screen_name == "calibrate":
 		_calibration_step(delta)
 		_refresh()
-	elif screen_name == "online" and Engine.get_process_frames() % 30 == 0:
+	elif (screen_name == "online" or screen_name == "edit") and Engine.get_process_frames() % 30 == 0:
 		_refresh()   # connection state, ping
 	elif screen_name == "main" and InputManager.pedals_ready() != _pedals_shown:
 		_pedals_shown = InputManager.pedals_ready()
@@ -118,11 +117,8 @@ func open(s: String) -> void:
 		InputManager.capture_mode = false
 	if s == "online":
 		_online_msg = ""
-		_online_room = ""
 		_searching = false
-		if Net.status == "offline":
-			if not Net.connect_to(Settings.server_host, Settings.server_port, Settings.player_name, Settings.player_color):
-				_online_msg = Lang.t("SERVER NOT FOUND")
+		_online_connect()
 	_refresh()
 
 
@@ -147,6 +143,8 @@ func _refresh() -> void:
 			_screen_result(sc)
 		"online":
 			_screen_online(sc)
+		"edit":
+			_screen_edit(sc)
 	sel = clampi(sel, 0, maxi(items.size() - 1, 0))   # the item list can shrink
 	_draw_items(sc)
 	sc.text_centered(PX.y - 40, Lang.t("STEER=SELECT  GAS/ENTER=OK  BRAKE/ESC=BACK  F12=RECENTER VR"), Palette.ROAD_DARK, 2.4)
@@ -297,28 +295,24 @@ func _screen_online(sc: PixelScreen) -> void:
 	elif Net.is_online():
 		status = Lang.t("CONNECTED, PING %d MS") % int(Net.rtt * 1000.0)
 		col = Palette.GREEN
-	sc.text_centered(140, "%s:%d  -  %s" % [Settings.server_host, Settings.server_port, status], col, 2.6)
-	sc.text_centered(180, Lang.t("NAME: %s") % Settings.player_name.to_upper(), Palette.WHITE, 3.0)
-	if _online_room != "":
-		sc.text_centered(240, Lang.t("ROOM CODE: %s") % _online_room, Palette.YELLOW, 5.0)
-		sc.text_centered(300, Lang.t("TELL YOUR OPPONENT THE CODE - WAITING ..."), Palette.WHITE, 2.6)
-	elif _searching:
+	if Settings.server_address == "":
+		status = Lang.t("ENTER THE SERVER ADDRESS FIRST")
+	sc.text_centered(150, status, col, 3.0)
+	if _searching:
 		sc.text_centered(260, Lang.t("SEARCHING FOR AN OPPONENT ..."), Palette.YELLOW, 3.0)
 	if _online_msg != "":
 		sc.text_centered(340, _online_msg, Palette.RED, 3.0)
-	if _online_room != "" or _searching:
+	if _searching:
 		items = [{"label": Lang.t("CANCEL"), "do": _act_online_cancel}]
 		return
 	var id: String = _practice_ids()[_online_track]
-	var code := ""
-	for i in 4:
-		code += ("[%s]" if i == _code_pos else " %s ") % _code[i]
+	var server := Settings.server_address if Settings.server_address != "" else "-"
 	items = [
+		{"label": Lang.t("NAME: %s") % Settings.player_name, "do": _act_edit_name},
+		{"label": Lang.t("CAR COLOUR: ") + _color_name(), "side": _side_color},
+		{"label": Lang.t("SERVER: %s") % server, "do": _act_edit_server},
 		{"label": Lang.t("TRACK: ") + TrackLibrary.display_name(id), "side": _side_online_track},
-		{"label": Lang.t("QUICK MATCH"), "do": func(): _act_online_join(NetCodec.JOIN_QUICK)},
-		{"label": Lang.t("CREATE ROOM"), "do": func(): _act_online_join(NetCodec.JOIN_CREATE)},
-		{"label": Lang.t("CODE:") + " " + code, "side": _side_code, "do": _act_code_next},
-		{"label": Lang.t("JOIN ROOM"), "do": func(): _act_online_join(NetCodec.JOIN_CODE)},
+		{"label": Lang.t("FIND AN OPPONENT"), "do": _act_online_join},
 		{"label": Lang.t("BACK"), "do": _act_online_back},
 	]
 
@@ -549,8 +543,10 @@ func _on_back() -> void:
 			open("main")
 		"result":
 			_on_accept()
+		"edit":
+			open("online")
 		"online":
-			if _online_room != "" or _searching:
+			if _searching:
 				_act_online_cancel()
 			else:
 				_act_online_back()
@@ -573,28 +569,29 @@ func _practice_ids() -> Array:
 	return TrackLibrary.ORDER + TrackLibrary.CUSTOM
 
 
-func _act_online_join(mode: int) -> void:
+func _online_connect() -> void:
+	if Net.status != "offline" or Settings.server_address == "":
+		return
+	if not Net.connect_to(Settings.server_address, Settings.player_name, Settings.player_color):
+		_online_msg = Lang.t("SERVER NOT FOUND")
+
+
+func _act_online_join() -> void:
 	if not Net.is_online():
 		_online_msg = Lang.t("NOT CONNECTED")
-		if Net.status == "offline":
-			Net.connect_to(Settings.server_host, Settings.server_port, Settings.player_name, Settings.player_color)
+		_online_connect()
 		_refresh()
 		return
 	_online_msg = ""
-	_searching = mode != NetCodec.JOIN_CREATE
-	Net.join(mode, _code, _practice_ids()[_online_track], GameState.league != null and GameState.league.super_league)
+	_searching = true
+	# the first one waiting picks the track
+	Net.join(NetCodec.JOIN_QUICK, "", _practice_ids()[_online_track], GameState.league != null and GameState.league.super_league)
 	_refresh()
 
 
 func _act_online_cancel() -> void:
 	Net.leave()
-	_online_room = ""
 	_searching = false
-	_refresh()
-
-
-func _act_code_next() -> void:
-	_code_pos = (_code_pos + 1) % 4
 	_refresh()
 
 
@@ -603,25 +600,111 @@ func _act_online_back() -> void:
 	open("main")
 
 
+func _act_edit_name() -> void:
+	_open_edit(Lang.t("YOUR NAME"), Settings.player_name, NAME_CHARS, 16, func(v: String):
+		Settings.player_name = v.strip_edges().to_upper() if v.strip_edges() != "" else Settings.player_name)
+
+
+func _act_edit_server() -> void:
+	_open_edit(Lang.t("SERVER ADDRESS"), Settings.server_address, ADDRESS_CHARS, 40, func(v: String):
+		Settings.server_address = v.strip_edges().to_lower())
+
+
+## Text entry: typed on the keyboard, or with the wheel (steer = change the
+## last character, gas = add one).
+func _open_edit(title: String, value: String, chars: String, max_len: int, done: Callable) -> void:
+	_edit = {"title": title, "value": value, "chars": chars, "max": max_len, "done": done}
+	open("edit")
+
+
+func _screen_edit(sc: PixelScreen) -> void:
+	sc.text_centered(90, _edit["title"], Palette.LIGHT_BLUE, 4.0)
+	var v: String = _edit["value"]
+	sc.text_centered(190, v + ("_" if int(Engine.get_process_frames() / 30) % 2 == 0 else " "), Palette.YELLOW, 5.0)
+	sc.text_centered(270, Lang.t("TYPE ON THE KEYBOARD - OR STEER = CHANGE LETTER, GAS = NEXT LETTER"), Palette.ROAD_DARK, 2.2)
+	items = [
+		{"label": Lang.t("LETTER: ") + (v.right(1) if v != "" else "-"), "side": _side_edit_char, "do": _act_edit_add},
+		{"label": Lang.t("DELETE LETTER"), "do": _act_edit_delete},
+		{"label": Lang.t("OK"), "do": _act_edit_ok},
+		{"label": Lang.t("CANCEL"), "do": func(): open("online")},
+	]
+
+
+func _side_edit_char(d: int) -> void:
+	var v: String = _edit["value"]
+	var chars: String = _edit["chars"]
+	if v == "":
+		v = chars[0]
+	else:
+		var i := chars.find(v.right(1))
+		v = v.left(v.length() - 1) + chars[wrapi(i + d, 0, chars.length())]
+	_edit["value"] = v
+
+
+func _act_edit_add() -> void:
+	var v: String = _edit["value"]
+	if v.length() < int(_edit["max"]):
+		# start the new letter as a copy of the last one: often only +-1 away
+		_edit["value"] = v + (v.right(1) if v != "" else str(_edit["chars"])[0])
+	_refresh()
+
+
+func _act_edit_delete() -> void:
+	var v: String = _edit["value"]
+	_edit["value"] = v.left(v.length() - 1)
+	_refresh()
+
+
+func _act_edit_ok() -> void:
+	_edit["done"].call(_edit["value"])
+	Settings.save_settings()
+	Net.disconnect_from()   # name or server changed: connect anew
+	open("online")
+
+
+## Keyboard typing on the text entry screen (arrows, Enter, Esc still
+## navigate through InputManager).
+func _input(event: InputEvent) -> void:
+	if screen_name != "edit" or not (event is InputEventKey) or not event.pressed:
+		return
+	var k := event as InputEventKey
+	if k.keycode == KEY_BACKSPACE:
+		_act_edit_delete()
+		get_viewport().set_input_as_handled()
+	elif k.unicode >= 32:
+		var c := String.chr(k.unicode)
+		var chars: String = _edit["chars"]
+		if chars.find(c.to_upper()) >= 0 and chars.find(c) < 0:
+			c = c.to_upper()
+		elif chars.find(c.to_lower()) >= 0 and chars.find(c) < 0:
+			c = c.to_lower()
+		if chars.find(c) >= 0 and str(_edit["value"]).length() < int(_edit["max"]):
+			_edit["value"] = str(_edit["value"]) + c
+			_refresh()
+		get_viewport().set_input_as_handled()
+
+
+func _color_name() -> String:
+	var i := CAR_COLORS.find("#" + Settings.player_color.to_html(false))
+	var names := [Lang.t("RED"), Lang.t("BLUE"), Lang.t("GREEN"), Lang.t("ORANGE"), Lang.t("PURPLE"), Lang.t("TEAL"), Lang.t("YELLOW"), Lang.t("WHITE")]
+	return names[i] if i >= 0 else "#" + Settings.player_color.to_html(false).to_upper()
+
+
+func _side_color(d: int) -> void:
+	var i := CAR_COLORS.find("#" + Settings.player_color.to_html(false))
+	Settings.player_color = Color(CAR_COLORS[wrapi(i + d, 0, CAR_COLORS.size())])
+	Settings.save_settings()
+	Net.disconnect_from()   # the colour goes to the server in HELLO
+	_online_connect()
+
+
 func _side_online_track(d: int) -> void:
 	_online_track = wrapi(_online_track + d, 0, _practice_ids().size())
-
-
-func _side_code(d: int) -> void:
-	var i := CODE_LETTERS.find(_code[_code_pos])
-	var c := CODE_LETTERS[wrapi(i + d, 0, CODE_LETTERS.length())]
-	_code = _code.substr(0, _code_pos) + c + _code.substr(_code_pos + 1)
 
 
 func _on_net_change() -> void:
 	if screen_name == "online":
 		_refresh()
-
-
-func _on_net_room(code: String) -> void:
-	_online_room = code
-	_searching = false
-	_refresh()
 
 
 func _on_net_matched(info: Dictionary) -> void:
@@ -631,14 +714,12 @@ func _on_net_matched(info: Dictionary) -> void:
 
 func _on_net_failed(code: int) -> void:
 	_searching = false
-	_online_room = ""
-	_online_msg = {1: Lang.t("ROOM NOT FOUND"), 2: Lang.t("ROOM IS FULL"), 3: Lang.t("SERVER VERSION DIFFERS - UPDATE THE GAME")}.get(code, "ERROR %d" % code)
+	_online_msg = Lang.t("SERVER VERSION DIFFERS - UPDATE THE GAME") if code == 3 else "ERROR %d" % code
 	_refresh()
 
 
 func _on_net_lost(_reason: String) -> void:
 	_searching = false
-	_online_room = ""
 	_online_msg = Lang.t("CONNECTION LOST")
 	if screen_name == "online":
 		_refresh()

@@ -66,8 +66,14 @@ func server_time() -> float:
 	return (local_ms() + _offset_ms) / 1000.0
 
 
-func connect_to(host: String, port: int, player_name: String, color: Color) -> bool:
+## address: "host" or "host:port" (NetCodec.parse_address).
+func connect_to(address: String, player_name: String, color: Color) -> bool:
 	disconnect_from()
+	var hp := NetCodec.parse_address(address)
+	var host: String = hp[0]
+	var port: int = hp[1]
+	if host == "":
+		return false
 	var ip := host if host.is_valid_ip_address() else IP.resolve_hostname(host, IP.TYPE_IPV4)
 	if ip == "":
 		push_warning("[Net] cannot resolve %s" % host)

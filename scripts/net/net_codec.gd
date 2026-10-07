@@ -9,6 +9,7 @@ const VERSION := 1
 const HEADER_SIZE := 10
 const STATE_SIZE := 36
 const MAX_STR := 32
+const DEFAULT_PORT := 27015
 
 # packet types
 const HELLO := 1
@@ -42,6 +43,23 @@ const RESULT_NONE := 255
 ## Race states in STATE packets (index = wire value).
 const RACE_STATES := ["hold", "racing", "falling", "craned", "finished", "wrecked"]
 const SQRT1_2 := 0.70710678118654752
+
+
+## "host", "host:port", "1.2.3.4:27015" -> [host, port]; the port defaults
+## to DEFAULT_PORT. Host "" if nothing usable was entered.
+static func parse_address(address: String) -> Array:
+	var a := address.strip_edges()
+	for prefix in ["udp://", "http://", "https://"]:
+		if a.begins_with(prefix):
+			a = a.substr(prefix.length())
+	a = a.trim_suffix("/")
+	var port := DEFAULT_PORT
+	if a.count(":") == 1:
+		var parts := a.split(":")
+		a = parts[0]
+		if parts[1].is_valid_int() and int(parts[1]) > 0 and int(parts[1]) < 65536:
+			port = int(parts[1])
+	return [a, port]
 
 
 # --- header ------------------------------------------------------------------------
