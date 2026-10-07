@@ -83,7 +83,7 @@ set G="<path>\Godot_v4.7.2-stable_win64_console.exe"
 %G% --headless --xr-mode off --fixed-fps 120 --path . -- --track=ski_flyer --opponent=5 --autopilot --debug --quit-after=200
 ```
 
-Command line options go after `--`, see `scripts/main.gd`: `--track=<id>`, `--opponent=<0..10>`, `--super`, `--autopilot`, `--no-xr`, `--menu=<screen>`, `--joydump`, `--debug`, `--chase` (camera behind the car), `--fps`, `--vr-bench`, `--render-scale=<x>`, `--screenshot=<s>`, `--quit-after=<s>`, `--lang=<en|de>`, `--online=<host[:port]>`, `--name=<name>`.
+Command line options go after `--`, see `scripts/main.gd`: `--track=<id>`, `--opponent=<0..10>`, `--super`, `--autopilot`, `--no-xr`, `--menu=<screen>`, `--joydump`, `--debug`, `--chase` (camera behind the car), `--fps`, `--vr-bench`, `--render-scale=<x>`, `--screenshot=<s>`, `--quit-after=<s>`, `--lang=<en|de>`, `--online=<host[:port]>`, `--name=<name>`, `--car-photos`.
 
 Handling is tuned centrally in `scripts/car/car_tuning.gd`, tracks live in `scripts/track/track_library.gd`. UI texts are English keys in the code (`Lang.t("...")`); the German table is in `scripts/core/lang.gd`, and a test checks that every key has a translation.
 

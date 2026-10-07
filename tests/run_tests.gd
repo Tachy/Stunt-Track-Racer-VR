@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_league_track_features", "test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time",
 	]
 	for t in tests:
 		_current = t
@@ -632,3 +632,74 @@ func test_title_music() -> void:
 		peak = maxf(peak, absf(x))
 		finite = finite and is_finite(x)
 	check(finite and peak > 0.2 and peak <= 0.951, "audible, finite, not clipping (peak %.2f)" % peak)
+
+
+# --- sound propagation (Doppler, travel time) ----------------------------------------
+
+## Emits a 1000 Hz tone for `secs`; source and listener move with constant
+## velocity. Returns the heard frequency over the last second.
+func _heard_freq(src0: Vector3, src_v: Vector3, lis0: Vector3, lis_v: Vector3, secs := 3.0) -> float:
+	var rate := 16000.0
+	var sp := SoundPropagation.new(rate)
+	var heard := PackedFloat32Array()
+	var n := 0
+	var block := 256
+	while n < int(secs * rate):
+		var emitted := PackedFloat32Array()
+		emitted.resize(block)
+		for i in block:
+			emitted[i] = sin(TAU * 1000.0 * (n + i) / rate)
+		n += block
+		var t := n / rate
+		heard.append_array(sp.process(emitted, src0 + src_v * t, lis0 + lis_v * t))
+	# frequency from interpolated rising zero crossings in the last second
+	var first := -1.0
+	var last := -1.0
+	var count := 0
+	for i in range(heard.size() - int(rate), heard.size()):
+		if heard[i - 1] < 0.0 and heard[i] >= 0.0:
+			var x := (i - 1) + heard[i - 1] / (heard[i - 1] - heard[i])
+			if first < 0.0:
+				first = x
+			last = x
+			count += 1
+	return (count - 1) / ((last - first) / rate)
+
+
+func test_doppler_source() -> void:
+	var c := SoundPropagation.SPEED_OF_SOUND
+	# source approaches at 0.1 c: f / (1 - 0.1) = 1111.1 Hz (not 1100)
+	var f := _heard_freq(Vector3(0, 0, 400), Vector3(0, 0, -0.1 * c), Vector3.ZERO, Vector3.ZERO)
+	check(near(f, 1000.0 / 0.9, 1.0), "approaching source: %.1f Hz, want 1111.1" % f)
+	# source recedes at 0.1 c: f / 1.1 = 909.1 Hz
+	f = _heard_freq(Vector3(0, 0, 20), Vector3(0, 0, 0.1 * c), Vector3.ZERO, Vector3.ZERO)
+	check(near(f, 1000.0 / 1.1, 1.0), "receding source: %.1f Hz, want 909.1" % f)
+
+
+func test_doppler_listener() -> void:
+	var c := SoundPropagation.SPEED_OF_SOUND
+	# listener approaches at 0.1 c: f (1 + 0.1) = 1100 Hz (not 1111)
+	var f := _heard_freq(Vector3(0, 0, 400), Vector3.ZERO, Vector3.ZERO, Vector3(0, 0, 0.1 * c))
+	check(near(f, 1100.0, 1.0), "approaching listener: %.1f Hz, want 1100" % f)
+	# moving side by side at the same speed: no shift
+	f = _heard_freq(Vector3(30, 0, 0), Vector3(0, 0, -40), Vector3.ZERO, Vector3(0, 0, -40))
+	check(near(f, 1000.0, 1.0), "same velocity: %.1f Hz, want 1000" % f)
+
+
+func test_sound_travel_time() -> void:
+	var rate := 16000.0
+	var sp := SoundPropagation.new(rate)
+	var heard := PackedFloat32Array()
+	for k in 100:
+		var b := PackedFloat32Array()
+		b.resize(320)
+		if k == 0:
+			b[0] = 1.0   # a click at t = 0
+		heard.append_array(sp.process(b, Vector3(343.0, 0, 0), Vector3.ZERO))
+	var at := -1
+	for i in heard.size():
+		if heard[i] > 0.5:
+			at = i
+			break
+	check(at >= 0 and absi(at - 16000) <= 1, "click from 343 m heard after 1 s (sample %d)" % at)
+	check(near(sp.delay(), 1.0, 1e-4), "delay 1 s (%.4f)" % sp.delay())

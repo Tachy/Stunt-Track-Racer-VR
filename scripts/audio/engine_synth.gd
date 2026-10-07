@@ -1,7 +1,9 @@
 class_name EngineSynth
 extends Node3D
 ## Procedural engine buzz (pulse wave + sub rumble) plus wind noise,
-## reminiscent of the Amiga original. Optionally positional (opponent).
+## reminiscent of the Amiga original. Optionally positional (opponent):
+## then it reaches the listener through SoundPropagation (travel time,
+## exact Doppler).
 
 const RATE := 16000.0
 
@@ -18,6 +20,7 @@ var _phase_sub := 0.0
 var _freq := 40.0
 var _lp := 0.0
 var _gain := 0.0
+var _propagation: SoundPropagation
 
 
 func setup(positional: bool, volume_db := 0.0) -> EngineSynth:
@@ -31,6 +34,7 @@ func setup(positional: bool, volume_db := 0.0) -> EngineSynth:
 		p3.unit_size = 12.0
 		p3.max_distance = 400.0
 		_player = p3
+		_propagation = SoundPropagation.new(RATE)
 	else:
 		var p2 := AudioStreamPlayer.new()
 		p2.stream = gen
@@ -53,6 +57,22 @@ func _process(_delta: float) -> void:
 	var frames := _playback.get_frames_available()
 	if frames <= 0:
 		return
+	var out := generate(frames)
+	if _propagation:
+		out = _propagation.process(out, global_position, _listener())
+	for x in out:
+		_playback.push_frame(Vector2(x, x))
+
+
+func _listener() -> Vector3:
+	var cam := get_viewport().get_camera_3d()
+	return cam.global_position if cam else global_position
+
+
+## The next `frames` samples as emitted at the car.
+func generate(frames: int) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	out.resize(frames)
 	var target_f := 38.0 + 165.0 * clampf(rpm, 0.0, 1.2) * (1.08 if boost else 1.0)
 	var target_gain := 0.0 if muted else (0.35 + 0.65 * load)
 	var f0 := _freq
@@ -71,7 +91,7 @@ func _process(_delta: float) -> void:
 		var pulse := 1.0 if _phase < 0.32 else -1.0
 		var sub := sin(TAU * _phase_sub)
 		_lp += (randf() * 2.0 - 1.0 - _lp) * 0.08
-		var sample := (pulse * 0.22 + sub * 0.28) * g + _lp * w * 0.9
-		_playback.push_frame(Vector2(sample, sample))
+		out[i] = (pulse * 0.22 + sub * 0.28) * g + _lp * w * 0.9
 	_freq = target_f
 	_gain = target_gain
+	return out

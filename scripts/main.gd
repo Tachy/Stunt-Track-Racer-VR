@@ -18,6 +18,7 @@ extends Node
 ##   --lang=<en|de>      UI language for this run (not saved)
 ##   --online=<host[:port]> quick match on that server (with --track=<id>)
 ##   --name=<name>       online player name for this run
+##   --car-photos        save close-ups of the car model, then quit
 
 var current: Node
 var _args := {}
@@ -39,7 +40,9 @@ func _ready() -> void:
 		print("[Main] window %s, 3D render scale %.2f -> %s px" % [DisplayServer.window_get_size(), vp.scaling_3d_scale, Vector2(DisplayServer.window_get_size()) * vp.scaling_3d_scale])
 	if _args.has("vr-bench"):
 		add_child(VrBench.new())
-	if _args.has("online"):
+	if _args.has("car-photos"):
+		_swap(CarPhotos.new())   # debug: close-ups of the car model, then quit
+	elif _args.has("online"):
 		_start_online()
 	elif _args.has("track"):
 		var req := {"track": _args["track"], "opponent": int(_args.get("opponent", "-1")),

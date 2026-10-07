@@ -127,6 +127,38 @@ func cylinder(center: Vector3, axis: Vector3, radius: float, length: float, segm
 		tri(b, b + r0, b + r1, cc)
 
 
+## Round tube along a polyline (wire, pipe, ring): a `sides`-gon swept with a
+## twist-free (parallel-transported) frame, so segments join without gaps.
+## closed = the last point connects back to the first.
+func tube(points: PackedVector3Array, radius: float, sides: int, col: Color, closed := false) -> void:
+	var n := points.size()
+	if n < 2:
+		return
+	var tangents: Array[Vector3] = []
+	for i in n:
+		var a := points[(i - 1 + n) % n] if (closed or i > 0) else points[i]
+		var b := points[(i + 1) % n] if (closed or i < n - 1) else points[i]
+		tangents.append((b - a).normalized())
+	var helper := Vector3.UP if absf(tangents[0].dot(Vector3.UP)) < 0.9 else Vector3.RIGHT
+	var u := tangents[0].cross(helper).normalized()
+	var rings: Array = []
+	for i in n:
+		var t := tangents[i]
+		u = (u - t * u.dot(t)).normalized()
+		var v := t.cross(u)
+		var ring := PackedVector3Array()
+		for k in sides:
+			var ang := TAU * k / sides
+			ring.append(points[i] + (u * cos(ang) + v * sin(ang)) * radius)
+		rings.append(ring)
+	for i in (n if closed else n - 1):
+		var r0: PackedVector3Array = rings[i]
+		var r1: PackedVector3Array = rings[(i + 1) % n]
+		for k in sides:
+			var k1 := (k + 1) % sides
+			quad(r0[k], r0[k1], r1[k1], r1[k], col)
+
+
 ## Pyramid / cone-like peak used for scenery.
 func peak(base_center: Vector3, radius: float, height: float, sides: int, col: Color, snow_col := Color(-1, 0, 0), snow_frac := 0.0, rot := 0.0) -> void:
 	var top := base_center + Vector3(0, height, 0)

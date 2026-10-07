@@ -34,6 +34,7 @@ var dashboard: Dashboard
 var banner: Panel3D
 var crane: Crane
 var engine: EngineSynth
+var dirt: DirtSynth
 var ptrack: CarTracker
 
 # opponent: identical physics, AI driver
@@ -43,6 +44,7 @@ var opp_track: CarTracker
 var opp_ai: AiDriver
 var opp_crane: Crane
 var opp_engine: EngineSynth
+var opp_dirt: DirtSynth
 var opp_driver := {}
 var opp_state := "held"       # held, racing, falling, craned, finished, wrecked
 var opp_state_time := 0.0
@@ -56,6 +58,8 @@ var _net_result := {}         # {winner, reason} from the server
 var _opp_gone := false        # opponent left or the connection is lost
 var _opp_lap_ms := 0.0
 var _opp_best := -1.0
+var _latency := -1.0          # age of the opponent's data on arrival (s), -1 = unknown
+var _latency_seen := -1       # Net.opp_states_received at the last measurement
 
 var state := "hold"
 var state_time := 0.0
@@ -116,6 +120,8 @@ func _ready() -> void:
 	car_model.add_child(banner)
 	engine = EngineSynth.new().setup(false, -8.0)
 	car.add_child(engine)
+	dirt = DirtSynth.new().setup(false, -4.0)
+	car.add_child(dirt)
 	car.landed.connect(_on_landed)
 	car.impacted.connect(_on_impact)
 	car.damage.wrecked.connect(_on_wrecked)
@@ -150,6 +156,8 @@ func _ready() -> void:
 		opp_car.add_child(opp_model)
 		opp_engine = EngineSynth.new().setup(true, -2.0)
 		opp_car.add_child(opp_engine)
+		opp_dirt = DirtSynth.new().setup(true, 0.0)
+		opp_car.add_child(opp_dirt)
 		opp_car.damage.wrecked.connect(_on_opponent_wrecked)
 		opp_crane = Crane.new()
 		add_child(opp_crane)
@@ -286,7 +294,7 @@ func _physics_process(dt: float) -> void:
 		if Engine.get_physics_frames() % 4 == 0:   # 30 Hz
 			Net.send_state(RemoteDriver.capture(car, race_time, state))
 		if PlayerCar.debug and Engine.get_physics_frames() % 120 == 0:
-			print("[Net] t=%.1f rtt=%d ms opp states=%d err=%.2f m opp=%s" % [race_time, Net.rtt * 1000.0, Net.opp_states_received, _remote.error, opp_state])
+			print("[Net] t=%.1f rtt=%d ms opp states=%d err=%.2f m opp=%s | %s" % [race_time, Net.rtt * 1000.0, Net.opp_states_received, _remote.error, opp_state, "  ".join(_status_lines())])
 	_accept_pressed = false
 
 
@@ -359,12 +367,41 @@ func _update_remote(dt: float) -> void:
 		opp_crane.release()
 	# the shared clock also runs on after our own finish
 	_remote.update(s, Net.server_time() - _net_drop if _net_drop >= 0.0 else race_time, dt)
+	_measure_latency(s)
 	opp_track.update_position()
 	var st: String = s["state"]
 	if opp_state != "finished" and opp_state != "wrecked":
 		opp_state = "held" if st == "hold" else st
 	if st == "wrecked":
 		_remote_wrecked()
+
+
+## Latency = how old the opponent's state is when it arrives: sent at its
+## race time t, received at (server clock - drop). Both clocks are the
+## server's, so this is the real one-way delay opponent -> server -> us
+## (up to the clock sync error). Only while both cars race.
+func _measure_latency(s: Dictionary) -> void:
+	if Net.opp_states_received == _latency_seen:
+		return
+	_latency_seen = Net.opp_states_received
+	if _net_drop < 0.0 or float(s["t"]) <= 0.0 or s["state"] == "finished" or s["state"] == "wrecked":
+		return
+	var age := maxf((Net.opp_state_server_s - _net_drop) - float(s["t"]), 0.0)
+	_latency = age if _latency < 0.0 else lerpf(_latency, age, 0.1)
+
+
+## Cockpit status: frame rate, online also latency (or ping) - one entry
+## per small line.
+func _status_lines() -> PackedStringArray:
+	var lines := PackedStringArray(["%d FPS" % Engine.get_frames_per_second()])
+	if online:
+		if not Net.is_online():
+			lines.append(Lang.t("OFFLINE"))
+		elif _latency >= 0.0 and Net.local_ms() - Net.opp_state_ms < 1000:
+			lines.append(Lang.t("LATENCY %d MS") % roundi(_latency * 1000.0))
+		else:
+			lines.append(Lang.t("PING %d MS") % roundi(Net.rtt * 1000.0))
+	return lines
 
 
 func _remote_wrecked() -> void:
@@ -613,6 +650,7 @@ func _process(delta: float) -> void:
 		"boost": car.boost_units, "boosting": car.boosting,
 		"lap_time": race_time - ptrack.lap_start if state != "hold" else 0.0,
 		"best": ptrack.best_lap, "speed": car.speed, "message": message,
+		"status": _status_lines(),
 	}
 	if opp_car:
 		data["gap"] = ptrack.progress - opp_track.progress
@@ -626,12 +664,21 @@ func _process(delta: float) -> void:
 	engine.boost = car.boosting
 	engine.wind = clampf(car.linear_velocity.length() / 70.0, 0.0, 1.0) * 0.35
 	engine.muted = car.is_wrecked()
+	_update_dirt(dirt, car)
 	if opp_car:
 		var oin: Dictionary = opp_car.input
 		opp_engine.rpm = clampf(absf(opp_car.speed) / opp_car.tuning.top_speed, 0.0, 1.0) * 0.85 + float(oin.get("throttle", 0.0)) * 0.15
 		opp_engine.load = float(oin.get("throttle", 0.0))
 		opp_engine.boost = opp_car.boosting
 		opp_engine.muted = opp_car.is_wrecked()
+		_update_dirt(opp_dirt, opp_car)
+
+
+## Sliding tyres on dirt: silent below 0.3 m/s sliding, full at ~6 m/s.
+func _update_dirt(d: DirtSynth, c: PlayerCar) -> void:
+	d.slide = clampf((c.slip_speed - 0.3) / 6.0, 0.0, 1.0)
+	d.speed = c.linear_velocity.length()
+	d.muted = c.freeze or not c.visible
 
 
 func _update_view() -> void:

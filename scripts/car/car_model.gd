@@ -29,8 +29,14 @@ const SEAT_EYE := Vector3(0.0, 0.96, 0.9)
 const HEADER_Y := 1.32
 const HEADER_Z := 0.36
 const HEADER_HALF := 0.46
+## Rake of the front cage frame (the "windscreen" frame) from the vertical.
+const SCREEN_RAKE_DEG := 20.0
+## Height of the front cage feet on the cockpit sides.
+const PILLAR_FOOT_Y := 0.4
 
 const FRAME_X := 0.32
+## Upper mount of the front coil-overs, out on an outrigger from the tower.
+const FRONT_SPRING_TOP_X := 0.62
 const METAL := Color("#555a60")
 const CHROME := Color("#c8c8c8")
 const HEADS := Color("#8a8f96")
@@ -57,6 +63,7 @@ static var _flame_mesh: ArrayMesh
 static var _flame_material: StandardMaterial3D
 static var _unit_bar: ArrayMesh
 static var _unit_coil: ArrayMesh
+static var _unit_rod: ArrayMesh
 
 
 func build(body_color: Color, cockpit: bool) -> CarModel:
@@ -101,6 +108,11 @@ func _build_chassis(kit: MeshKit, body_color: Color) -> void:
 	for z in [-1.75, 1.15]:
 		for sx in [-1.0, 1.0]:
 			kit.box(Vector3(0.36 * sx, 0.02, z), Vector3(0.1, 0.5, 0.12), METAL)
+	# front: outriggers from the tower tops carry the upper spring mounts
+	for sx in [-1.0, 1.0]:
+		var z := float(WHEEL_POS[0].z) + 0.08
+		kit.bar(Vector3(0.36 * sx, 0.25, z), Vector3((FRONT_SPRING_TOP_X + 0.03) * sx, 0.31, z), 0.055, METAL)
+		kit.bar(Vector3(0.36 * sx, 0.12, z), Vector3((FRONT_SPRING_TOP_X - 0.05) * sx, 0.29, z), 0.035, METAL)   # brace
 
 
 func _build_engine(kit: MeshKit) -> void:
@@ -109,18 +121,23 @@ func _build_engine(kit: MeshKit) -> void:
 	kit.box(Vector3(0, -0.02, z0), Vector3(0.5, 0.36, 1.05), METAL)
 	# V cylinder heads
 	for sx in [-1.0, 1.0]:
-		kit.box(Vector3(0.2 * sx, 0.24, z0), Vector3(0.2, 0.26, 1.0), HEADS, Basis(Vector3.FORWARD, deg_to_rad(30.0) * sx))
-		# exhaust: four open pipes per side (eight in all), sweeping out of the
-		# heads and ending in short stacks that point out and back
+		var head := Basis(Vector3.FORWARD, deg_to_rad(30.0) * sx)
+		var head_c := Vector3(0.2 * sx, 0.24, z0)
+		kit.box(head_c, Vector3(0.2, 0.26, 1.0), HEADS, head)
+		# exhaust: four short open stubs per side (eight in all), standing on
+		# the sloped top of each head, leaning 60 deg back from its normal
+		var n := head.y                                  # top face normal: up and out
+		var on_face: Vector3 = head_c + n * 0.13 - head.x * sx * 0.04
+		var lean := deg_to_rad(60.0)   # from the face normal toward the back (+Z)
+		var dir := (n * cos(lean) + Vector3.BACK * sin(lean)).normalized()
 		for k in 4:
-			var z := z0 - 0.38 + k * 0.25
-			var a := Vector3(0.33 * sx, 0.24, z)
-			var b := Vector3(0.56 * sx, 0.12, z + 0.04)
-			var c := b + Vector3(0.12 * sx, 0.05, 0.16)
-			kit.bar(a, b, 0.05, EXHAUST)
-			kit.bar(b, c, 0.055, EXHAUST)
-			kit.cylinder(c, (c - b).normalized(), 0.034, 0.02, 8, EXHAUST.darkened(0.25), Palette.BLACK)
-			_outlets.append([c, (c - b).normalized()])
+			var base: Vector3 = on_face + Vector3(0, 0, -0.38 + k * 0.25)
+			# the slanted pipe reaches deep enough into the head that its
+			# whole rim is buried: no gap where it meets the sloped face
+			var visible := 0.11
+			var sink := 0.03 * tan(lean) + 0.015
+			kit.cylinder(base + dir * ((visible - sink) * 0.5), dir, 0.03, visible + sink, 10, EXHAUST, Palette.BLACK)
+			_outlets.append([base + dir * visible, dir])
 	# supercharger + scoop
 	kit.box(Vector3(0, 0.42, z0), Vector3(0.28, 0.16, 0.6), CHROME)
 	kit.box(Vector3(0, 0.55, z0 - 0.08), Vector3(0.3, 0.1, 0.3), Palette.BLACK)
@@ -134,8 +151,14 @@ func _build_cabin(kit: MeshKit, body_color: Color, cockpit: bool) -> void:
 	var dark := Palette.INTERIOR
 	# tub
 	kit.box(Vector3(0, -0.14, 0.95), Vector3(1.04, 0.08, 1.5), dark)
+	# the front cage feet stand this far ahead of the header (raked frame)
+	var foot_z := HEADER_Z - (HEADER_Y - PILLAR_FOOT_Y) * tan(deg_to_rad(SCREEN_RAKE_DEG))
 	for sx in [-1.0, 1.0]:
 		kit.box(Vector3(0.52 * sx, 0.12, 0.98), Vector3(0.08, 0.56, 1.46), body_color)
+		# a slim rail carries the raked front frame forward, braced down to
+		# the chassis frame (keeps the view onto the front wheels free)
+		kit.box(Vector3(0.52 * sx, PILLAR_FOOT_Y - 0.04, (foot_z - 0.05 + 0.25) * 0.5), Vector3(0.08, 0.1, 0.25 - foot_z + 0.05), body_color)
+		kit.bar(Vector3(0.52 * sx, PILLAR_FOOT_Y - 0.06, foot_z + 0.04), Vector3(FRAME_X * sx, -0.16, 0.1), 0.05, METAL)
 	kit.box(Vector3(0, 0.16, 1.72), Vector3(1.12, 0.64, 0.08), body_color)
 	# firewall / scuttle with dashboard cowl
 	kit.box(Vector3(0, 0.14, 0.24), Vector3(1.12, 0.54, 0.08), body_color)
@@ -148,7 +171,7 @@ func _build_cabin(kit: MeshKit, body_color: Color, cockpit: bool) -> void:
 	# roll cage
 	var t := 0.065
 	for sx in [-1.0, 1.0]:
-		kit.bar(Vector3(0.52 * sx, 0.4, 0.26), Vector3(HEADER_HALF * sx, HEADER_Y, HEADER_Z), t, Palette.CAGE)
+		kit.bar(Vector3(0.52 * sx, PILLAR_FOOT_Y, foot_z), Vector3(HEADER_HALF * sx, HEADER_Y, HEADER_Z), t, Palette.CAGE)
 		kit.bar(Vector3(HEADER_HALF * sx, HEADER_Y, HEADER_Z), Vector3(HEADER_HALF * sx, HEADER_Y, 1.4), t, Palette.CAGE)
 		kit.bar(Vector3(HEADER_HALF * sx, HEADER_Y, 1.4), Vector3(0.52 * sx, 0.42, 1.68), t, Palette.CAGE)
 	kit.box(Vector3(0, HEADER_Y, HEADER_Z), Vector3(HEADER_HALF * 2.0 + t, 0.11, 0.05), Palette.CAGE)
@@ -218,21 +241,32 @@ static func _bar_mesh() -> ArrayMesh:
 	return _unit_bar
 
 
-## Coil spring of unit length along -Z (scaling along Z compresses the coils).
+## Coil spring of unit length along -Z (scaling along Z compresses the
+## coils): a round wire helix between two spring seats.
 static func _coil_mesh() -> ArrayMesh:
 	if _unit_coil == null:
 		var k := MeshKit.new()
-		var turns := 7
-		var seg := 8
-		var r := 0.075
-		var prev := Vector3(r, 0, 0)
-		for i in turns * seg:
-			var a := TAU * (i + 1) / seg
-			var p := Vector3(cos(a) * r, sin(a) * r, -float(i + 1) / (turns * seg))
-			k.box((prev + p) * 0.5, Vector3(0.025, 0.025, 0.06), Palette.YELLOW, Basis.looking_at((p - prev).normalized(), Vector3.UP))
-			prev = p
+		var turns := 8
+		var seg := 18
+		var r := 0.058
+		var pts := PackedVector3Array()
+		for i in turns * seg + 1:
+			var a := TAU * i / seg
+			pts.append(Vector3(cos(a) * r, sin(a) * r, -0.03 - 0.94 * float(i) / (turns * seg)))
+		k.tube(pts, 0.009, 6, Palette.YELLOW)
+		for z in [-0.015, -0.985]:
+			k.cylinder(Vector3(0, 0, z), Vector3.BACK, r + 0.018, 0.03, 14, METAL.lightened(0.25))
 		_unit_coil = k.build()
 	return _unit_coil
+
+
+## Round rod of unit length and diameter along -Z (damper).
+static func _rod_mesh() -> ArrayMesh:
+	if _unit_rod == null:
+		var k := MeshKit.new()
+		k.cylinder(Vector3(0, 0, -0.5), Vector3.BACK, 0.5, 1.0, 10, CHROME)
+		_unit_rod = k.build()
+	return _unit_rod
 
 
 func _link(mesh: ArrayMesh, thickness: float) -> MeshInstance3D:
@@ -289,7 +323,7 @@ func _build_wheels() -> void:
 			"upper": _link(_bar_mesh(), 0.045),
 			"lower": _link(_bar_mesh(), 0.055),
 			"spring": _link(_coil_mesh(), 1.0),
-			"damper": _link(_bar_mesh(), 0.03),
+			"damper": _link(_rod_mesh(), 0.024),
 		})
 
 
@@ -320,8 +354,11 @@ func update_wheels(comp: PackedFloat32Array, steer: float, spin: PackedFloat32Ar
 		var upper_out := Vector3(hub_x * sx, y + 0.14, pos.z)
 		_place(lk["lower"], lower_in, lower_out)
 		_place(lk["upper"], upper_in, upper_out)
-		# coil-over from the tower top to the lower arm
+		# coil-over from the tower top to the lower arm; at the front from the
+		# end of an outrigger on the tower, so it stands more upright
 		var top := Vector3(0.4 * sx, 0.28, pos.z + 0.08)
+		if w < 2:
+			top = Vector3(FRONT_SPRING_TOP_X * sx, 0.3, pos.z + 0.08)
 		var bottom := lower_in.lerp(lower_out, 0.75) + Vector3(0, 0.05, 0.08)
 		_place(lk["spring"], top, bottom)
 		_place(lk["damper"], top, bottom)
@@ -336,16 +373,23 @@ func _build_steering_wheel() -> void:
 	steering_rot = Node3D.new()
 	steering_pivot.add_child(steering_rot)
 	var kit := MeshKit.new()
+	# round rim: one closed tube, three spokes into a round hub
 	var r := 0.15
-	var seg := 14
-	for i in seg:
-		var a0 := TAU * i / seg
-		var a1 := TAU * (i + 1) / seg
-		kit.bar(Vector3(cos(a0) * r, sin(a0) * r, 0), Vector3(cos(a1) * r, sin(a1) * r, 0), 0.03, Palette.TYRE)
-	kit.bar(Vector3(-r, 0, 0), Vector3(r, 0, 0), 0.025, Palette.HUB)
-	kit.bar(Vector3(0, 0, 0), Vector3(0, -r, 0), 0.025, Palette.HUB)
-	kit.box(Vector3(0, r, 0.005), Vector3(0.03, 0.035, 0.04), Palette.YELLOW)
-	kit.box(Vector3(0, 0, -0.04), Vector3(0.06, 0.06, 0.08), Palette.HUB)
+	var rim := PackedVector3Array()
+	for i in 48:
+		var a := TAU * i / 48
+		rim.append(Vector3(cos(a) * r, sin(a) * r, 0))
+	kit.tube(rim, 0.016, 8, Palette.TYRE, true)
+	# top-centre marker: a yellow sleeve over the rim
+	var mark := PackedVector3Array()
+	for i in 7:
+		var a := PI * 0.5 + deg_to_rad(-9.0 + 3.0 * i)
+		mark.append(Vector3(cos(a) * r, sin(a) * r, 0))
+	kit.tube(mark, 0.0185, 8, Palette.YELLOW)
+	for a in [0.0, PI, PI * 1.5]:
+		var d := Vector3(cos(a), sin(a), 0)
+		kit.tube(PackedVector3Array([d * 0.03 + Vector3(0, 0, -0.015), d * (r - 0.01)]), 0.01, 6, Palette.HUB)
+	kit.cylinder(Vector3(0, 0, -0.02), Vector3.BACK, 0.04, 0.05, 16, Palette.HUB, Palette.HUB.darkened(0.2))
 	steering_rot.add_child(kit.build_instance())
 	var col := MeshKit.new()
 	col.bar(Vector3(0, 0, -0.05), Vector3(0, 0, -0.3), 0.04, Palette.HUB.darkened(0.4))

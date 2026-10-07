@@ -28,6 +28,8 @@ var rtt := 0.0
 ## Latest opponent car state (NetCodec.decode_state) and when it came.
 var opp_state := {}
 var opp_state_ms := 0
+## Server clock (s) when the latest opponent state arrived.
+var opp_state_server_s := 0.0
 var opp_states_received := 0
 
 var _udp: PacketPeerUDP
@@ -239,6 +241,7 @@ func _receive(data: PackedByteArray) -> void:
 					_opp_seq = h["seq"]
 					opp_state = s
 					opp_state_ms = local_ms()
+					opp_state_server_s = server_time()
 					opp_states_received += 1
 		NetCodec.EVENT:
 			var e := NetCodec.decode_event(b)

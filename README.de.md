@@ -84,7 +84,7 @@ set G="<Pfad>\Godot_v4.7.2-stable_win64_console.exe"
 %G% --headless --xr-mode off --fixed-fps 120 --path . -- --track=ski_flyer --opponent=5 --autopilot --debug --quit-after=200
 ```
 
-Kommandozeilen-Optionen stehen nach `--`, siehe `scripts/main.gd`: `--track=<id>`, `--opponent=<0..10>`, `--super`, `--autopilot`, `--no-xr`, `--menu=<screen>`, `--joydump`, `--debug`, `--chase` (Kamera hinter dem Auto), `--fps`, `--vr-bench`, `--render-scale=<x>`, `--screenshot=<s>`, `--quit-after=<s>`, `--lang=<en|de>`, `--online=<host[:port]>`, `--name=<name>`.
+Kommandozeilen-Optionen stehen nach `--`, siehe `scripts/main.gd`: `--track=<id>`, `--opponent=<0..10>`, `--super`, `--autopilot`, `--no-xr`, `--menu=<screen>`, `--joydump`, `--debug`, `--chase` (Kamera hinter dem Auto), `--fps`, `--vr-bench`, `--render-scale=<x>`, `--screenshot=<s>`, `--quit-after=<s>`, `--lang=<en|de>`, `--online=<host[:port]>`, `--name=<name>`, `--car-photos`.
 
 Das Fahrverhalten wird zentral in `scripts/car/car_tuning.gd` eingestellt, die Strecken in `scripts/track/track_library.gd`.
 
