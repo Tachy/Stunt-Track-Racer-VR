@@ -16,6 +16,8 @@ class_name TrackLibrary
 ##    TrackPath pit detection)
 ##   bridge drawbridge leaves on this piece
 ##   no_crane  never put the car back here
+##   (tunnels: a negative h takes the road below the ground - an open cut
+##    first, then a covered tunnel; see TrackPath tunnel detection)
 ##
 ## The league tracks are own designs in the spirit of the 1989 originals
 ## (irregular layouts, steep banking, pits with black walls); straight lengths
@@ -42,7 +44,7 @@ const LEGACY_IDS := {
 }
 
 ## Extra tracks (practice only, not part of the league).
-const CUSTOM := ["loop_and_jump"]
+const CUSTOM := ["loop_and_jump", "grand_tour"]
 
 const DIVISION_TRACKS := {
 	4: ["first_flight", "camel_back"],
@@ -52,6 +54,59 @@ const DIVISION_TRACKS := {
 }
 
 const TRACKS := {
+	# Long figure eight with everything: camel humps, two jumps, a pit, the
+	# drawbridge, a loop and a 400 m tunnel with an S-bend that passes 17 m
+	# under the start straight. Straights solved so the lap closes exactly.
+	"grand_tour": {
+		"name": "Grand Tour", "theme": 0, "base": 8.0, "boost": 70, "boost_super": 55, "division": 1,
+		"pieces": [
+			{"t": "S", "l": 120},                                  # start straight
+			{"t": "S", "l": 80, "bump": 4.0},                      # camel humps
+			{"t": "S", "l": 80, "bump": 4.0},
+			{"t": "S", "l": 80, "bump": 3.0},
+			{"t": "L", "r": 50, "bank": -36.0},
+			{"t": "S", "l": 40},
+			{"t": "S", "l": 30, "h": 11.0, "p": "kick"},           # jump 1
+			{"t": "S", "l": 14, "h": 9.0, "p": "lin", "gap": true},
+			{"t": "S", "l": 30, "h": 8.0, "p": "land"},
+			{"t": "S", "l": 40},
+			{"t": "L", "r": 50, "bank": -36.0},
+			{"t": "S", "l": 30},
+			{"t": "S", "l": 30, "h": 10.0, "p": "kick"},           # pit
+			{"t": "S", "l": 3, "h": 4.0, "p": "lin", "no_crane": true},
+			{"t": "S", "l": 12, "h": 4.0, "no_crane": true},
+			{"t": "S", "l": 3, "h": 9.0, "p": "lin", "no_crane": true},
+			{"t": "S", "l": 40, "h": 8.0, "p": "land"},
+			{"t": "S", "l": 40},
+			{"t": "S", "l": 80, "h": 20.0},                        # up to the drawbridge
+			{"t": "S", "l": 40},
+			{"t": "S", "l": 60, "bridge": true},
+			{"t": "S", "l": 40},
+			{"t": "S", "l": 80, "h": 8.0},
+			{"t": "L", "r": 50, "bank": -36.0},
+			{"t": "S", "l": 40},
+			{"t": "S", "l": 100, "h": -9.0},                       # down into the cut
+			{"t": "S", "l": 200},                                  # tunnel, under the start straight
+			{"t": "R", "r": 70, "a": 35, "bank": 14.0},            # S-bend in the tunnel
+			{"t": "L", "r": 70, "a": 35, "bank": -14.0},
+			{"t": "S", "l": 120, "bump": 1.2},                     # waves in the tunnel
+			{"t": "S", "l": 60},
+			{"t": "S", "l": 100, "h": 6.0},                        # climb out
+			{"t": "S", "l": 30, "h": 9.0, "p": "kick"},            # jump 2
+			{"t": "S", "l": 14, "h": 7.0, "p": "lin", "gap": true},
+			{"t": "S", "l": 30, "h": 6.0, "p": "land"},
+			{"t": "S", "l": 40},
+			{"t": "R", "r": 50, "bank": 36.0},
+			{"t": "S", "l": 156.68},
+			{"t": "S", "l": 70},
+			{"t": "O", "side": 1},                                 # loop
+			{"t": "S", "l": 70},
+			{"t": "R", "r": 50, "bank": 36.0},
+			{"t": "S", "l": 549.3, "h": 8.0},
+			{"t": "R", "r": 50, "bank": 36.0},
+			{"t": "S", "l": 520},                                  # back over the tunnel
+		],
+	},
 	# Figure eight: the north-south branch crosses the east-west branch on a
 	# deck 10 m above it (underpass), two loops, a jump and steep banking.
 	"loop_and_jump": {

@@ -5,7 +5,8 @@ class_name EnvironmentBuilder
 const GROUND_SIZE := 8000.0
 
 
-static func build(parent: Node3D, theme: int, track_bounds: AABB) -> void:
+## holes: plan-view polygons (x, z) left open in the ground (TrackPath.ground_holes).
+static func build(parent: Node3D, theme: int, track_bounds: AABB, holes: Array = []) -> void:
 	var env := WorldEnvironment.new()
 	env.name = "WorldEnvironment"
 	var e := Environment.new()
@@ -50,13 +51,15 @@ static func build(parent: Node3D, theme: int, track_bounds: AABB) -> void:
 	sun.directional_shadow_split_3 = 0.35
 	parent.add_child(sun)
 
-	# ground plane (visual + collision)
+	# ground plane (visual + collision), open over tunnel cuts
 	var kit := MeshKit.new()
 	var g := GROUND_SIZE * 0.5
 	var c := track_bounds.get_center()
-	kit.quad(Vector3(c.x - g, 0, c.z - g), Vector3(c.x + g, 0, c.z - g),
-		Vector3(c.x + g, 0, c.z + g), Vector3(c.x - g, 0, c.z + g), Palette.GROUND)
-	_ground_marks(kit, track_bounds)
+	var ground_tris := PackedVector3Array()
+	GroundMesh.area(Rect2(c.x - g, c.z - g, GROUND_SIZE, GROUND_SIZE), holes, ground_tris)
+	for t in range(0, ground_tris.size(), 3):
+		kit.tri(ground_tris[t], ground_tris[t + 1], ground_tris[t + 2], Palette.GROUND)
+	_ground_marks(kit, track_bounds, holes)
 	var gm := kit.build_instance()
 	gm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	gm.name = "Ground"
@@ -66,9 +69,15 @@ static func build(parent: Node3D, theme: int, track_bounds: AABB) -> void:
 	body.name = "GroundBody"
 	body.collision_layer = TrackNode.LAYER_GROUND
 	body.collision_mask = 0
-	var shape := WorldBoundaryShape3D.new()
 	var cs := CollisionShape3D.new()
-	cs.shape = shape
+	if holes.is_empty():
+		cs.shape = WorldBoundaryShape3D.new()
+	else:
+		# an infinite plane would fill the tunnels: the ground's own triangles
+		var shape := ConcavePolygonShape3D.new()
+		shape.backface_collision = true
+		shape.set_faces(ground_tris)
+		cs.shape = shape
 	body.add_child(cs)
 	parent.add_child(body)
 
@@ -77,8 +86,9 @@ static func build(parent: Node3D, theme: int, track_bounds: AABB) -> void:
 	parent.add_child(scenery)
 
 
-## A few darker ground patches for speed/height perception near the track.
-static func _ground_marks(kit: MeshKit, b: AABB) -> void:
+## A few darker ground patches for speed/height perception near the track
+## (none near a hole: they would cover it).
+static func _ground_marks(kit: MeshKit, b: AABB, holes: Array = []) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 1989
 	var c := b.get_center()
@@ -87,6 +97,14 @@ static func _ground_marks(kit: MeshKit, b: AABB) -> void:
 	for i in 70:
 		var p := Vector3(c.x + rng.randf_range(-extent, extent), 0.02, c.z + rng.randf_range(-extent, extent))
 		var r := rng.randf_range(6.0, 22.0)
+		var near_hole := false
+		for h in holes:
+			for q in h:
+				if Vector2(p.x, p.z).distance_to(q) < r + 4.0:
+					near_hole = true
+					break
+		if near_hole:
+			continue
 		var sides := 6
 		for k in sides:
 			var a0 := TAU * k / sides

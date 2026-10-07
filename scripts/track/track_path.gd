@@ -20,6 +20,12 @@ const LOOP_SHIFT := 11.0          # sideways shift of a loop: road width + 1 m
 ## built as a deck (slab) instead of a wall down to the ground.
 const DECK_CLEARANCE := 4.0
 const DECK_MARGIN := 2.0
+## Tunnels: where the road dips below the ground (y = 0). Covered where the
+## whole tunnel box - roof included - lies below the ground; an open cut
+## with retaining walls where the road is below ground but the box is not.
+const TUNNEL_HEIGHT := 6.0      # clear height above the road
+const TUNNEL_SIDE := 0.5        # extra width beyond the road on each side
+const TUNNEL_ROOF := 0.6        # roof thickness
 
 var def: Dictionary
 var pieces: Array = []
@@ -50,6 +56,11 @@ var loop_mask := PackedByteArray()
 ## 1 = build as a deck/slab with thickness (overhead part of a loop, or a
 ## section another part of the track passes under)
 var deck := PackedByteArray()
+## 1 = covered tunnel / 1 = open cut (road below ground, no roof)
+var tunnel := PackedByteArray()
+var cut := PackedByteArray()
+## Distance (m) from a tunnel sample to the nearest portal, 0 outside.
+var tunnel_depth := PackedFloat32Array()
 
 
 
@@ -59,6 +70,7 @@ func _init(track_def: Dictionary) -> void:
 	_sample()
 	_finish_frames()
 	_detect_pits()
+	_detect_tunnels()
 	_detect_decks()
 
 
@@ -265,7 +277,8 @@ func _detect_decks() -> void:
 				if bucket == null:
 					continue
 				for j in bucket:
-					if absf(delta_s(s_arr[i], s_arr[j])) < 40.0:
+					# (a road over a tunnel stands on the ground: no deck)
+					if absf(delta_s(s_arr[i], s_arr[j])) < 40.0 or tunnel[j] == 1:
 						continue
 					if center[j].y > center[i].y - DECK_CLEARANCE:
 						continue
@@ -288,6 +301,86 @@ func _finish_frames() -> void:
 		forward[i] = f
 		up[i] = u3
 		right[i] = f.cross(u3).normalized()
+
+
+func tunnel_half_width(i: int) -> float:
+	return half_width[i] + TUNNEL_SIDE
+
+
+## "Up" of the tunnel cross-section at sample i: square to the road's
+## right (so the box banks with the road) but in a vertical plane - not
+## pitched with the slope, so portals stand upright and meet the cut walls.
+func tunnel_up(i: int) -> Vector3:
+	var f := Vector3(forward[i].x, 0.0, forward[i].z).normalized()
+	return right[i].cross(f).normalized()
+
+
+## Corners of the tunnel cross-section at sample i: [bottom left, bottom
+## right, top left, top right]. The box turns and banks with the road.
+func tunnel_corners(i: int) -> Array:
+	var hw := tunnel_half_width(i)
+	var bl := center[i] - right[i] * hw
+	var br := center[i] + right[i] * hw
+	var u := tunnel_up(i) * TUNNEL_HEIGHT
+	return [bl, br, bl + u, br + u]
+
+
+func _detect_tunnels() -> void:
+	tunnel.resize(n)
+	tunnel.fill(0)
+	cut.resize(n)
+	cut.fill(0)
+	for i in n:
+		if road[i] == 0 or loop_mask[i] == 1:
+			continue
+		var c := tunnel_corners(i)
+		var roof_top := maxf(c[2].y, c[3].y) + TUNNEL_ROOF
+		if roof_top <= 0.0:
+			tunnel[i] = 1
+		elif minf(c[0].y, c[1].y) < 0.0:
+			cut[i] = 1
+	tunnel_depth.resize(n)
+	tunnel_depth.fill(0.0)
+	for i in n:
+		if tunnel[i] == 0:
+			continue
+		var d := 0
+		while d < n and tunnel[(i + d) % n] == 1 and tunnel[(i - d + n) % n] == 1:
+			d += 1
+		tunnel_depth[i] = d * STEP
+
+
+## Openings in the ground over the open cuts, as plan-view polygons (x, z):
+## each runs along both retaining walls, from the sample before the cut to
+## the one after it (the tunnel portal, or the road back above ground).
+func ground_holes() -> Array:
+	var holes := []
+	var start := 0
+	while start < n and cut[start] == 1:
+		start += 1
+	if start >= n:
+		return holes
+	var i := 0
+	while i < n:
+		var k := (start + i) % n
+		if cut[k] == 0:
+			i += 1
+			continue
+		var run := [(k - 1 + n) % n]
+		while i < n and cut[(start + i) % n] == 1:
+			run.append((start + i) % n)
+			i += 1
+		run.append((start + i) % n)
+		var poly := PackedVector2Array()
+		var rights := PackedVector2Array()
+		for idx in run:
+			var c := tunnel_corners(idx)
+			poly.append(Vector2(c[0].x, c[0].z))
+			rights.append(Vector2(c[1].x, c[1].z))
+		rights.reverse()
+		poly.append_array(rights)
+		holes.append(poly)
+	return holes
 
 
 func _detect_pits() -> void:
@@ -488,7 +581,7 @@ func is_crane_allowed(piece_index: int) -> bool:
 	if p["type"] != "S" or p["gap"] or p["bridge"] or p["no_crane"]:
 		return false
 	for i in range(p["i0"], p["i1"]):
-		if deck[i] == 1:
+		if deck[i] == 1 or tunnel[i] == 1 or cut[i] == 1:
 			return false
 	if p["profile"] == "kick" or p["profile"] == "land":
 		return false

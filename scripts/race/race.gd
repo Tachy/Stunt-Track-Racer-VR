@@ -58,6 +58,11 @@ var _net_result := {}         # {winner, reason} from the server
 var _opp_gone := false        # opponent left or the connection is lost
 var _opp_lap_ms := 0.0
 var _opp_best := -1.0
+# light inside tunnels
+var _sun: DirectionalLight3D
+var _world_env: Environment
+var _sun_energy := 1.0
+var _ambient_energy := 1.0
 var _latency := -1.0          # age of the opponent's data on arrival (s), -1 = unknown
 var _latency_seen := -1       # Net.opp_states_received at the last measurement
 
@@ -71,6 +76,11 @@ var result := {}
 var autopilot := false
 var _chase := OS.get_cmdline_user_args().has("--chase")
 var _overview := OS.get_cmdline_user_args().has("--overview")
+## debug: a fixed view onto the first tunnel portal (--view-portal[=<side>])
+## or onto the start of the first cut (--view-cut[=<side>]); side -1/1 =
+## from the left/right, 0 = down the road
+var _view_portal := ""
+var _view_cut := ""
 
 ## Pose the crane holds the car in. While held the view uses it instead of the
 ## interpolated transform, which lags a few frames behind a teleport.
@@ -95,13 +105,22 @@ func _ready() -> void:
 	_rng.randomize()
 	autopilot = OS.get_cmdline_user_args().has("--autopilot")
 	online = req.has("online")
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--view-portal"):
+			_view_portal = a.get_slice("=", 1) if "=" in a else "1"
+		if a.begins_with("--view-cut"):
+			_view_cut = a.get_slice("=", 1) if "=" in a else "1"
 	Sfx.stop_music()
 	def = TrackLibrary.get_def(req["track"])
 	var super_league: bool = req.get("super", false)
 	path = TrackPath.new(def)
 	track = TrackNode.new().build(path)
 	add_child(track)
-	EnvironmentBuilder.build(self, def["theme"], path.bounds())
+	EnvironmentBuilder.build(self, def["theme"], path.bounds(), path.ground_holes())
+	_sun = get_tree().get_first_node_in_group("sun")
+	_world_env = (get_node("WorldEnvironment") as WorldEnvironment).environment
+	_sun_energy = _sun.light_energy
+	_ambient_energy = _world_env.ambient_light_energy
 
 	tuning = CarTuning.super_league() if super_league else CarTuning.standard()
 	tuning.max_steer_deg = Settings.max_wheel_angle_deg
@@ -111,6 +130,7 @@ func _ready() -> void:
 	add_child(car)
 	car.boost_units = def["boost_super"] if super_league else def["boost"]
 	car_model = CarModel.new().build(Palette.PLAYER_BODY, true)
+	_lit_by_tunnel_lamps(car_model)
 	car.add_child(car_model)
 	dashboard = Dashboard.new()
 	car_model.dashboard_anchor.add_child(dashboard)
@@ -156,6 +176,7 @@ func _ready() -> void:
 		add_child(opp_car)
 		opp_car.boost_units = car.boost_units
 		opp_model = CarModel.new().build(Color(opp_driver.get("color", "#2266dd")), false)
+		_lit_by_tunnel_lamps(opp_model)
 		opp_car.add_child(opp_model)
 		opp_engine = EngineSynth.new().setup(true, -2.0)
 		opp_car.add_child(opp_engine)
@@ -638,7 +659,25 @@ func _flash(text: String) -> void:
 
 # --- per-frame visuals / VR viewpoint ----------------------------------------------
 
+## The tunnel lamps only light what is on their render layer (so they do
+## not shine through the ground): the cars join it.
+static func _lit_by_tunnel_lamps(node: Node) -> void:
+	for vi in node.find_children("*", "VisualInstance3D", true, false):
+		(vi as VisualInstance3D).layers |= TrackNode.TUNNEL_LIGHT_LAYER
+
+
+## Deep in a tunnel daylight fades: less sky light, and without shadows
+## (which would keep the sun out by themselves) less sun as well.
+func _update_tunnel_light() -> void:
+	var f := 0.0
+	if path.tunnel.size() == path.n and path.tunnel[ptrack.idx] == 1:
+		f = smoothstep(2.0, 25.0, path.tunnel_depth[ptrack.idx])
+	_world_env.ambient_light_energy = _ambient_energy * (1.0 - 0.55 * f)
+	_sun.light_energy = _sun_energy * (1.0 - (0.0 if Settings.shadows else 0.85) * f)
+
+
 func _process(delta: float) -> void:
+	_update_tunnel_light()
 	_update_view()
 	car_model.update_wheels(car.wheel_comp, car.steer_angle, car.wheel_spin, tuning.suspension_rest, delta)
 	var wheel_deg := InputManager.wheel_angle_deg()
@@ -689,6 +728,8 @@ func _update_view() -> void:
 	var eye := CarModel.SEAT_EYE
 	if _chase:
 		eye = Vector3(-2.6, 1.6, 6.5)   # debug: external view, behind-left
+	if (_view_portal != "" or _view_cut != "") and _feature_view():
+		return
 	if _overview:
 		# debug: oblique bird's-eye view of the whole track
 		var b := path.bounds()
@@ -700,6 +741,28 @@ func _update_view() -> void:
 	# view from the car's attitude in space only (loops, flips, roll-overs alike)
 	var view := CockpitMath.view_basis(xf.basis, Settings.tilt_follow)
 	XrManager.set_base(Transform3D(view, xf * eye))
+
+
+func _feature_view() -> bool:
+	var k := -1
+	for i in path.n:
+		var prev := (i - 1 + path.n) % path.n
+		if (_view_portal != "" and path.tunnel[i] == 1 and path.cut[prev] == 1) 				or (_view_cut != "" and path.cut[i] == 1 and path.cut[prev] == 0 and path.tunnel[prev] == 0):
+			k = i
+			break
+	if k < 0:
+		return false
+	# <side>[,<metres back>[,<height above the road>]]
+	var arg := (_view_portal if _view_portal != "" else _view_cut).split(",")
+	var side := float(arg[0]) if arg[0].is_valid_float() else 1.0
+	var back := (k - (int(arg[1]) if arg.size() > 1 else 22) + path.n) % path.n
+	var target := path.center[k] + Vector3.UP * (3.0 if _view_portal != "" else 0.0)
+	var eye := path.center[back] + path.right_flat[k] * side * 12.0
+	eye.y = (4.0 if _view_portal != "" else path.center[back].y + 3.0) if side != 0.0 else path.center[back].y + 2.0
+	if arg.size() > 2:
+		eye.y = path.center[back].y + float(arg[2])
+	XrManager.set_base(Transform3D(Basis.looking_at(target - eye, Vector3.UP), eye))
+	return true
 
 
 func _piece_desc(pi_: int) -> String:

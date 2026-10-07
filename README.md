@@ -60,6 +60,7 @@ At 50 % the view therefore always stays within ±45° of straight ahead, in pitc
 
 - **8 tracks**, freely rebuilt (no original data). Div 4: First Flight, Camel Back · Div 3: Mega Ramp, Stone Hopper · Div 2: Big Dipper, The Tower · Div 1: Bridge Run (with drawbridge), Ski Flyer
 - **Loop and Jump** (practice only): a figure eight with an **underpass** at the crossing (the upper branch runs on a bridge deck with thickness, the lower one passes beneath), plus **two loops**, a jump and banked curves. Loops have walls down to the ground up to the vertical tangent; the overhead part is a curved road slab.
+- **Grand Tour** (practice only, 3.7 km): every element on one lap - camel humps, two jumps, a pit, the drawbridge, a loop and a 400 m **tunnel** with a banked S-bend that runs 17 m under the start straight. A tunnel forms wherever the road dips below the ground: first an open cut with retaining walls, then a portal and a lit rectangular tube that turns and banks with the road.
 - **Elevated tracks without guard rails.** If you fall off, the **crane** puts you back. The race also starts from the crane ("DROP START").
 - **Damage:** a crack runs along the roll bar, heavy hits punch holes. Holes stay for the whole season and amplify further damage. When the crack is full, the car is wrecked.
 - **Boost**, limited per race. 3 laps, 1 against 1. Opponent AI with 11 drivers and their habits (pushing, blocking, edge riding, wheelies).

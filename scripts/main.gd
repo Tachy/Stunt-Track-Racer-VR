@@ -8,7 +8,8 @@ extends Node
 ##   --autopilot         the player car drives itself (testing)
 ##   --no-xr             force desktop mode
 ##   --quit-after=<sec>  quit after some seconds (testing)
-##   --screenshot=<sec>  save a screenshot after some seconds
+##   --screenshot=<sec>[,<sec>...]  save screenshots after some seconds
+##                       (auto.png; with several times auto_1.png, auto_2.png ...)
 ##   --menu=<screen>     open a menu screen (main, league, practice, settings, calibrate)
 ##   --chase             debug camera behind the car
 ##   --render-scale=<x>  3D render scale (benchmark VR-like pixel counts)
@@ -23,7 +24,7 @@ extends Node
 var current: Node
 var _args := {}
 var _elapsed := 0.0
-var _shot_done := false
+var _shots_taken := 0
 
 
 func _ready() -> void:
@@ -65,9 +66,12 @@ func _process(delta: float) -> void:
 				if Input.is_joy_button_pressed(id, b as JoyButton):
 					btns.append(b)
 			print("[Joy %d] %s | known=%s | axes %s | buttons %s" % [id, Input.get_joy_name(id), Input.is_joy_known(id), " ".join(axes), btns])
-	if _args.has("screenshot") and not _shot_done and _elapsed >= float(_args["screenshot"]):
-		_shot_done = true
-		XrManager.save_screenshot("user://screenshots/auto.png")
+	if _args.has("screenshot"):
+		var times: PackedStringArray = _args["screenshot"].split(",")
+		if _shots_taken < times.size() and _elapsed >= float(times[_shots_taken]):
+			_shots_taken += 1
+			var file := "auto.png" if times.size() == 1 else "auto_%d.png" % _shots_taken
+			XrManager.save_screenshot("user://screenshots/" + file)
 	if _args.has("quit-after") and _elapsed >= float(_args["quit-after"]):
 		_report_and_quit()
 

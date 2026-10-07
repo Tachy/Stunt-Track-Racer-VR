@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_league_track_features", "test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground",
 	]
 	for t in tests:
 		_current = t
@@ -703,3 +703,92 @@ func test_sound_travel_time() -> void:
 			break
 	check(at >= 0 and absi(at - 16000) <= 1, "click from 343 m heard after 1 s (sample %d)" % at)
 	check(near(sp.delay(), 1.0, 1e-4), "delay 1 s (%.4f)" % sp.delay())
+
+
+# --- tunnels -------------------------------------------------------------------------
+
+func test_tunnel_track() -> void:
+	var p := TrackPath.new(TrackLibrary.get_def("grand_tour"))
+	check(p.closure_error < 0.5 and p.heading_error < 0.01, "grand_tour closed (err %.3f)" % p.closure_error)
+	check(p.total_length > 3500.0, "grand_tour is long (%.0f m)" % p.total_length)
+	var covered := 0
+	var cut := 0
+	var roof_ok := true
+	for i in p.n:
+		covered += p.tunnel[i]
+		cut += p.cut[i]
+		if p.tunnel[i] == 1:
+			var c := p.tunnel_corners(i)
+			if maxf(c[2].y, c[3].y) + TrackPath.TUNNEL_ROOF > 0.0:
+				roof_ok = false
+	check(covered > 300, "covered tunnel (%d m)" % covered)
+	check(cut > 20 and cut < 200, "open cuts at both ends (%d m)" % cut)
+	check(roof_ok, "tunnel roof below the ground everywhere")
+	var holes := p.ground_holes()
+	check(holes.size() == 2, "two openings in the ground (%d)" % holes.size())
+	# the start straight runs over the tunnel, not into it
+	var over := false
+	for i in p.n:
+		if p.tunnel[i] == 0:
+			continue
+		for j in range(0, p.n, 2):
+			if p.tunnel[j] == 0 and p.road[j] == 1 and Vector2(p.center[j].x - p.center[i].x, p.center[j].z - p.center[i].z).length() < 6.0 and p.center[j].y > 5.0:
+				over = true
+				break
+		if over:
+			break
+	check(over, "a road crosses over the tunnel")
+	var crane_ok := true
+	for pi_ in p.pieces.size():
+		var rs := p.recovery_s(float(p.pieces[pi_]["s0"]) + float(p.pieces[pi_]["length"]) * 0.5)
+		var k := p.index_at_s(rs)
+		if not p.is_crane_allowed(p.piece_at_s(rs)) or p.road[k] != 1 or p.tunnel[k] == 1 or p.cut[k] == 1:
+			crane_ok = false
+	check(crane_ok, "crane never sets down in a tunnel or cut")
+
+
+func test_tunnel_mesh_and_ground() -> void:
+	var p := TrackPath.new(TrackLibrary.get_def("grand_tour"))
+	var node := TrackNode.new().build(p)
+	check(node.has_node("TunnelMesh") and node.has_node("TunnelLamps"), "tunnel mesh and lamps")
+	var lights := 0
+	for c in node.get_children():
+		if c is OmniLight3D:
+			lights += 1
+	check(lights > 10, "tunnel lights (%d)" % lights)
+	node.free()
+	# ground: open over the cut, closed over the covered tunnel
+	var tris := PackedVector3Array()
+	GroundMesh.area(Rect2(-4000, -4000, 8000, 8000), p.ground_holes(), tris)
+	var in_cut := -1
+	var in_tunnel := -1
+	for i in p.n:
+		if p.cut[i] == 1 and p.center[i].y < -3.0 and in_cut < 0:
+			in_cut = i
+		if p.tunnel[i] == 1 and p.tunnel_depth[i] > 50.0 and in_tunnel < 0:
+			in_tunnel = i
+	check(not _ground_covers(tris, p.center[in_cut]), "no ground over the open cut")
+	check(_ground_covers(tris, p.center[in_tunnel]), "ground over the covered tunnel")
+	var area := 0.0
+	for t in range(0, tris.size(), 3):
+		area += 0.5 * absf((tris[t + 1] - tris[t]).cross(tris[t + 2] - tris[t]).y)
+	var hole_area := 0.0
+	for h in p.ground_holes():
+		hole_area += absf(_poly_area(h))
+	check(absf(area + hole_area - 8000.0 * 8000.0) < 50.0, "ground + holes = whole square (diff %.1f m2)" % (area + hole_area - 64e6))
+
+
+func _ground_covers(tris: PackedVector3Array, pos: Vector3) -> bool:
+	var q := Vector2(pos.x, pos.z)
+	for t in range(0, tris.size(), 3):
+		if Geometry2D.point_is_inside_triangle(q, Vector2(tris[t].x, tris[t].z), Vector2(tris[t + 1].x, tris[t + 1].z), Vector2(tris[t + 2].x, tris[t + 2].z)):
+			return true
+	return false
+
+
+func _poly_area(poly: PackedVector2Array) -> float:
+	var a := 0.0
+	for i in poly.size():
+		var j := (i + 1) % poly.size()
+		a += poly[i].x * poly[j].y - poly[j].x * poly[i].y
+	return a * 0.5

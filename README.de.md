@@ -61,6 +61,7 @@ Bei 50 % bleibt der Blick so immer innerhalb von ±45° zur Geradeaussicht, in N
 - **Loop and Jump** (nur Übungsfahrt): eine Acht mit **Unterführung** an der Kreuzung (der obere Ast läuft auf einem Brückendeck mit Dicke, der untere fährt darunter durch), dazu **zwei Loopings**, ein Sprung und Steilkurven. Loopings sind bis zur senkrechten Tangente mit Mauer bis zum Boden gebaut, im Überkopf-Teil als gebogene Fahrbahnplatte.
 
 - **8 Strecken**, frei nachgebaut (keine Originaldaten). Div 4: First Flight, Camel Back · Div 3: Mega Ramp, Stone Hopper · Div 2: Big Dipper, The Tower · Div 1: Bridge Run (mit Zugbrücke), Ski Flyer
+- **Grand Tour** (nur Übungsfahrt, 3,7 km): alle Elemente in einer Runde – Kamelbuckel, zwei Sprünge, eine Grube, die Zugbrücke, ein Looping und ein 400 m langer **Tunnel** mit überhöhter S-Kurve, der 17 m unter der Startgeraden durchführt. Ein Tunnel entsteht überall, wo die Fahrbahn unter den Boden abtaucht: zuerst ein offener Einschnitt mit Stützmauern, dann ein Portal und eine beleuchtete rechteckige Röhre, die Kurven und Querneigung mitmacht.
 - **Erhöhte Strecken ohne Leitplanken.** Wer herunterfällt, wird vom **Kran** zurückgesetzt. Auch der Start erfolgt am Kran („DROP START“).
 - **Schaden:** Ein Riss wandert über den Überrollbügel, schwere Treffer schlagen Löcher. Die Löcher bleiben die ganze Saison und verstärken weiteren Schaden. Ist der Riss voll, ist der Wagen Schrott.
 - **Boost**, begrenzt pro Rennen. 3 Runden, 1 gegen 1. Gegner-KI mit 11 Fahrern und deren Eigenheiten (drängeln, blockieren, am Rand fahren, Wheelies).

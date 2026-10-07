@@ -43,7 +43,7 @@ func _ready() -> void:
 		track_id = GameState.league.next_race()["track"]
 	var path := TrackPath.new(TrackLibrary.get_def(track_id))
 	add_child(TrackNode.new().build(path))
-	EnvironmentBuilder.build(self, TrackLibrary.TRACKS[track_id]["theme"], path.bounds())
+	EnvironmentBuilder.build(self, TrackLibrary.TRACKS[track_id]["theme"], path.bounds(), path.ground_holes())
 
 	# viewpoint: beside the start straight, slightly elevated
 	var f := path.frame_at_s(20.0)
