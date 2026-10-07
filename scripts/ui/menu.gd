@@ -179,7 +179,7 @@ func _screen_main(sc: PixelScreen) -> void:
 	items = [
 		{"label": Lang.t("LEAGUE"), "do": func(): open("league")},
 		{"label": Lang.t("PRACTICE"), "do": func(): open("practice")},
-		{"label": Lang.t("ONLINE"), "do": func(): open("online")},
+		{"label": Lang.t("MULTIPLAYER"), "do": func(): open("online")},
 		{"label": Lang.t("CALIBRATE WHEEL"), "do": func(): open("calibrate")},
 		{"label": Lang.t("SETTINGS"), "do": func(): open("settings")},
 		{"label": Lang.t("QUIT"), "do": func(): get_tree().quit()},
@@ -286,7 +286,7 @@ func _screen_result(sc: PixelScreen) -> void:
 
 
 func _screen_online(sc: PixelScreen) -> void:
-	sc.text_centered(90, Lang.t("ONLINE RACE (1 VS 1)"), Palette.LIGHT_BLUE, 4.0)
+	sc.text_centered(90, Lang.t("MULTIPLAYER (1 VS 1)"), Palette.LIGHT_BLUE, 4.0)
 	var status := Lang.t("NOT CONNECTED")
 	var col := Palette.RED
 	if Net.status == "connecting":

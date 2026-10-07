@@ -71,7 +71,7 @@ Bei 50 % bleibt der Blick so immer innerhalb von ±45° zur Geradeaussicht, in N
 
 Zwei Spieler fahren über das Internet gegeneinander, verbunden über einen kleinen Server (`server/`, Go, wenige MB, keine Physik). Jedes Spiel rechnet sein eigenes Auto und sendet dessen Zustand 30-mal pro Sekunde (36 Byte pro Paket, etwa 2,2 KB/s). Das Gegnerauto ist eine vollwertige physikalische Kopie, die zum empfangenen Zustand gezogen wird. Der Server bringt die nächsten zwei suchenden Spieler zusammen, legt den gemeinsamen Drop-Zeitpunkt fest und entscheidet über den Sieg. Protokoll: `docs/net-protocol.md`.
 
-- Name, Autofarbe und Serveradresse werden im ONLINE-Menü eingetragen (über die Tastatur oder Zeichen für Zeichen mit dem Lenkrad). Die Adresse ist `host` oder `host:port`; ohne Port gilt 27015. Der Server selbst braucht keine Konfiguration.
+- Name, Autofarbe und Serveradresse werden im MULTIPLAYER-Menü eingetragen (über die Tastatur oder Zeichen für Zeichen mit dem Lenkrad). Die Adresse ist `host` oder `host:port`; ohne Port gilt 27015. Der Server selbst braucht keine Konfiguration.
 - Server starten: `go run ./server -v` (in `server/`), oder `docker build -t stunt-racer-server server/` und `docker run -d -p 27015:27015/udp stunt-racer-server`, oder die systemd-Unit in `server/deploy/`. Es muss nur UDP-Port 27015 offen sein. Schritt für Schritt: `docs/server-install.de.md`.
 - Test ohne Menü: `-- --track=camel_back --online=127.0.0.1:27015 --name=ANN --autopilot` in zwei Instanzen (ohne `--fixed-fps`, weil das Netz Echtzeit braucht). Mit `-sim-latency 80ms -sim-loss 0.03` simuliert der Server eine schlechte Leitung; `go test ./...` in `server/` testet den Server.
 

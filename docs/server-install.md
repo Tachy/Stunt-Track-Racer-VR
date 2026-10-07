@@ -1,7 +1,7 @@
 # Installing the online server on Linux
 
 The server (`server/`, Go) needs no configuration and runs no physics; a small VPS is enough.
-Players enter their name, car colour and the server address in the game's ONLINE menu.
+Players enter their name, car colour and the server address in the game's MULTIPLAYER menu.
 
 ## 1. Build the server (Windows machine)
 
@@ -53,7 +53,7 @@ journalctl -u stunt-racer -f        # live log: hello "NAME" from …, races, re
 
 ## 6. Connect from the game
 
-1. **ONLINE** → **SERVER** → enter the address, e.g. `203.0.113.5` or `racer.example.org` (no port needed; `host:port` works too).
+1. **MULTIPLAYER** → **SERVER** → enter the address, e.g. `203.0.113.5` or `racer.example.org` (no port needed; `host:port` works too).
 2. Optionally change **NAME** and **CAR COLOUR**.
 3. The top line must read "CONNECTED, PING … MS".
 4. Both players choose **FIND AN OPPONENT**. Whoever searches first picks the track.

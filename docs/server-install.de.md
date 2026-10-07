@@ -1,7 +1,7 @@
 # Online-Server auf Linux installieren
 
 Der Server (`server/`, Go) braucht keine Konfiguration und rechnet keine Physik. Ein kleiner VPS reicht.
-Spieler tragen Name, Autofarbe und Serveradresse im ONLINE-Menü des Spiels ein.
+Spieler tragen Name, Autofarbe und Serveradresse im MULTIPLAYER-Menü des Spiels ein.
 
 ## 1. Server-Programm bauen (Windows-Rechner)
 
@@ -53,7 +53,7 @@ journalctl -u stunt-racer -f        # Live-Log: hello "JOHAN" from …, Rennen, 
 
 ## 6. Im Spiel verbinden
 
-1. **ONLINE** → **SERVER** → Adresse eintragen, z. B. `203.0.113.5` oder `racer.example.de` (ohne Port, `host:port` geht auch).
+1. **MULTIPLAYER** → **SERVER** → Adresse eintragen, z. B. `203.0.113.5` oder `racer.example.de` (ohne Port, `host:port` geht auch).
 2. Optional **NAME** und **AUTOFARBE** anpassen.
 3. Oben muss „VERBUNDEN, PING … MS“ stehen.
 4. Beide Spieler wählen **GEGNER SUCHEN**. Wer zuerst sucht, bestimmt die Strecke.
