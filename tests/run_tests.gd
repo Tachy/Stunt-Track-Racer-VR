@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_league_track_features", "test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip",
+		"test_net_golden", "test_net_roundtrip", "test_title_music",
 	]
 	for t in tests:
 		_current = t
@@ -605,3 +605,30 @@ func test_net_roundtrip() -> void:
 	check(NetCodec.parse_address("1.2.3.4:abc") == ["1.2.3.4", 27015], "bad port -> default")
 	check(NetCodec.parse_address("udp://host/") == ["host", 27015], "scheme and slash stripped")
 	check(NetCodec.parse_address("")[0] == "", "empty address")
+
+
+# --- title music ---------------------------------------------------------------------
+
+func test_title_music() -> void:
+	var bars := TitleMusic.song()
+	check(bars.size() == 34, "34 bars (%d)" % bars.size())
+	var ok := true
+	for b in bars:
+		var eighths := 0
+		for tok in String(b["melody"]).split(" ", false):
+			eighths += int(tok.split(":")[1])
+		if eighths != 0 and eighths != 8:
+			ok = false
+			printerr("bar %s melody has %d eighths" % [b["chord"], eighths])
+		TitleMusic.chord(b["chord"])   # parses
+	check(ok, "every melody bar fills 4/4")
+	check(TitleMusic.midi("A4") == 69 and TitleMusic.midi("C#5") == 73 and TitleMusic.midi("Bb4") == 70, "note names")
+	check(TitleMusic.chord("Bbm") == [10, [0, 3, 7]] and TitleMusic.chord("C7") == [0, [0, 4, 7, 10]], "chord names")
+	var s := TitleMusic.render(8, 10)
+	check(s.size() == 2 * TitleMusic.bar_samples(), "two bars rendered")
+	var peak := 0.0
+	var finite := true
+	for x in s:
+		peak = maxf(peak, absf(x))
+		finite = finite and is_finite(x)
+	check(finite and peak > 0.2 and peak <= 0.951, "audible, finite, not clipping (peak %.2f)" % peak)

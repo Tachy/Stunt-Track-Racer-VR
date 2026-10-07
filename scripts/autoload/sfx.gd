@@ -1,11 +1,19 @@
 extends Node
-## One-shot sound effects, synthesised at startup (no audio files needed).
+## One-shot sound effects, synthesised at startup (no audio files needed),
+## and the menu's title music (TitleMusic, rendered in a thread once and
+## then cached in user://).
 
 const RATE := 22050
+const MUSIC_DB := -7.0
 
 var _streams := {}
 var _players: Array[AudioStreamPlayer] = []
 var _next := 0
+var music: AudioStreamWAV
+var _music_player: AudioStreamPlayer
+var _music_thread: Thread
+var _music_wanted := false
+var _music_fade: Tween
 
 
 func _ready() -> void:
@@ -23,6 +31,57 @@ func _ready() -> void:
 	_streams["beep_low"] = _wav(_tone(0.18, 440.0))
 	_streams["drop"] = _wav(_sweep(0.5, 600.0, 200.0))
 	_streams["wreck"] = _wav(_sweep(1.2, 300.0, 40.0))
+	_music_player = AudioStreamPlayer.new()
+	add_child(_music_player)
+	if DisplayServer.get_name() != "headless":
+		_music_thread = Thread.new()
+		_music_thread.start(_render_music)
+
+
+func _exit_tree() -> void:
+	if _music_thread:
+		_music_thread.wait_to_finish()
+
+
+# --- title music -------------------------------------------------------------------
+
+func _render_music() -> void:
+	_music_rendered.call_deferred(TitleMusic.pcm())
+
+
+func _music_rendered(bytes: PackedByteArray) -> void:
+	_music_thread.wait_to_finish()
+	_music_thread = null
+	music = TitleMusic.stream(bytes)
+	print("[Sfx] title music ready (%.0f s loop)" % (bytes.size() / 2.0 / TitleMusic.RATE))
+	if _music_wanted:
+		play_music()
+
+
+## Starts the title music (as soon as it is rendered), unless switched off.
+func play_music() -> void:
+	_music_wanted = true
+	if music == null or not Settings.music or (_music_player.playing and _music_fade == null):
+		return
+	if _music_fade:
+		_music_fade.kill()
+		_music_fade = null
+	if not _music_player.playing:
+		_music_player.stream = music
+		_music_player.play()
+	_music_player.volume_db = MUSIC_DB
+
+
+## Fades the title music out.
+func stop_music(fade := 0.8) -> void:
+	_music_wanted = false
+	if not _music_player.playing or _music_fade:
+		return
+	_music_fade = create_tween()
+	_music_fade.tween_property(_music_player, "volume_db", -50.0, fade)
+	_music_fade.tween_callback(func():
+		_music_player.stop()
+		_music_fade = null)
 
 
 func play(sfx_name: String, volume_db := 0.0, pitch := 1.0) -> void:

@@ -91,6 +91,7 @@ func _ready() -> void:
 	_rng.randomize()
 	autopilot = OS.get_cmdline_user_args().has("--autopilot")
 	online = req.has("online")
+	Sfx.stop_music()
 	def = TrackLibrary.get_def(req["track"])
 	var super_league: bool = req.get("super", false)
 	path = TrackPath.new(def)

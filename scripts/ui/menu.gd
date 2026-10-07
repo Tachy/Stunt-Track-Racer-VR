@@ -74,6 +74,7 @@ func _ready() -> void:
 	Net.failed.connect(_on_net_failed)
 	Net.disconnected.connect(_on_net_lost)
 	XrManager.set_base(base)
+	Sfx.play_music()
 	open(screen_name)
 
 
@@ -249,6 +250,7 @@ func _screen_settings(sc: PixelScreen) -> void:
 		{"label": Lang.t("SPEEDO: ") + ("KMH" if Settings.speed_kmh else "MPH"), "side": _side_units},
 		{"label": Lang.t("SHADOWS: ") + (Lang.t("ON") if Settings.shadows else Lang.t("OFF")), "side": _side_shadows},
 		{"label": Lang.t("VOLUME: %d") % Settings.volume, "side": _side_volume},
+		{"label": Lang.t("MUSIC: ") + (Lang.t("ON") if Settings.music else Lang.t("OFF")), "side": _side_music},
 		{"label": Lang.t("LANGUAGE: %s") % ("DEUTSCH" if Lang.current == "de" else "ENGLISH"), "side": _side_language},
 		{"label": Lang.t("BACK"), "do": _act_settings_back},
 	]
@@ -771,6 +773,14 @@ func _side_shadows(_d: int) -> void:
 
 func _side_units(_d: int) -> void:
 	Settings.speed_kmh = not Settings.speed_kmh
+
+
+func _side_music(_d: int) -> void:
+	Settings.music = not Settings.music
+	if Settings.music:
+		Sfx.play_music()
+	else:
+		Sfx.stop_music(0.3)
 
 
 func _side_volume(d: int) -> void:

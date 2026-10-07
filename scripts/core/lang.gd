@@ -93,6 +93,7 @@ const DE := {
 	"YOU LOSE": "VERLOREN",
 	"YOU WIN!": "SIEG!",
 	"YOUR BEST LAP: ": "DEINE BESTE RUNDE: ",
+	"MUSIC: ": "MUSIK: ",
 	"FIND AN OPPONENT": "GEGNER SUCHEN",
 	"RED": "ROT",
 	"BLUE": "BLAU",

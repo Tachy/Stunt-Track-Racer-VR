@@ -12,6 +12,7 @@ var wheel_range_deg := 900.0
 var max_wheel_angle_deg := 32.0
 var speed_kmh := false
 var volume := 8
+var music := true
 var shadows := true
 ## UI language: "en" (default) or "de".
 var language := "en"
@@ -42,6 +43,7 @@ func load_settings() -> void:
 	max_wheel_angle_deg = cfg.get_value("wheel", "max_wheel_angle_deg", max_wheel_angle_deg)
 	speed_kmh = cfg.get_value("game", "speed_kmh", speed_kmh)
 	volume = cfg.get_value("game", "volume", volume)
+	music = cfg.get_value("game", "music", music)
 	shadows = cfg.get_value("view", "shadows", shadows)
 	language = cfg.get_value("game", "language", language)
 	server_address = cfg.get_value("online", "server", server_address)
@@ -60,6 +62,7 @@ func save_settings() -> void:
 	cfg.set_value("wheel", "max_wheel_angle_deg", max_wheel_angle_deg)
 	cfg.set_value("game", "speed_kmh", speed_kmh)
 	cfg.set_value("game", "volume", volume)
+	cfg.set_value("game", "music", music)
 	cfg.set_value("view", "shadows", shadows)
 	cfg.set_value("game", "language", language)
 	cfg.set_value("online", "server", server_address)
