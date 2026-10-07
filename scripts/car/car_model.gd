@@ -7,8 +7,8 @@ extends Node3D
 ## Origin = suspension mount height, forward = -Z.
 
 ## Wheel mount points (FL, FR, RL, RR) and radii - shared with PlayerCar.
-const WHEEL_POS := [Vector3(-0.98, 0.0, -1.75), Vector3(0.98, 0.0, -1.75),
-		Vector3(-0.98, 0.0, 1.15), Vector3(0.98, 0.0, 1.15)]
+const WHEEL_POS := [Vector3(-1.1, 0.0, -1.75), Vector3(1.1, 0.0, -1.75),
+		Vector3(-1.1, 0.0, 1.15), Vector3(1.1, 0.0, 1.15)]
 const WHEEL_R := [0.42, 0.42, 0.48, 0.48]
 const WHEEL_W := [0.30, 0.30, 0.44, 0.44]
 const WHEEL_RADIUS := 0.42
@@ -50,6 +50,11 @@ var _crack_points: PackedVector2Array
 var _last_crack := -1.0
 var _last_holes := -1
 var _rest := 0.5
+var _outlets: Array = []         # [position, direction] of the 8 exhaust pipes
+var _flames: Array[Node3D] = []
+var _flame_on := false
+static var _flame_mesh: ArrayMesh
+static var _flame_material: StandardMaterial3D
 static var _unit_bar: ArrayMesh
 static var _unit_coil: ArrayMesh
 
@@ -64,6 +69,7 @@ func build(body_color: Color, cockpit: bool) -> CarModel:
 	add_child(body)
 
 	_build_wheels()
+	_build_flames()
 	if cockpit:
 		_build_steering_wheel()
 		dashboard_anchor = Node3D.new()
@@ -104,14 +110,17 @@ func _build_engine(kit: MeshKit) -> void:
 	# V cylinder heads
 	for sx in [-1.0, 1.0]:
 		kit.box(Vector3(0.2 * sx, 0.24, z0), Vector3(0.2, 0.26, 1.0), HEADS, Basis(Vector3.FORWARD, deg_to_rad(30.0) * sx))
-		# exhaust headers: four pipes per side sweeping out and back
+		# exhaust: four open pipes per side (eight in all), sweeping out of the
+		# heads and ending in short stacks that point out and back
 		for k in 4:
 			var z := z0 - 0.38 + k * 0.25
 			var a := Vector3(0.33 * sx, 0.24, z)
-			var b := Vector3(0.58 * sx, 0.08, z + 0.05)
+			var b := Vector3(0.56 * sx, 0.12, z + 0.04)
+			var c := b + Vector3(0.12 * sx, 0.05, 0.16)
 			kit.bar(a, b, 0.05, EXHAUST)
-			kit.bar(b, Vector3(0.62 * sx, -0.04, 0.15), 0.05, EXHAUST)
-		kit.bar(Vector3(0.62 * sx, -0.04, 0.15), Vector3(0.66 * sx, -0.08, 1.9), 0.09, EXHAUST.darkened(0.2))
+			kit.bar(b, c, 0.055, EXHAUST)
+			kit.cylinder(c, (c - b).normalized(), 0.034, 0.02, 8, EXHAUST.darkened(0.25), Palette.BLACK)
+			_outlets.append([c, (c - b).normalized()])
 	# supercharger + scoop
 	kit.box(Vector3(0, 0.42, z0), Vector3(0.28, 0.16, 0.6), CHROME)
 	kit.box(Vector3(0, 0.55, z0 - 0.08), Vector3(0.3, 0.1, 0.3), Palette.BLACK)
@@ -148,6 +157,55 @@ func _build_cabin(kit: MeshKit, body_color: Color, cockpit: bool) -> void:
 	if not cockpit:
 		kit.box(Vector3(0, 0.96, 1.0), Vector3(0.3, 0.3, 0.32), Palette.WHITE)
 		kit.box(Vector3(0, 0.96, 0.85), Vector3(0.26, 0.1, 0.04), Palette.BLACK)
+
+
+# --- boost flames ---------------------------------------------------------------------
+
+## A flame cone along +Y: yellow core inside an orange-red mantle.
+static func _flame() -> ArrayMesh:
+	if _flame_mesh == null:
+		var k := MeshKit.new()
+		k.peak(Vector3.ZERO, 0.055, 0.42, 6, Color(1.0, 0.35, 0.05, 0.75))
+		k.peak(Vector3(0, 0.01, 0), 0.03, 0.26, 6, Color(1.0, 0.9, 0.35, 0.95))
+		_flame_mesh = k.build()
+		_flame_material = StandardMaterial3D.new()
+		_flame_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_flame_material.vertex_color_use_as_albedo = true
+		_flame_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_flame_material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		_flame_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return _flame_mesh
+
+
+func _build_flames() -> void:
+	var mesh := _flame()
+	for o in _outlets:
+		var pos: Vector3 = o[0]
+		var dir: Vector3 = o[1]
+		var f := Node3D.new()
+		f.position = pos
+		var x := dir.cross(Vector3.FORWARD).normalized()
+		f.basis = Basis(x, dir, x.cross(dir))   # +Y along the pipe
+		var mi := MeshInstance3D.new()
+		mi.mesh = mesh
+		mi.material_override = _flame_material
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		f.add_child(mi)
+		f.visible = false
+		add_child(f)
+		_flames.append(f)
+
+
+## Flames out of all eight pipes while boosting, flickering every frame.
+func set_boost(on: bool) -> void:
+	if not on and not _flame_on:
+		return
+	_flame_on = on
+	for f in _flames:
+		f.visible = on
+		if on:
+			var w := randf_range(0.8, 1.15)
+			f.scale = Vector3(w, randf_range(0.55, 1.35), w)
 
 
 # --- wheels & suspension ------------------------------------------------------------

@@ -11,6 +11,11 @@ const WHEELS := CarModel.WHEEL_POS
 const WHEEL_R := CarModel.WHEEL_R
 const MASK_ENV := TrackNode.LAYER_ROAD | TrackNode.LAYER_WALL | TrackNode.LAYER_GROUND
 const LANDING_COOLDOWN := 0.25
+## Bottom of the tyre hitboxes above the wheel centre (m).
+const WHEEL_BOX_LIFT := 0.15
+## Traction control/ABS: share of the friction circle kept for the side
+## force (1 = all of it; slightly less keeps some braking while sliding).
+const TC_LATERAL_RESERVE := 0.9
 const MAX_SANE_SPEED := 120.0   # m/s
 const MAX_SPIN := 12.0          # rad/s
 
@@ -32,6 +37,7 @@ var on_ground_plane := false
 var airtime := 0.0
 ## Fell off the road: no flight alignment, the car tumbles as it comes.
 var off_road := false
+var _wheel_boxes: Array[CollisionShape3D] = []
 var engine_load := 0.0
 
 var wheel_comp := PackedFloat32Array([0, 0, 0, 0])
@@ -92,6 +98,30 @@ func setup(t: CarTuning, holes: int) -> void:
 	eng.shape = ebox
 	eng.position = Vector3(0, 0.4, -0.95)
 	add_child(eng)
+	# wheels: upper part of each tyre (from WHEEL_BOX_LIFT above the wheel
+	# centre to its top), so cars and walls hit the tyres. The boxes move with
+	# the suspension (_place_wheel_box), so they stay r + lift above the road
+	# under their wheel; the road itself is touched only by the rays.
+	for w in 4:
+		var r: float = WHEEL_R[w]
+		var wheel := CollisionShape3D.new()
+		var wbox := BoxShape3D.new()
+		wbox.size = Vector3(CarModel.WHEEL_W[w], r - WHEEL_BOX_LIFT, r * 1.8)
+		wheel.shape = wbox
+		add_child(wheel)
+		_wheel_boxes.append(wheel)
+		_place_wheel_box(w, t.suspension_rest - (CarModel.RIDE_HEIGHT - r))
+
+
+## Wheel hitbox w for the wheel centre (rest - comp) below its mount. Only
+## moved when the wheel travelled > 2 cm (a moved shape rebuilds the body).
+func _place_wheel_box(w: int, comp: float) -> void:
+	var r: float = WHEEL_R[w]
+	var p: Vector3 = WHEELS[w]
+	var y := -(tuning.suspension_rest - comp) + (r + WHEEL_BOX_LIFT) * 0.5
+	var box: CollisionShape3D = _wheel_boxes[w]
+	if absf(box.position.y - y) > 0.02 or box.position.x != p.x:
+		box.position = Vector3(p.x, y, p.z)
 
 
 func teleport(xform: Transform3D) -> void:
@@ -112,6 +142,11 @@ func hold(on: bool) -> void:
 	freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
 	freeze = on
 	_skip_impact = 3
+	if not on:
+		# dropped from rest: a held (kinematic) car that was moved picks up
+		# the implied velocity of the move, which must not carry over
+		linear_velocity = Vector3.ZERO
+		angular_velocity = Vector3.ZERO
 
 
 func is_wrecked() -> bool:
@@ -200,6 +235,7 @@ func _physics_process(dt: float) -> void:
 		if hit.is_empty():
 			wheel_comp[w] = 0.0
 			wheel_contact[w] = false
+			_place_wheel_box(w, 0.0)
 			var om := wheel_omega[w] * maxf(0.0, 1.0 - 0.4 * dt)
 			if w >= 2:
 				om += (throttle * tuning.engine_force * 0.0004 - brk * 60.0 * signf(om)) * dt
@@ -223,6 +259,7 @@ func _physics_process(dt: float) -> void:
 			touchdown_normal = normal
 		wheel_comp[w] = comp
 		wheel_contact[w] = true
+		_place_wheel_box(w, comp)
 
 		var damp := tuning.damping if comp_vel > 0.0 else tuning.damping_rebound
 		var fs := tuning.spring * comp + damp * comp_vel
@@ -241,14 +278,21 @@ func _physics_process(dt: float) -> void:
 		var v_long := pv.dot(wf)
 		var v_lat := pv.dot(wr)
 		var load := minf(fs, max_load)
-		var f_lat := -v_lat * tuning.cornering_stiffness
+		# side force from the slip angle (not the sideways speed), so the
+		# tyre does not get stiffer the faster the car goes
+		var c_alpha := tuning.cornering_stiffness_front if w < 2 else tuning.cornering_stiffness_rear
+		var f_lat := -atan2(v_lat, maxf(absf(v_long), tuning.slip_min_speed)) * c_alpha
+		var limit := tuning.grip * load
 		var f_long := -v_long * 25.0
 		if w >= 2 and rear_contacts > 0:
 			f_long += drive / rear_contacts
 		if brk > 0.0:
 			f_long -= clampf(v_long * 2.0, -1.0, 1.0) * tuning.brake_force * brk * 0.25
+		if tuning.traction_control and limit > 0.0:
+			var lat_share := minf(absf(f_lat) / limit, 1.0)
+			var avail := limit * sqrt(1.0 - TC_LATERAL_RESERVE * lat_share * lat_share)
+			f_long = clampf(f_long, -avail, avail)
 		var f := Vector2(f_long, f_lat)
-		var limit := tuning.grip * load
 		if f.length() > limit:
 			f = f * (limit / f.length())
 		var f_tyre := wf * f.x + wr * f.y

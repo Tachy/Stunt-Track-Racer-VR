@@ -11,6 +11,12 @@ const LAPS := 3
 const START_S := 8.0
 const START_LAT := 2.4
 const HOLD_HEIGHT := 1.5
+## Two cars on cranes closer than this (m along the track) are set down side
+## by side: symmetric at +-CRANE_SIDE_LAT, or CRANE_BESIDE next to a held car.
+const CRANE_NEAR := 15.0
+const CRANE_SIDE_LAT := 1.6
+const CRANE_BESIDE := 3.2
+const CRANE_MAX_LAT := 3.4
 const END_DELAY := 4.5
 const AI_CRANE_DELAY := 1.2
 const AI_DROP_DELAY := 1.2
@@ -256,7 +262,14 @@ func _update_opponent(dt: float) -> void:
 			if opp_state_time > AI_CRANE_DELAY:
 				var rs := path.recovery_s(opp_track.s)
 				opp_track.move_to(rs)
-				var xf := _hold_transform(rs, 0.0, HOLD_HEIGHT)
+				var lat := 0.0
+				if car.freeze and absf(path.delta_s(ptrack.s, rs)) < CRANE_NEAR:
+					# the player hangs on the crane here: set down beside it (the
+					# player's view is not moved)
+					var plat := ptrack.lateral()
+					var side := -signf(plat) if absf(plat) > 0.1 else 1.0
+					lat = clampf(plat + side * CRANE_BESIDE, -CRANE_MAX_LAT, CRANE_MAX_LAT)
+				var xf := _hold_transform(rs, lat, HOLD_HEIGHT)
 				opp_car.teleport(xf)
 				opp_car.hold(true)
 				opp_crane.hold(xf)
@@ -271,6 +284,11 @@ func _update_opponent(dt: float) -> void:
 				opp_state_time = 0.0
 		"wrecked":
 			opp_car.input = {"steer": 0.0, "throttle": 0.0, "brake": 1.0, "boost": false}
+
+
+## The opponent hangs on its crane close to s.
+func _opp_held_near(s: float) -> bool:
+	return opp_car != null and opp_car.freeze and absf(path.delta_s(opp_track.s, s)) < CRANE_NEAR
 
 
 func _drop_start() -> void:
@@ -301,11 +319,22 @@ func _lap_completed() -> void:
 func _crane_reposition() -> void:
 	var rs := path.recovery_s(ptrack.s)
 	ptrack.move_to(rs)
-	var xf := _hold_transform(rs, 0.0, HOLD_HEIGHT)
+	var lat := 0.0
+	var opp_beside := _opp_held_near(rs)
+	if opp_beside:
+		# both on the crane at the same spot: one left, one right (the
+		# opponent is moved, the player is placed during the fade)
+		lat = (-signf(opp_track.lateral()) if absf(opp_track.lateral()) > 0.1 else -1.0) * CRANE_SIDE_LAT
+	var xf := _hold_transform(rs, lat, HOLD_HEIGHT)
 	car.teleport(xf)
 	car.hold(true)
 	crane.hold(xf)
 	_held_xf = xf
+	if opp_beside:
+		var oxf := _hold_transform(opp_track.s, -lat, HOLD_HEIGHT)
+		opp_car.teleport(oxf)
+		opp_car.hold(true)
+		opp_crane.hold(oxf)
 	Sfx.play("clank")
 	state = "craned"
 	state_time = 0.0
@@ -414,6 +443,7 @@ func _process(delta: float) -> void:
 		wheel_deg = float(car.input["steer"]) * Settings.wheel_range_deg * 0.5
 	car_model.set_steering_wheel_deg(wheel_deg)
 	car_model.set_damage(car.damage.crack, car.damage.holes)
+	car_model.set_boost(car.boosting)
 
 	var data := {
 		"lap": mini(ptrack.laps_done() + 1, LAPS), "laps": LAPS,
@@ -424,6 +454,7 @@ func _process(delta: float) -> void:
 	if opp_car:
 		data["gap"] = ptrack.progress - opp_track.progress
 		opp_model.update_wheels(opp_car.wheel_comp, opp_car.steer_angle, opp_car.wheel_spin, opp_car.tuning.suspension_rest, delta)
+		opp_model.set_boost(opp_car.boosting)
 	dashboard.set_data(data)
 
 	var airborne := car.grounded == 0

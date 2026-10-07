@@ -13,6 +13,8 @@ const G := 9.81
 const SPAN := 6
 ## Acceleration assumed when planning the run-up to a jump (m/s^2).
 const ACCEL_PLAN := 3.0
+## Loop entry speed cap relative to loop_speed().
+const LOOP_CAP := 1.04
 
 
 static func compute(path: TrackPath, super_league := false) -> PackedFloat32Array:
@@ -22,7 +24,10 @@ static func compute(path: TrackPath, super_league := false) -> PackedFloat32Arra
 	v.resize(n)
 	for i in n:
 		if _near_loop(path, i):
-			v[i] = vmax       # loops are handled by floors()
+			# floors() give the minimum; cap just above it: faster only
+			# crushes the suspension into the bump stop (> 8 g) and the
+			# chassis scrapes through the loop
+			v[i] = minf(vmax, loop_speed(_loop_radius(path, i)) * LOOP_CAP)
 			continue
 		var a := path.forward[(i - SPAN + n) % n]
 		var b := path.forward[(i + SPAN) % n]
@@ -91,7 +96,7 @@ static func floors(path: TrackPath, super_league := false) -> PackedFloat32Array
 			continue
 		var r: float = p["radius"]
 		var v_top := sqrt(1.6 * G * r)
-		var req := minf(sqrt(v_top * v_top + 4.0 * G * r) * 1.12, vmax)
+		var req := minf(loop_speed(r), vmax)
 		var k: int = p["i0"]
 		var vv := req
 		for step in 600:
@@ -109,6 +114,20 @@ static func floors(path: TrackPath, super_league := false) -> PackedFloat32Array
 				var k := (i - step + n) % n
 				f[k] = maxf(f[k], 30.0)
 	return f
+
+
+## Entry speed for a loop of radius r: enough to keep pressing on the road
+## at the top (v_top^2 = 1.6 g r), plus 12 % margin.
+static func loop_speed(r: float) -> float:
+	return sqrt(5.6 * G * r) * 1.12
+
+
+static func _loop_radius(path: TrackPath, i: int) -> float:
+	for k in range(-SPAN - 1, SPAN + 2):
+		var p: Dictionary = path.pieces[path.piece_of[(i + k + path.n) % path.n]]
+		if p["type"] == "O":
+			return float(p["radius"])
+	return TrackPath.LOOP_RADIUS
 
 
 static func _near_loop(path: TrackPath, i: int) -> bool:

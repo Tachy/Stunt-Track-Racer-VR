@@ -11,7 +11,7 @@ extends RefCounted
 
 const WHEELBASE := 2.9
 ## Lateral centre distance of two cars side by side (car width ~2.4 m).
-const SIDE_GAP := 2.6
+const SIDE_GAP := 3.0       # car width 2.64 m + margin
 const MAX_LAT := 3.4
 
 var car: PlayerCar
@@ -26,11 +26,12 @@ var race_time := 0.0          # set by the race; no pushing right after the star
 
 var lat := 0.0
 var lat_target := 0.0
-var _last_lat := 0.0
 
 const LANE_GAIN := 0.018      # rad per metre off the lane
 const LANE_DAMP := 0.035      # rad per (m/s) of sideways drift
 const COMMIT_AHEAD := 70      # samples: before loops/jumps keep to the centre
+const COMMIT_SIDE_LAT := 2.0  # m: side by side in a loop/jump, each on its half
+const LOOP_LOOK := 5.0        # m: pure pursuit look-ahead inside a loop
 
 
 func _init(t: CarTracker, prof: PackedFloat32Array, flo: PackedFloat32Array, driver_skill: float, driver_flags: Array) -> void:
@@ -71,11 +72,20 @@ func compute(dt: float, other: CarTracker) -> Dictionary:
 
 	_choose_lane(gap, other_lat, other != null)
 	if _committed(look_i):
+		# loops/jumps: straight down the middle - unless the rival is close,
+		# then each car keeps to its own half (no lane changes, no contact)
 		lat_target = 0.0
+		if other and absf(gap) < 20.0:
+			var side := signf(lat - other_lat)
+			if side == 0.0:
+				side = 1.0 if gap >= 0.0 else -1.0
+			lat_target = side * COMMIT_SIDE_LAT
 	lat = move_toward(lat, lat_target, (2.2 if absf(gap) > 6.0 or other == null else 1.0) * dt)
 
 	# pure pursuit steering towards a point ahead on the chosen lane
 	var look := 10.0 + 0.3 * maxf(v, 0.0)
+	if path.loop_mask[tracker.idx] == 1:
+		look = LOOP_LOOK   # 20 m would be a quarter of the loop: target above/behind the car
 	var ts := s + look
 	var tp := path.center_at_s(ts) + path.right_flat[path.index_at_s(ts)] * lat
 	var local := car.global_transform.affine_inverse() * tp
@@ -84,8 +94,13 @@ func compute(dt: float, other: CarTracker) -> Dictionary:
 	# pure pursuit cuts corners: pull back towards the chosen lane, and damp
 	# the drift across the road
 	var lat_now := tracker.lateral()
-	var lat_rate := (lat_now - _last_lat) / maxf(dt, 1e-3)
-	_last_lat = lat_now
+	# sideways drift from the velocity (not from differencing lateral(), which
+	# jumps whenever the nearest sample changes, e.g. in the shifted loops),
+	# minus the sideways run of the path itself
+	var rf := path.right_flat[tracker.idx]
+	var pf := path.forward[tracker.idx]
+	var vel := car.linear_velocity
+	var lat_rate := vel.dot(rf) - vel.dot(pf) * pf.dot(rf)
 	wheel_angle += LANE_GAIN * (lat - lat_now) - LANE_DAMP * lat_rate
 	var steer := clampf(wheel_angle / deg_to_rad(car.tuning.max_steer_deg), -1.0, 1.0)
 

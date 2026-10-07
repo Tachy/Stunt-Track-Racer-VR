@@ -20,7 +20,9 @@ var last_lap := -1.0
 var off_timer := 0.0
 var flip_timer := 0.0
 var stuck_timer := 0.0
+var hang_timer := 0.0
 const STUCK_TIME := 2.5
+const HANG_TIME := 2.0     # no wheel on the ground and not moving: wedged
 
 
 func _init(p: TrackPath, c: PlayerCar, start_s: float) -> void:
@@ -87,10 +89,16 @@ func check_off(dt: float) -> bool:
 		stuck_timer += dt
 	else:
 		stuck_timer = 0.0
-	if off_timer > OFF_TRACK_TIME or flip_timer > FLIP_TIME or stuck_timer > STUCK_TIME:
+	# wedged somewhere with no wheel on the ground and not moving
+	if car.grounded == 0 and car.linear_velocity.length() < 1.0:
+		hang_timer += dt
+	else:
+		hang_timer = 0.0
+	if off_timer > OFF_TRACK_TIME or flip_timer > FLIP_TIME or stuck_timer > STUCK_TIME or hang_timer > HANG_TIME:
 		off_timer = 0.0
 		flip_timer = 0.0
 		stuck_timer = 0.0
+		hang_timer = 0.0
 		return true
 	return false
 
@@ -103,3 +111,4 @@ func move_to(rs: float) -> void:
 	off_timer = 0.0
 	flip_timer = 0.0
 	stuck_timer = 0.0
+	hang_timer = 0.0

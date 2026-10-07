@@ -13,7 +13,7 @@ func _init() -> void:
 		"test_recenter", "test_tracks_closed", "test_track_heights", "test_track_mesh",
 		"test_lap_tracker", "test_recovery", "test_bridge", "test_damage", "test_league",
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
-		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view",
+		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_league_track_features", "test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
 	]
 	for t in tests:
@@ -445,6 +445,42 @@ func test_shifted_loop_view() -> void:
 		check(near(best["down"][1], 40.0, 1.0), "loop %d: nose down -> view 40 above nose (got %.1f)" % [loops, best["down"][1]])
 		check(_view_overspeed(cars) < 0.1, "loop %d: no jumps (%.2f)" % [loops, _view_overspeed(cars)])
 	check(loops == 2, "two loops checked")
+
+
+func test_crane_chains() -> void:
+	var crane := Crane.new()
+	var xf := Transform3D(Basis(Vector3.UP, 0.7), Vector3(10, 5, -20))
+	crane.hold(xf)
+	var hook := xf * Vector3(0, Crane.HOOK_HEIGHT, 0)
+	# held: taut and straight from the hook to the car corners
+	for c in crane._chains.size():
+		var pts: PackedVector3Array = crane._chains[c]["pts"]
+		check(pts[0].is_equal_approx(hook), "chain %d starts at the hook" % c)
+		check(pts[pts.size() - 1].is_equal_approx(xf * (Crane.CORNERS[c] as Vector3)), "chain %d ends at the car corner" % c)
+	# released (hook kept in place here): the chains swing down and settle
+	crane._free = true
+	var max_stretch := 0.0
+	var swing_late := 0.0
+	for step in 1200:   # 10 s at 120 Hz
+		var before: Vector3 = crane._chains[0]["pts"][crane._chains[0]["pts"].size() - 1]
+		crane._simulate(1.0 / 120.0)
+		var after: Vector3 = crane._chains[0]["pts"][crane._chains[0]["pts"].size() - 1]
+		if step > 1080:
+			swing_late = maxf(swing_late, before.distance_to(after) * 120.0)
+	for c in crane._chains.size():
+		var ch: Dictionary = crane._chains[c]
+		var pts: PackedVector3Array = ch["pts"]
+		var seg: float = ch["seg"]
+		for i in pts.size() - 1:
+			max_stretch = maxf(max_stretch, absf(pts[i].distance_to(pts[i + 1]) - seg) / seg)
+		var end := pts[pts.size() - 1]
+		check(not is_nan(end.x), "chain %d: no NaN" % c)
+		var length := seg * (pts.size() - 1)
+		check(Vector2(end.x - hook.x, end.z - hook.z).length() < 0.15 * length, "chain %d hangs below the hook (offset %.2f)" % [c, Vector2(end.x - hook.x, end.z - hook.z).length()])
+		check(end.y < hook.y - 0.9 * length, "chain %d hangs straight down" % c)
+	check(max_stretch < 0.03, "chain links keep their length (max stretch %.1f %%)" % (max_stretch * 100.0))
+	check(swing_late < 0.3, "swinging dies down (end speed %.2f m/s after 9 s)" % swing_late)
+	crane.free()
 
 
 func test_league_track_features() -> void:

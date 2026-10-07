@@ -25,7 +25,17 @@ extends Resource
 @export var anti_roll := 7000.0
 
 @export var grip := 1.35                 # friction coefficient
-@export var cornering_stiffness := 11000.0  # N per m/s lateral slip
+## Lateral tyre force per rad of slip angle (real tyres: ~60-90 kN/rad). The
+## wide rear tyres are stiffer, which keeps the car stable (understeer).
+@export var cornering_stiffness_front := 60000.0
+@export var cornering_stiffness_rear := 90000.0
+## Below this speed the slip angle is taken against this speed instead, so a
+## (nearly) standing car still gets a finite, stable lateral force.
+@export var slip_min_speed := 6.4
+## Traction control + ABS: within the friction circle the tyre's side force
+## comes first; drive and brake only get what is left, so the rear does not
+## break away under full throttle and the car still steers while braking.
+@export var traction_control := true
 @export var max_steer_deg := 32.0
 @export var high_speed_steer_deg := 7.0
 @export var steer_falloff_speed := 50.0
