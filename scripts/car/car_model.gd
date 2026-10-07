@@ -40,8 +40,10 @@ const FRAME_X := 0.32
 ## the body). Diameters in m.
 const DAMPER_BODY_D := 0.064
 const DAMPER_ROD_D := 0.038
-## Upper mount of the front coil-overs, out on an outrigger from the tower.
-const FRONT_SPRING_TOP_X := 0.62
+## Coil-overs lean in at the top by this much (m): their upper mounts sit on
+## outriggers from the towers, front and rear alike.
+const SPRING_LEAN_X := 0.1275
+const SPRING_TOP_Y := 0.3
 const METAL := Color("#555a60")
 const CHROME := Color("#c8c8c8")
 const HEADS := Color("#8a8f96")
@@ -114,11 +116,12 @@ func _build_chassis(kit: MeshKit, body_color: Color) -> void:
 	for z in [-1.75, 1.15]:
 		for sx in [-1.0, 1.0]:
 			kit.box(Vector3(0.36 * sx, 0.02, z), Vector3(0.1, 0.5, 0.12), METAL)
-	# front: outriggers from the tower tops carry the upper spring mounts
-	for sx in [-1.0, 1.0]:
-		var z := float(WHEEL_POS[0].z) + 0.08
-		kit.bar(Vector3(0.36 * sx, 0.25, z), Vector3((FRONT_SPRING_TOP_X + 0.03) * sx, 0.31, z), 0.055, METAL)
-		kit.bar(Vector3(0.36 * sx, 0.12, z), Vector3((FRONT_SPRING_TOP_X - 0.05) * sx, 0.29, z), 0.035, METAL)   # brace
+	# outriggers from the tower tops carry the upper spring mounts
+	for w in 4:
+		var top := spring_top(w)
+		var sx := signf(top.x)
+		kit.bar(Vector3(0.36 * sx, 0.25, top.z), top + Vector3(0.03 * sx, 0.01, 0), 0.055, METAL)
+		kit.bar(Vector3(0.36 * sx, 0.12, top.z), top + Vector3(-0.05 * sx, -0.01, 0), 0.035, METAL)   # brace
 
 
 func _build_engine(kit: MeshKit) -> void:
@@ -345,6 +348,16 @@ func _build_wheels() -> void:
 		})
 
 
+## Upper coil-over mount of wheel w: SPRING_LEAN_X inside the point where
+## the spring meets the lower arm (3/4 out along it), so all four lean alike.
+static func spring_top(w: int) -> Vector3:
+	var pos: Vector3 = WHEEL_POS[w]
+	var sx := signf(pos.x)
+	var hub_x := absf(pos.x) - float(WHEEL_W[w]) * 0.5 - 0.06
+	var bottom_x := lerpf(FRAME_X, hub_x, 0.75)
+	return Vector3((bottom_x - SPRING_LEAN_X) * sx, SPRING_TOP_Y, pos.z + 0.08)
+
+
 ## comp = suspension compression per wheel (m), rest = rest length.
 ## dt > 0 smooths extension so wheels drop visibly instead of snapping.
 func update_wheels(comp: PackedFloat32Array, steer: float, spin: PackedFloat32Array, rest: float, dt := 0.0) -> void:
@@ -372,11 +385,8 @@ func update_wheels(comp: PackedFloat32Array, steer: float, spin: PackedFloat32Ar
 		var upper_out := Vector3(hub_x * sx, y + 0.14, pos.z)
 		_place(lk["lower"], lower_in, lower_out)
 		_place(lk["upper"], upper_in, upper_out)
-		# coil-over from the tower top to the lower arm; at the front from the
-		# end of an outrigger on the tower, so it stands more upright
-		var top := Vector3(0.4 * sx, 0.28, pos.z + 0.08)
-		if w < 2:
-			top = Vector3(FRONT_SPRING_TOP_X * sx, 0.3, pos.z + 0.08)
+		# coil-over from the end of the tower outrigger to the lower arm
+		var top := spring_top(w)
 		var bottom := lower_in.lerp(lower_out, 0.75) + Vector3(0, 0.05, 0.08)
 		_place(lk["spring"], top, bottom)
 		# telescopic damper: the body stands on the lower arm, the piston rod

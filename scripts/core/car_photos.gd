@@ -10,6 +10,7 @@ const SHOTS := [
 	["engine", Vector3(-1.5, 1.1, -2.4), Vector3(0, 0.35, -0.95)],
 	["rear", Vector3(2.4, 0.3, 2.5), Vector3(0.8, -0.1, 1.15)],
 	["exhaust", Vector3(-0.95, 0.75, -0.2), Vector3(-0.3, 0.35, -0.95)],
+	["rear_spring", Vector3(1.9, 0.45, 2.2), Vector3(0.6, 0.0, 1.2)],
 ]
 
 

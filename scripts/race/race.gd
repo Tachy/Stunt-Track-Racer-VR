@@ -114,6 +114,9 @@ func _ready() -> void:
 	car.add_child(car_model)
 	dashboard = Dashboard.new()
 	car_model.dashboard_anchor.add_child(dashboard)
+	if XrManager.xr_active:
+		# VR: half its height higher, in its own (tilted) plane
+		dashboard.position.y += Dashboard.SIZE.y * 0.5
 	banner = Panel3D.new().setup(Vector2i(512, 96), Vector2(0.8, 0.15))
 	banner.position = Vector3(0, 1.05, -1.7)
 	banner.visible = false
