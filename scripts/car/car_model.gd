@@ -35,6 +35,11 @@ const SCREEN_RAKE_DEG := 20.0
 const PILLAR_FOOT_Y := 0.4
 
 const FRAME_X := 0.32
+## Damper inside the coil spring: body (on the lower arm, reaching half way
+## up the spring at rest) and piston rod (from the top mount, sliding into
+## the body). Diameters in m.
+const DAMPER_BODY_D := 0.064
+const DAMPER_ROD_D := 0.038
 ## Upper mount of the front coil-overs, out on an outrigger from the tower.
 const FRONT_SPRING_TOP_X := 0.62
 const METAL := Color("#555a60")
@@ -48,7 +53,7 @@ var steering_pivot: Node3D
 var steering_rot: Node3D
 var dashboard_anchor: Node3D
 
-var _links: Array = []          # per wheel: {upper, lower, spring, damper}
+var _links: Array = []          # per wheel: {upper, lower, spring, damper_body, damper_rod}
 var _shown_comp := PackedFloat32Array([0, 0, 0, 0])
 var _crack_mi: MeshInstance3D
 var _holes_mi: MeshInstance3D
@@ -64,6 +69,7 @@ static var _flame_material: StandardMaterial3D
 static var _unit_bar: ArrayMesh
 static var _unit_coil: ArrayMesh
 static var _unit_rod: ArrayMesh
+static var _unit_damper: ArrayMesh
 
 
 func build(body_color: Color, cockpit: bool) -> CarModel:
@@ -260,13 +266,24 @@ static func _coil_mesh() -> ArrayMesh:
 	return _unit_coil
 
 
-## Round rod of unit length and diameter along -Z (damper).
+## Round rod of unit length and diameter along -Z (damper piston rod).
 static func _rod_mesh() -> ArrayMesh:
 	if _unit_rod == null:
 		var k := MeshKit.new()
 		k.cylinder(Vector3(0, 0, -0.5), Vector3.BACK, 0.5, 1.0, 10, CHROME)
 		_unit_rod = k.build()
 	return _unit_rod
+
+
+## Damper body of unit length and diameter along -Z, with a collar where
+## the piston rod comes out (at -Z).
+static func _damper_mesh() -> ArrayMesh:
+	if _unit_damper == null:
+		var k := MeshKit.new()
+		k.cylinder(Vector3(0, 0, -0.47), Vector3.BACK, 0.5, 0.94, 14, METAL.darkened(0.15))
+		k.cylinder(Vector3(0, 0, -0.97), Vector3.BACK, 0.42, 0.06, 14, Palette.BLACK)
+		_unit_damper = k.build()
+	return _unit_damper
 
 
 func _link(mesh: ArrayMesh, thickness: float) -> MeshInstance3D:
@@ -323,7 +340,8 @@ func _build_wheels() -> void:
 			"upper": _link(_bar_mesh(), 0.045),
 			"lower": _link(_bar_mesh(), 0.055),
 			"spring": _link(_coil_mesh(), 1.0),
-			"damper": _link(_rod_mesh(), 0.024),
+			"damper_body": _link(_damper_mesh(), DAMPER_BODY_D),
+			"damper_rod": _link(_rod_mesh(), DAMPER_ROD_D),
 		})
 
 
@@ -361,7 +379,15 @@ func update_wheels(comp: PackedFloat32Array, steer: float, spin: PackedFloat32Ar
 			top = Vector3(FRONT_SPRING_TOP_X * sx, 0.3, pos.z + 0.08)
 		var bottom := lower_in.lerp(lower_out, 0.75) + Vector3(0, 0.05, 0.08)
 		_place(lk["spring"], top, bottom)
-		_place(lk["damper"], top, bottom)
+		# telescopic damper: the body stands on the lower arm, the piston rod
+		# hangs from the top mount and slides in and out of it
+		# body length fixed at the first (resting) placement: half the spring
+		if not lk.has("body_len"):
+			lk["body_len"] = 0.5 * top.distance_to(bottom)
+		var body_len: float = lk["body_len"]
+		var axis := (top - bottom).normalized()
+		_place(lk["damper_body"], bottom, bottom + axis * body_len)
+		_place(lk["damper_rod"], top, bottom + axis * (body_len * 0.4))
 
 
 func _build_steering_wheel() -> void:
