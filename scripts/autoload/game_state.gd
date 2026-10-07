@@ -43,6 +43,12 @@ func practice_request(track: String, with_opponent: bool) -> Dictionary:
 		"super": league != null and league.super_league, "holes": 0}
 
 
+## A race against the other online player (Net.matched info).
+func online_request(info: Dictionary) -> Dictionary:
+	return {"track": info["track"], "opponent": -1, "league": false, "super": info["super"], "holes": 0,
+		"online": {"slot": info["slot"], "opp_name": info["opp_name"], "opp_color": info["opp_color"]}}
+
+
 ## result: {won, player_fastest, wrecked, holes, player_best, opp_best, ...}
 func apply_result(result: Dictionary) -> void:
 	last_result = result

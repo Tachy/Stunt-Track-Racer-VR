@@ -16,6 +16,8 @@ extends Node
 ##   --fps               log frame rate every second
 ##   --joydump           print joypad axes/buttons twice a second
 ##   --lang=<en|de>      UI language for this run (not saved)
+##   --online=<host:port> quick match on that server (with --track=<id>)
+##   --name=<name>       online player name for this run
 
 var current: Node
 var _args := {}
@@ -37,7 +39,9 @@ func _ready() -> void:
 		print("[Main] window %s, 3D render scale %.2f -> %s px" % [DisplayServer.window_get_size(), vp.scaling_3d_scale, Vector2(DisplayServer.window_get_size()) * vp.scaling_3d_scale])
 	if _args.has("vr-bench"):
 		add_child(VrBench.new())
-	if _args.has("track"):
+	if _args.has("online"):
+		_start_online()
+	elif _args.has("track"):
 		var req := {"track": _args["track"], "opponent": int(_args.get("opponent", "-1")),
 			"league": false, "super": _args.has("super"), "holes": 0}
 		_start_race(req)
@@ -63,6 +67,18 @@ func _process(delta: float) -> void:
 		XrManager.save_screenshot("user://screenshots/auto.png")
 	if _args.has("quit-after") and _elapsed >= float(_args["quit-after"]):
 		_report_and_quit()
+
+
+## Command line: connect, quick match, race (testing without the menu).
+func _start_online() -> void:
+	var hp: PackedStringArray = _args["online"].split(":")
+	var port := int(hp[1]) if hp.size() > 1 else Settings.server_port
+	var nm: String = _args.get("name", Settings.player_name)
+	Net.matched.connect(func(info: Dictionary): _start_race(GameState.online_request(info)))
+	Net.welcomed.connect(func(): Net.join(NetCodec.JOIN_QUICK, "", _args.get("track", "first_flight"), _args.has("super")), CONNECT_ONE_SHOT)
+	if not Net.connect_to(hp[0], port, nm, Settings.player_color):
+		push_error("[Main] cannot connect to %s" % _args["online"])
+		get_tree().quit(1)
 
 
 func _report_and_quit() -> void:
@@ -98,7 +114,7 @@ func _start_race(req: Dictionary) -> void:
 
 func _on_race_finished(result: Dictionary) -> void:
 	print("[Main] race finished: ", result)
-	if _args.has("track"):
+	if _args.has("track") or _args.has("online"):
 		_report_and_quit()
 		return
 	GameState.apply_result(result)

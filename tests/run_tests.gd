@@ -15,6 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_league_track_features", "test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
+		"test_net_golden", "test_net_roundtrip",
 	]
 	for t in tests:
 		_current = t
@@ -546,3 +547,56 @@ func test_translations() -> void:
 	check(Lang.t("PRACTICE") == "ÜBUNGSFAHRT", "German lookup")
 	Lang.current = "en"
 	check(Lang.t("PRACTICE") == "PRACTICE", "English default")
+
+
+# --- online protocol -----------------------------------------------------------------
+
+func _golden(name: String) -> String:
+	return FileAccess.get_file_as_string("res://server/testdata/%s.hex" % name).strip_edges()
+
+
+func test_net_golden() -> void:
+	# the same messages as server/protocol_test.go: byte-identical encoding
+	var st := {
+		"t": 12.345, "pos": Vector3(123.456, -7.89, 1000.001), "rot": Quaternion(0.1, -0.9, 0.3, 0.3),
+		"vel": Vector3(12.344, -3.21, 45.678), "angvel": Vector3(0.1234, -2.3456, 11.0),
+		"steer": -0.3, "throttle": 0.8, "brake": 0.12, "boosting": true, "reverse": false,
+		"held": true, "state": "racing", "boost": 7, "crack": 0.4, "holes": 2,
+	}
+	var pkt := NetCodec.packet(NetCodec.STATE, 65535, 2, 0xDEADBEEF, NetCodec.encode_state(st))
+	check(pkt.hex_encode() == _golden("state"), "state packet matches Go: %s" % pkt.hex_encode())
+	pkt = NetCodec.packet(NetCodec.HELLO, 1, 0, 0, NetCodec.encode_hello("Jöhn", Color8(255, 128, 0)))
+	check(pkt.hex_encode() == _golden("hello"), "hello packet matches Go: %s" % pkt.hex_encode())
+	pkt = NetCodec.packet(NetCodec.EVENT, 7, 0, 42, NetCodec.encode_event(1, NetCodec.EV_JOIN,
+		NetCodec.ev_join(NetCodec.JOIN_CREATE, "abcd", "camel_back", true)))
+	check(pkt.hex_encode() == _golden("join"), "join packet matches Go: %s" % pkt.hex_encode())
+	# decode a server message encoded by Go
+	var h := NetCodec.parse(_golden("match").hex_decode())
+	check(h.get("type", 0) == NetCodec.EVENT and h["seq"] == 9 and h["ack"] == 4 and h["token"] == 42, "match header")
+	var e := NetCodec.decode_event(h["body"])
+	check(e.get("kind", 0) == NetCodec.EV_MATCH and e["id"] == 3 and e["slot"] == 1, "match event")
+	check(e.get("track", "") == "camel_back" and e.get("opp_name", "") == "Max" and e.get("super", true) == false, "match fields")
+	check((e["opp_color"] as Color).is_equal_approx(Color8(34, 102, 221)), "match colour")
+
+
+func test_net_roundtrip() -> void:
+	var rot := Quaternion(Vector3(0.3, 1.0, -0.2).normalized(), 2.5)
+	var st := {
+		"t": 61.5, "pos": Vector3(-812.25, 33.1, 2.0), "rot": rot,
+		"vel": Vector3(-41.0, 3.33, 0.07), "angvel": Vector3(-1.5, 0.25, 9.9),
+		"steer": 1.0, "throttle": 0.0, "brake": 1.0, "boosting": false, "reverse": true,
+		"held": false, "airborne": true, "state": "wrecked", "boost": 0, "crack": 1.0, "holes": 8,
+	}
+	var data := NetCodec.encode_state(st)
+	check(data.size() == NetCodec.STATE_SIZE, "state is %d bytes" % data.size())
+	var b := StreamPeerBuffer.new()
+	b.data_array = data
+	var d := NetCodec.decode_state(b)
+	check(near(d["t"], 61.5) and (d["pos"] as Vector3).is_equal_approx(st["pos"]), "time and position")
+	check(((d["vel"] - st["vel"]) as Vector3).length() < 0.01 and ((d["angvel"] - st["angvel"]) as Vector3).length() < 0.002, "velocities")
+	var dq: Quaternion = d["rot"]
+	check(absf(dq.dot(rot)) > 0.99999, "rotation (dot %f)" % absf(dq.dot(rot)))
+	check(d["reverse"] and d["airborne"] and not d["boosting"] and not d["held"] and d["state"] == "wrecked" and d["holes"] == 8, "flags")
+	check(near(d["steer"], 1.0) and near(d["brake"], 1.0) and near(d["crack"], 1.0), "inputs")
+	check(NetCodec.seq_newer(2, 65534) and not NetCodec.seq_newer(65534, 2) and not NetCodec.seq_newer(5, 5), "sequence wrap-around")
+	check(NetCodec.parse(PackedByteArray([1, 2, 3])).is_empty(), "short packet rejected")

@@ -1,0 +1,23 @@
+# systemd unit for the online server (Linux VPS without Docker).
+#   GOOS=linux GOARCH=amd64 go build -o stunt-racer-server .   (in server/)
+#   copy it to /usr/local/bin/, this file to /etc/systemd/system/, then
+#   systemctl enable --now stunt-racer
+# Open UDP port 27015 in the firewall (e.g. ufw allow 27015/udp).
+[Unit]
+Description=Stunt Track Racer VR online server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/stunt-racer-server -port 27015 -v
+Restart=always
+RestartSec=2
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+MemoryMax=64M
+
+[Install]
+WantedBy=multi-user.target

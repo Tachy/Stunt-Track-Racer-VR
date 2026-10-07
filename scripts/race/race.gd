@@ -3,7 +3,9 @@ extends Node3D
 ## One race: track, player car, optional opponent, crane start ("DROP START"),
 ## lap counting, falling off + crane recovery, damage, boost and the cockpit
 ## viewpoint for VR. The opponent is the same physical car (PlayerCar) as the
-## player's, driven by an AiDriver instead of wheel and pedals.
+## player's, driven by an AiDriver instead of wheel and pedals - or, online
+## (req["online"]), by the other player's car state over the network
+## (RemoteDriver); the server sets the drop time and decides the winner.
 
 signal finished(result: Dictionary)
 
@@ -46,6 +48,15 @@ var opp_state := "held"       # held, racing, falling, craned, finished, wrecked
 var opp_state_time := 0.0
 var _opp_slow_time := 0.0
 
+# online: req["online"] = {slot, opp_name, opp_color}
+var online := false
+var _remote: RemoteDriver
+var _net_drop := -1.0         # drop time on the server clock (s), -1 until START
+var _net_result := {}         # {winner, reason} from the server
+var _opp_gone := false        # opponent left or the connection is lost
+var _opp_lap_ms := 0.0
+var _opp_best := -1.0
+
 var state := "hold"
 var state_time := 0.0
 var race_time := 0.0
@@ -79,6 +90,7 @@ func _init(request: Dictionary) -> void:
 func _ready() -> void:
 	_rng.randomize()
 	autopilot = OS.get_cmdline_user_args().has("--autopilot")
+	online = req.has("online")
 	def = TrackLibrary.get_def(req["track"])
 	var super_league: bool = req.get("super", false)
 	path = TrackPath.new(def)
@@ -117,9 +129,15 @@ func _ready() -> void:
 	var opp_index: int = req.get("opponent", -1)
 	var lat := 0.0
 	var start_lat := minf(START_LAT, path.half_width[path.index_at_s(START_S)] * 0.5)
-	if opp_index >= 0:
+	if opp_index >= 0 or online:
 		lat = -start_lat
-		opp_driver = Drivers.get_driver(opp_index)
+		if online:
+			var net: Dictionary = req["online"]
+			opp_driver = {"name": net["opp_name"], "color": net["opp_color"]}
+			if int(net["slot"]) == 1:
+				lat = start_lat
+		else:
+			opp_driver = Drivers.get_driver(opp_index)
 		opp_car = PlayerCar.new()
 		opp_car.name = "Opponent"
 		var opp_tuning := CarTuning.super_league() if super_league else CarTuning.standard()
@@ -134,12 +152,15 @@ func _ready() -> void:
 		opp_car.damage.wrecked.connect(_on_opponent_wrecked)
 		opp_crane = Crane.new()
 		add_child(opp_crane)
-		var oxf := _hold_transform(START_S, start_lat, HOLD_HEIGHT)
+		var oxf := _hold_transform(START_S, -lat, HOLD_HEIGHT)
 		opp_car.teleport(oxf)
 		opp_car.hold(true)
 		opp_crane.hold(oxf)
 		opp_track = CarTracker.new(path, opp_car, START_S)
-		opp_ai = AiDriver.new(opp_track, profile, floors, opp_driver.get("skill", 0.85), opp_driver.get("flags", []))
+		if online:
+			_remote = RemoteDriver.new(opp_car)
+		else:
+			opp_ai = AiDriver.new(opp_track, profile, floors, opp_driver.get("skill", 0.85), opp_driver.get("flags", []))
 
 	var xf := _hold_transform(START_S, lat, HOLD_HEIGHT)
 	car.teleport(xf)
@@ -158,11 +179,24 @@ func _ready() -> void:
 	InputManager.accept.connect(_on_accept)
 	InputManager.nav.connect(_on_nav)
 	_update_view()
-	print("[Race] %s vs %s (super=%s)" % [def["name"], Drivers.get_driver(opp_index)["name"] if opp_index >= 0 else "-", super_league])
+	if online:
+		Net.start_at.connect(_on_net_start)
+		Net.opponent_event.connect(_on_net_opponent)
+		Net.result_received.connect(_on_net_result)
+		Net.disconnected.connect(_on_net_lost)
+		Net.send_ready()
+		message = Lang.t("WAITING FOR OPPONENT")
+	print("[Race] %s vs %s (super=%s%s)" % [def["name"], opp_driver.get("name", "-"), super_league, ", online" if online else ""])
 
 
 func _exit_tree() -> void:
 	get_tree().paused = false
+	if online:
+		Net.leave()
+		Net.start_at.disconnect(_on_net_start)
+		Net.opponent_event.disconnect(_on_net_opponent)
+		Net.result_received.disconnect(_on_net_result)
+		Net.disconnected.disconnect(_on_net_lost)
 	if InputManager.back.is_connected(_on_back):
 		InputManager.back.disconnect(_on_back)
 		InputManager.accept.disconnect(_on_accept)
@@ -185,9 +219,19 @@ func _hold_transform(s: float, lat: float, height: float) -> Transform3D:
 func _physics_process(dt: float) -> void:
 	car.input = _ap.compute(dt, opp_track) if autopilot else InputManager.get_drive()
 	if opp_car:
-		_update_opponent(dt)
+		if online:
+			_update_remote(dt)
+		else:
+			_update_opponent(dt)
 	state_time += dt
 	match state:
+		"hold" when online:
+			if _net_drop >= 0.0:
+				message = "DROP START"
+				if Net.server_time() >= _net_drop:
+					_drop_start()
+			elif not Net.is_online():
+				message = Lang.t("CONNECTION LOST")
 		"hold":
 			if not autopilot and not InputManager.pedals_ready():
 				# pedal values unknown until moved once - wait for them
@@ -230,9 +274,18 @@ func _physics_process(dt: float) -> void:
 				state = "racing"
 				state_time = 0.0
 		"finished", "wrecked":
-			if state_time > END_DELAY and result.get("_sent", false) == false:
+			# online: wait (a while) for the server's verdict
+			var decided := not online or not _net_result.is_empty() or _opp_gone or state_time > END_DELAY + 8.0
+			if state_time > END_DELAY and decided and result.get("_sent", false) == false:
 				result["_sent"] = true
 				finished.emit(result)
+	if online:
+		if state != "hold" and state != "finished" and state != "wrecked" and _net_drop >= 0.0:
+			race_time = Net.server_time() - _net_drop   # one clock for both players
+		if Engine.get_physics_frames() % 4 == 0:   # 30 Hz
+			Net.send_state(RemoteDriver.capture(car, race_time, state))
+		if PlayerCar.debug and Engine.get_physics_frames() % 120 == 0:
+			print("[Net] t=%.1f rtt=%d ms opp states=%d err=%.2f m opp=%s" % [race_time, Net.rtt * 1000.0, Net.opp_states_received, _remote.error, opp_state])
 	_accept_pressed = false
 
 
@@ -286,6 +339,96 @@ func _update_opponent(dt: float) -> void:
 			opp_car.input = {"steer": 0.0, "throttle": 0.0, "brake": 1.0, "boost": false}
 
 
+## Online: the opponent's car follows the received state (RemoteDriver);
+## held = on its crane at the transmitted pose.
+func _update_remote(dt: float) -> void:
+	opp_state_time += dt
+	var s: Dictionary = Net.opp_state
+	if s.is_empty() or _opp_gone:
+		return
+	if s["held"]:
+		var xf := RemoteDriver.target(s, float(s["t"]))
+		if not opp_car.freeze or opp_car.global_position.distance_to(xf.origin) > 0.05:
+			opp_car.teleport(xf)
+			opp_car.hold(true)
+			opp_crane.hold(xf)
+			opp_track.move_to(path.s_of(xf.origin, path.nearest(xf.origin)))
+	elif opp_car.freeze:
+		opp_car.hold(false)
+		opp_crane.release()
+	# the shared clock also runs on after our own finish
+	_remote.update(s, Net.server_time() - _net_drop if _net_drop >= 0.0 else race_time, dt)
+	opp_track.update_position()
+	var st: String = s["state"]
+	if opp_state != "finished" and opp_state != "wrecked":
+		opp_state = "held" if st == "hold" else st
+	if st == "wrecked":
+		_remote_wrecked()
+
+
+func _remote_wrecked() -> void:
+	if opp_car.damage.is_wrecked:
+		return
+	opp_car.damage.is_wrecked = true
+	opp_car.damage.wrecked.emit()
+
+
+func _on_net_start(server_s: float) -> void:
+	_net_drop = server_s
+	print("[Race] online drop in %.2f s" % (server_s - Net.server_time()))
+
+
+func _on_net_opponent(what: int, laps: int, race_s: float) -> void:
+	match what:
+		NetCodec.EV_LAP:
+			var lap := race_s - _opp_lap_ms
+			_opp_lap_ms = race_s
+			if _opp_best < 0.0 or lap < _opp_best:
+				_opp_best = lap
+			print("[Race] opponent lap %d: %s" % [laps, Dashboard.fmt_time(lap)])
+		NetCodec.EV_FINISH:
+			opp_state = "finished"
+			if state == "racing" or state == "falling" or state == "craned":
+				opp_finished_first = true
+				_flash(Lang.t("OPPONENT FINISHED"))
+		NetCodec.EV_WRECKED:
+			_remote_wrecked()
+		NetCodec.EV_LEAVE:
+			_opponent_gone(Lang.t("OPPONENT LEFT"))
+
+
+func _on_net_result(winner: int, reason: int) -> void:
+	_net_result = {"winner": winner, "reason": reason}
+	print("[Race] online result: winner slot %d (reason %d), we are slot %d" % [winner, reason, req["online"]["slot"]])
+	if state == "finished" and not result.get("retired", true):
+		var won := winner == int(req["online"]["slot"])
+		result["won"] = won
+		message = Lang.t("YOU WIN!") if won else Lang.t("YOU LOSE")
+		_flash(message)
+
+
+func _on_net_lost(_reason: String) -> void:
+	_opponent_gone(Lang.t("CONNECTION LOST"))
+
+
+## The opponent is gone for good: its car disappears, the race goes on.
+func _opponent_gone(text: String) -> void:
+	if _opp_gone:
+		return
+	_opp_gone = true
+	opp_state = "wrecked"
+	opp_car.hold(true)
+	opp_car.visible = false
+	opp_car.collision_layer = 0
+	opp_crane.visible = false
+	if state != "finished" and state != "wrecked":
+		_flash(text)
+	if state == "hold" and _net_drop < 0.0:
+		_net_drop = Net.server_time() if Net.is_online() else -1.0
+		if _net_drop < 0.0:
+			_drop_start()
+
+
 ## The opponent hangs on its crane close to s.
 func _opp_held_near(s: float) -> bool:
 	return opp_car != null and opp_car.freeze and absf(path.delta_s(opp_track.s, s)) < CRANE_NEAR
@@ -294,7 +437,7 @@ func _opp_held_near(s: float) -> bool:
 func _drop_start() -> void:
 	car.hold(false)
 	crane.release()
-	if opp_car:
+	if opp_car and not online:
 		opp_car.hold(false)
 		opp_crane.release()
 		opp_state = "racing"
@@ -308,6 +451,8 @@ func _drop_start() -> void:
 
 func _lap_completed() -> void:
 	print("[Race] lap %d: %s" % [ptrack.laps_done(), Dashboard.fmt_time(ptrack.last_lap)])
+	if online:
+		Net.send_lap(ptrack.laps_done(), race_time)
 	if ptrack.laps_done() >= LAPS:
 		_finish(false)
 	else:
@@ -321,7 +466,13 @@ func _crane_reposition() -> void:
 	ptrack.move_to(rs)
 	var lat := 0.0
 	var opp_beside := _opp_held_near(rs)
-	if opp_beside:
+	if opp_beside and online:
+		# the other player's car is theirs: set down beside it
+		var olat := opp_track.lateral()
+		var side := -signf(olat) if absf(olat) > 0.1 else 1.0
+		lat = clampf(olat + side * CRANE_BESIDE, -CRANE_MAX_LAT, CRANE_MAX_LAT)
+		opp_beside = false
+	elif opp_beside:
 		# both on the crane at the same spot: one left, one right (the
 		# opponent is moved, the player is placed during the fade)
 		lat = (-signf(opp_track.lateral()) if absf(opp_track.lateral()) > 0.1 else -1.0) * CRANE_SIDE_LAT
@@ -349,17 +500,26 @@ func _finish(retired: bool) -> void:
 	state = "finished"
 	state_time = 0.0
 	car.controls_enabled = false
+	if online:
+		if retired:
+			Net.leave()
+		else:
+			Net.send_finish(race_time, ptrack.best_lap)
 	var opp_best := opp_track.best_lap if opp_track else -1.0
+	if online:
+		opp_best = _opp_best
 	var best_lap := ptrack.best_lap
 	var won := not opp_finished_first and not retired
 	var fastest := best_lap > 0.0 and (opp_best < 0.0 or best_lap <= opp_best) and not retired
-	if opp_car == null:
+	if opp_car == null or (online and _opp_gone and not opp_finished_first):
 		won = not retired
+	if online and not _net_result.is_empty() and not retired:
+		won = int(_net_result["winner"]) == int(req["online"]["slot"])
 	result = {
 		"won": won, "player_fastest": fastest, "wrecked": false, "retired": retired,
 		"holes": car.damage.holes, "player_best": best_lap, "opp_best": opp_best,
 		"race_time": race_time, "track": req["track"],
-		"opponent_name": opp_driver.get("name", ""),
+		"opponent_name": opp_driver.get("name", ""), "online": online,
 	}
 	if retired:
 		message = Lang.t("RETIRED")
@@ -375,6 +535,8 @@ func _on_wrecked() -> void:
 	state = "wrecked"
 	state_time = 0.0
 	car.controls_enabled = false
+	if online:
+		Net.send_wrecked()
 	Sfx.play("wreck")
 	message = Lang.t("WRECKED!")
 	_flash(Lang.t("CAR WRECKED!"))
@@ -382,7 +544,7 @@ func _on_wrecked() -> void:
 		"won": false, "player_fastest": false, "wrecked": true, "retired": false,
 		"holes": car.damage.holes, "player_best": ptrack.best_lap, "opp_best": opp_track.best_lap if opp_track else -1.0,
 		"race_time": race_time, "track": req["track"],
-		"opponent_name": opp_driver.get("name", ""),
+		"opponent_name": opp_driver.get("name", ""), "online": online,
 	}
 
 
@@ -517,7 +679,9 @@ func _on_nav(dir: int) -> void:
 
 
 func _set_paused(p: bool) -> void:
-	get_tree().paused = p
+	get_tree().paused = p and not online   # online the race goes on
+	if online:
+		car.controls_enabled = not p and state != "finished" and state != "wrecked"
 	InputManager.menu_mode = p
 	if _pause_panel == null:
 		_pause_panel = Panel3D.new().setup(Vector2i(512, 256), Vector2(0.7, 0.35))

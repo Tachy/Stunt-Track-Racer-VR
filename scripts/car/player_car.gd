@@ -23,6 +23,8 @@ static var debug := OS.get_cmdline_user_args().has("--debug")
 
 ## Debug output only for the car with verbose = true (the player's).
 var verbose := false
+## Online opponent's copy (RemoteDriver): damage comes from the network.
+var remote := false
 var tuning: CarTuning
 var damage: DamageModel
 var input := {"steer": 0.0, "throttle": 0.0, "brake": 0.0, "boost": false}
@@ -391,6 +393,8 @@ func _check_impact() -> void:
 
 
 func _damage(amount: float, why := "") -> void:
+	if remote:
+		return
 	var eff := damage.hit(amount)
 	if debug and verbose:
 		print("[Car] damage %.3f (%s) speed=%.1f crack=%.3f holes=%d pos=%s" % [eff, why, speed, damage.crack, damage.holes, global_position])

@@ -66,6 +66,14 @@ At 50 % the view therefore always stays within ±45° of straight ahead, in pitc
 - **League** with 4 divisions of 3 drivers, promotion and relegation. Winning division 1 unlocks the Super League.
 - Procedural engine sound, effects, retro pixel font, UI in English and German. No external assets needed.
 
+## Online (1 vs 1)
+
+Two players race each other over the internet through a small server (`server/`, Go, a few MB, no physics). Each game simulates its own car and sends its state 30 times a second (36 bytes per packet, about 2.2 KB/s); the opponent's car is a full physical copy pulled toward the received state. The server pairs players (quick match or a 4-letter room code), sets the common drop time and decides the winner. Protocol: `docs/net-protocol.md`.
+
+- Server address, name and colour: `[online]` in `settings.cfg` (`server_host`, `server_port` = 27015, `player_name`, `player_color`).
+- Run the server: `go run ./server -v` (in `server/`), or `docker build -t stunt-racer-server server/` and `docker run -d -p 27015:27015/udp stunt-racer-server`, or the systemd unit in `server/deploy/`. Only UDP port 27015 needs to be open.
+- Test without the menu: `-- --track=camel_back --online=127.0.0.1:27015 --name=ANN --autopilot` in two instances (no `--fixed-fps`: the network needs real time). `-sim-latency 80ms -sim-loss 0.03` on the server simulates a bad line; `go test ./...` in `server/` tests the server.
+
 ## Development / tests
 
 ```
@@ -75,7 +83,7 @@ set G="<path>\Godot_v4.7.2-stable_win64_console.exe"
 %G% --headless --xr-mode off --fixed-fps 120 --path . -- --track=ski_flyer --opponent=5 --autopilot --debug --quit-after=200
 ```
 
-Command line options go after `--`, see `scripts/main.gd`: `--track=<id>`, `--opponent=<0..10>`, `--super`, `--autopilot`, `--no-xr`, `--menu=<screen>`, `--joydump`, `--debug`, `--chase` (camera behind the car), `--fps`, `--vr-bench`, `--render-scale=<x>`, `--screenshot=<s>`, `--quit-after=<s>`, `--lang=<en|de>`.
+Command line options go after `--`, see `scripts/main.gd`: `--track=<id>`, `--opponent=<0..10>`, `--super`, `--autopilot`, `--no-xr`, `--menu=<screen>`, `--joydump`, `--debug`, `--chase` (camera behind the car), `--fps`, `--vr-bench`, `--render-scale=<x>`, `--screenshot=<s>`, `--quit-after=<s>`, `--lang=<en|de>`, `--online=<host:port>`, `--name=<name>`.
 
 Handling is tuned centrally in `scripts/car/car_tuning.gd`, tracks live in `scripts/track/track_library.gd`. UI texts are English keys in the code (`Lang.t("...")`); the German table is in `scripts/core/lang.gd`, and a test checks that every key has a translation.
 

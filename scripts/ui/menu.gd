@@ -21,6 +21,14 @@ var _showcase: Node3D
 var _cal: Dictionary = {}
 var _time := 0.0
 var _pedals_shown := true
+# online screen
+var _online_track := 0
+var _code := "AAAA"
+var _code_pos := 0
+var _online_msg := ""
+var _online_room := ""
+var _searching := false
+const CODE_LETTERS := "ABCDEFGHJKLMNPQRSTUVWXYZ"   # as the server's (no I/O)
 
 
 func _init(start_screen := "main") -> void:
@@ -60,6 +68,11 @@ func _ready() -> void:
 	InputManager.accept.connect(_on_accept)
 	InputManager.back.connect(_on_back)
 	InputManager.device_changed.connect(_refresh)
+	Net.welcomed.connect(_on_net_change)
+	Net.room_created.connect(_on_net_room)
+	Net.matched.connect(_on_net_matched)
+	Net.failed.connect(_on_net_failed)
+	Net.disconnected.connect(_on_net_lost)
 	XrManager.set_base(base)
 	open(screen_name)
 
@@ -71,6 +84,11 @@ func _exit_tree() -> void:
 	InputManager.accept.disconnect(_on_accept)
 	InputManager.back.disconnect(_on_back)
 	InputManager.device_changed.disconnect(_refresh)
+	Net.welcomed.disconnect(_on_net_change)
+	Net.room_created.disconnect(_on_net_room)
+	Net.matched.disconnect(_on_net_matched)
+	Net.failed.disconnect(_on_net_failed)
+	Net.disconnected.disconnect(_on_net_lost)
 
 
 func _process(delta: float) -> void:
@@ -81,6 +99,8 @@ func _process(delta: float) -> void:
 	if screen_name == "calibrate":
 		_calibration_step(delta)
 		_refresh()
+	elif screen_name == "online" and Engine.get_process_frames() % 30 == 0:
+		_refresh()   # connection state, ping
 	elif screen_name == "main" and InputManager.pedals_ready() != _pedals_shown:
 		_pedals_shown = InputManager.pedals_ready()
 		_refresh()
@@ -96,6 +116,13 @@ func open(s: String) -> void:
 		InputManager.capture_mode = InputManager.device >= 0
 	else:
 		InputManager.capture_mode = false
+	if s == "online":
+		_online_msg = ""
+		_online_room = ""
+		_searching = false
+		if Net.status == "offline":
+			if not Net.connect_to(Settings.server_host, Settings.server_port, Settings.player_name, Settings.player_color):
+				_online_msg = Lang.t("SERVER NOT FOUND")
 	_refresh()
 
 
@@ -118,6 +145,9 @@ func _refresh() -> void:
 			_screen_calibrate(sc)
 		"result":
 			_screen_result(sc)
+		"online":
+			_screen_online(sc)
+	sel = clampi(sel, 0, maxi(items.size() - 1, 0))   # the item list can shrink
 	_draw_items(sc)
 	sc.text_centered(PX.y - 40, Lang.t("STEER=SELECT  GAS/ENTER=OK  BRAKE/ESC=BACK  F12=RECENTER VR"), Palette.ROAD_DARK, 2.4)
 	sc.commit()
@@ -151,6 +181,7 @@ func _screen_main(sc: PixelScreen) -> void:
 	items = [
 		{"label": Lang.t("LEAGUE"), "do": func(): open("league")},
 		{"label": Lang.t("PRACTICE"), "do": func(): open("practice")},
+		{"label": Lang.t("ONLINE"), "do": func(): open("online")},
 		{"label": Lang.t("CALIBRATE WHEEL"), "do": func(): open("calibrate")},
 		{"label": Lang.t("SETTINGS"), "do": func(): open("settings")},
 		{"label": Lang.t("QUIT"), "do": func(): get_tree().quit()},
@@ -250,8 +281,45 @@ func _screen_result(sc: PixelScreen) -> void:
 	if r.has("season_report"):
 		sc.text_centered(380, str(r["season_report"]), Palette.YELLOW, 3.0)
 	var is_league: bool = GameState.request.get("league", false)
+	var next := "league" if is_league else ("online" if r.get("online", false) else "main")
 	items = [
-		{"label": Lang.t("CONTINUE"), "do": func(): open("league" if is_league else "main")},
+		{"label": Lang.t("CONTINUE"), "do": func(): open(next)},
+	]
+
+
+func _screen_online(sc: PixelScreen) -> void:
+	sc.text_centered(90, Lang.t("ONLINE RACE (1 VS 1)"), Palette.LIGHT_BLUE, 4.0)
+	var status := Lang.t("NOT CONNECTED")
+	var col := Palette.RED
+	if Net.status == "connecting":
+		status = Lang.t("CONNECTING ...")
+		col = Palette.YELLOW
+	elif Net.is_online():
+		status = Lang.t("CONNECTED, PING %d MS") % int(Net.rtt * 1000.0)
+		col = Palette.GREEN
+	sc.text_centered(140, "%s:%d  -  %s" % [Settings.server_host, Settings.server_port, status], col, 2.6)
+	sc.text_centered(180, Lang.t("NAME: %s") % Settings.player_name.to_upper(), Palette.WHITE, 3.0)
+	if _online_room != "":
+		sc.text_centered(240, Lang.t("ROOM CODE: %s") % _online_room, Palette.YELLOW, 5.0)
+		sc.text_centered(300, Lang.t("TELL YOUR OPPONENT THE CODE - WAITING ..."), Palette.WHITE, 2.6)
+	elif _searching:
+		sc.text_centered(260, Lang.t("SEARCHING FOR AN OPPONENT ..."), Palette.YELLOW, 3.0)
+	if _online_msg != "":
+		sc.text_centered(340, _online_msg, Palette.RED, 3.0)
+	if _online_room != "" or _searching:
+		items = [{"label": Lang.t("CANCEL"), "do": _act_online_cancel}]
+		return
+	var id: String = _practice_ids()[_online_track]
+	var code := ""
+	for i in 4:
+		code += ("[%s]" if i == _code_pos else " %s ") % _code[i]
+	items = [
+		{"label": Lang.t("TRACK: ") + TrackLibrary.display_name(id), "side": _side_online_track},
+		{"label": Lang.t("QUICK MATCH"), "do": func(): _act_online_join(NetCodec.JOIN_QUICK)},
+		{"label": Lang.t("CREATE ROOM"), "do": func(): _act_online_join(NetCodec.JOIN_CREATE)},
+		{"label": Lang.t("CODE:") + " " + code, "side": _side_code, "do": _act_code_next},
+		{"label": Lang.t("JOIN ROOM"), "do": func(): _act_online_join(NetCodec.JOIN_CODE)},
+		{"label": Lang.t("BACK"), "do": _act_online_back},
 	]
 
 
@@ -481,6 +549,11 @@ func _on_back() -> void:
 			open("main")
 		"result":
 			_on_accept()
+		"online":
+			if _online_room != "" or _searching:
+				_act_online_cancel()
+			else:
+				_act_online_back()
 		_:
 			open("main")
 
@@ -498,6 +571,77 @@ func _act_practice_start() -> void:
 
 func _practice_ids() -> Array:
 	return TrackLibrary.ORDER + TrackLibrary.CUSTOM
+
+
+func _act_online_join(mode: int) -> void:
+	if not Net.is_online():
+		_online_msg = Lang.t("NOT CONNECTED")
+		if Net.status == "offline":
+			Net.connect_to(Settings.server_host, Settings.server_port, Settings.player_name, Settings.player_color)
+		_refresh()
+		return
+	_online_msg = ""
+	_searching = mode != NetCodec.JOIN_CREATE
+	Net.join(mode, _code, _practice_ids()[_online_track], GameState.league != null and GameState.league.super_league)
+	_refresh()
+
+
+func _act_online_cancel() -> void:
+	Net.leave()
+	_online_room = ""
+	_searching = false
+	_refresh()
+
+
+func _act_code_next() -> void:
+	_code_pos = (_code_pos + 1) % 4
+	_refresh()
+
+
+func _act_online_back() -> void:
+	Net.disconnect_from()
+	open("main")
+
+
+func _side_online_track(d: int) -> void:
+	_online_track = wrapi(_online_track + d, 0, _practice_ids().size())
+
+
+func _side_code(d: int) -> void:
+	var i := CODE_LETTERS.find(_code[_code_pos])
+	var c := CODE_LETTERS[wrapi(i + d, 0, CODE_LETTERS.length())]
+	_code = _code.substr(0, _code_pos) + c + _code.substr(_code_pos + 1)
+
+
+func _on_net_change() -> void:
+	if screen_name == "online":
+		_refresh()
+
+
+func _on_net_room(code: String) -> void:
+	_online_room = code
+	_searching = false
+	_refresh()
+
+
+func _on_net_matched(info: Dictionary) -> void:
+	if screen_name == "online":
+		start_race.emit(GameState.online_request(info))
+
+
+func _on_net_failed(code: int) -> void:
+	_searching = false
+	_online_room = ""
+	_online_msg = {1: Lang.t("ROOM NOT FOUND"), 2: Lang.t("ROOM IS FULL"), 3: Lang.t("SERVER VERSION DIFFERS - UPDATE THE GAME")}.get(code, "ERROR %d" % code)
+	_refresh()
+
+
+func _on_net_lost(_reason: String) -> void:
+	_searching = false
+	_online_room = ""
+	_online_msg = Lang.t("CONNECTION LOST")
+	if screen_name == "online":
+		_refresh()
 
 
 func _act_settings_back() -> void:

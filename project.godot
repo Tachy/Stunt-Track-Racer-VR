@@ -18,6 +18,7 @@ InputManager="*res://scripts/autoload/input_manager.gd"
 XrManager="*res://scripts/autoload/xr_manager.gd"
 GameState="*res://scripts/autoload/game_state.gd"
 Sfx="*res://scripts/autoload/sfx.gd"
+Net="*res://scripts/net/net_client.gd"
 
 [display]
 
