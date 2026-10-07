@@ -71,7 +71,7 @@ At 50 % the view therefore always stays within ±45° of straight ahead, in pitc
 Two players race each other over the internet through a small server (`server/`, Go, a few MB, no physics). Each game simulates its own car and sends its state 30 times a second (36 bytes per packet, about 2.2 KB/s); the opponent's car is a full physical copy pulled toward the received state. The server pairs the next two players looking for a race, sets the common drop time and decides the winner. Protocol: `docs/net-protocol.md`.
 
 - Name, car colour and server address are set in the ONLINE menu (typed on the keyboard, or letter by letter with the wheel). The address is `host` or `host:port`; the port defaults to 27015. The server itself needs no configuration.
-- Run the server: `go run ./server -v` (in `server/`), or `docker build -t stunt-racer-server server/` and `docker run -d -p 27015:27015/udp stunt-racer-server`, or the systemd unit in `server/deploy/`. Only UDP port 27015 needs to be open.
+- Run the server: `go run ./server -v` (in `server/`), or `docker build -t stunt-racer-server server/` and `docker run -d -p 27015:27015/udp stunt-racer-server`, or the systemd unit in `server/deploy/`. Only UDP port 27015 needs to be open. Step by step: `docs/server-install.md`.
 - Test without the menu: `-- --track=camel_back --online=127.0.0.1:27015 --name=ANN --autopilot` in two instances (no `--fixed-fps`: the network needs real time). `-sim-latency 80ms -sim-loss 0.03` on the server simulates a bad line; `go test ./...` in `server/` tests the server.
 
 ## Development / tests
