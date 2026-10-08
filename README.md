@@ -15,7 +15,7 @@ The game starts **either** in VR **or** on the desktop. There is no switching wh
 | **VR** | `Start-VR.cmd` | `"<Godot.exe>" --path "<project folder>"` |
 | **Desktop** | `Start-Desktop.cmd` | `"<Godot.exe>" --xr-mode off --path "<project folder>" -- --no-xr` |
 
-The `.cmd` files expect Godot 4.7.2 in `D:\Eigene_Programme\Godot 4\`. If yours lives elsewhere, set the environment variable `GODOT` to the Godot executable or edit the line in the files.
+The `.cmd` files read the path of the Godot executable from `start.cfg`: copy `start.cfg.example` to `start.cfg` and enter the path of your Godot 4.7 exe there (`start.cfg` stays local, it is not in the repository).
 
 - **VR:** The headset must be on and its OpenXR runtime (e.g. Pimax, SteamVR) running. If it isn't, the game shows a message and quits. It never falls back to desktop silently.
 - **Desktop:** OpenXR is not started at all. Hold the right mouse button and drag to look around; F12 resets the view.

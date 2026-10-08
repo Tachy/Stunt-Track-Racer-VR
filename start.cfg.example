@@ -1,0 +1,6 @@
+# Settings of the start scripts (Start-Desktop.cmd, Start-VR.cmd).
+# Copy this file to start.cfg and enter your paths; start.cfg stays local
+# (it is not in the repository).
+
+# Path of the Godot 4.7 executable (no quotes)
+GODOT=C:\Godot\Godot_v4.7.2-stable_win64.exe
