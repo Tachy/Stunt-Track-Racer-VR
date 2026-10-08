@@ -344,9 +344,11 @@ func _physics_process(dt: float) -> void:
 	_prev_vel = linear_velocity
 
 
-## In the air the car turns into its flight direction (tangent of the
-## parabola): nose along the velocity vector, no roll. Very slow falls (e.g.
-## sliding off the edge) only get levelled.
+## In the air the car pitches into its flight direction (tangent of the
+## parabola): the nose follows the velocity vector, turning about the car's
+## own cross axis only. Roll and yaw stay free (they keep what the car took
+## off with). Very slow falls (e.g. sliding off the edge) only get the nose
+## levelled.
 func _align_to_flight(b: Basis, dt: float) -> void:
 	if airtime < tuning.air_align_delay:
 		return
@@ -361,20 +363,24 @@ func _align_to_flight(b: Basis, dt: float) -> void:
 	var flat := Vector2(dir.x, dir.z).length()
 	var pitch := clampf(atan2(dir.y, flat), -max_pitch, max_pitch)
 	var heading := Vector3(dir.x, 0.0, dir.z).normalized() if flat > 0.05 else Vector3(-b.z.x, 0.0, -b.z.z).normalized()
-	var target := Basis.looking_at(heading, Vector3.UP) * Basis(Vector3.RIGHT, pitch)
-	var q := (target * b.orthonormalized().inverse()).get_rotation_quaternion()
-	if q.w < 0.0:
-		q = -q
-	var angle := q.get_angle()
-	var desired := Vector3.ZERO
-	if angle > 1e-4:
-		desired = q.get_axis().normalized() * angle * tuning.air_align_rate
+	dir = heading * cos(pitch) + Vector3.UP * sin(pitch)
+	# pitch error: the flight direction in the car's plane of symmetry
+	# against its nose, about its cross axis
+	var side := b.x.normalized()
+	var fwd := -b.z.normalized()
+	var in_plane := dir - side * dir.dot(side)
+	if in_plane.length() < 0.1:
+		return   # flying sideways: no pitch to follow
+	in_plane = in_plane.normalized()
+	var error := atan2(side.dot(fwd.cross(in_plane)), fwd.dot(in_plane))
+	var desired := error * tuning.air_align_rate
 	# feed-forward: the parabola turns at w = v x g / |v|^2 (removes the lag)
 	if v.length() >= tuning.air_align_min_speed:
-		desired += v.cross(Vector3.DOWN * 9.81 * gravity_scale) / v.length_squared()
-	angular_velocity = angular_velocity.lerp(desired, clampf(dt * tuning.air_align_blend, 0.0, 1.0))
+		desired += side.dot(v.cross(Vector3.DOWN * 9.81 * gravity_scale)) / v.length_squared()
+	var w_pitch := angular_velocity.dot(side)
+	angular_velocity += side * (lerpf(w_pitch, desired, clampf(dt * tuning.air_align_blend, 0.0, 1.0)) - w_pitch)
 	if debug and verbose and Engine.get_physics_frames() % 15 == 0:
-		print("[Air] t=%.2fs flight angle %+.1f deg, car pitch %+.1f deg, error %.1f deg" % [airtime, rad_to_deg(atan2(v.y, Vector2(v.x, v.z).length())), rad_to_deg(asin(clampf(-b.z.y, -1.0, 1.0))), rad_to_deg(angle)])
+		print("[Air] t=%.2fs flight angle %+.1f deg, car pitch %+.1f deg, roll %+.1f deg, pitch error %.1f deg" % [airtime, rad_to_deg(atan2(v.y, Vector2(v.x, v.z).length())), rad_to_deg(asin(clampf(-b.z.y, -1.0, 1.0))), rad_to_deg(atan2(b.x.y, b.y.y)), rad_to_deg(error)])
 
 
 ## Velocity change not explained by our own forces and gravity = collision.
