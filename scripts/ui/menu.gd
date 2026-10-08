@@ -10,6 +10,12 @@ signal open_editor
 const PX := Vector2i(1024, 768)
 const WORLD := Vector2(2.0, 1.5)
 const DIST := 2.2
+const PANEL_Y := 0.2              # panel centre above the eye ...
+## ... and below it the turning view of the selected track, as wide as the
+## panel, not as high
+const PREVIEW_WORLD := Vector2(2.0, 0.6)
+const PREVIEW_PX := Vector2i(1024, 307)
+const PREVIEW_GAP := 0.05
 
 var screen_name := "main"
 var sel := 0
@@ -19,6 +25,7 @@ var base := Transform3D.IDENTITY
 var _practice_track := 0
 var _practice_opponent := true
 var _showcase: Node3D
+var _preview: TrackPreview3D
 var _cal: Dictionary = {}
 var _time := 0.0
 var _pedals_shown := true
@@ -57,7 +64,11 @@ func _ready() -> void:
 
 	panel = Panel3D.new().setup(PX, WORLD)
 	add_child(panel)
-	panel.transform = base * Transform3D(Basis.IDENTITY, Vector3(0, -0.1, -DIST))
+	panel.transform = base * Transform3D(Basis.IDENTITY, Vector3(0, PANEL_Y, -DIST))
+	_preview = TrackPreview3D.new().setup(PREVIEW_PX, PREVIEW_WORLD)
+	add_child(_preview)
+	var preview_y := PANEL_Y - WORLD.y * 0.5 - PREVIEW_GAP - PREVIEW_WORLD.y * 0.5
+	_preview.transform = base * Transform3D(Basis.IDENTITY, Vector3(0, preview_y, -DIST))
 
 	_showcase = CarModel.new().build(Palette.PLAYER_BODY, false)
 	add_child(_showcase)
@@ -148,9 +159,23 @@ func _refresh() -> void:
 		"edit":
 			_screen_edit(sc)
 	sel = clampi(sel, 0, maxi(items.size() - 1, 0))   # the item list can shrink
+	_update_preview()
 	_draw_items(sc)
 	sc.text_centered(PX.y - 40, Lang.t("STEER=SELECT  GAS/ENTER=OK  BRAKE/ESC=BACK  F12=RECENTER VR"), Palette.ROAD_DARK, 2.4)
 	sc.commit()
+
+
+## The turning track view below the panel: on the screens where a track is
+## chosen (practice, multiplayer), the chosen one.
+func _update_preview() -> void:
+	if _preview == null:
+		return
+	if screen_name == "practice":
+		_preview.show_track(_practice_ids()[_practice_track])
+	elif screen_name == "online" and not _searching:
+		_preview.show_track(_online_ids()[_online_track])
+	else:
+		_preview.hide_track()
 
 
 func _draw_items(sc: PixelScreen) -> void:
