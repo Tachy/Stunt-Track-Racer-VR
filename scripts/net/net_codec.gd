@@ -5,11 +5,15 @@ extends RefCounted
 ## No autoload references, so the headless tests can use it.
 
 const MAGIC := 0xB1
-const VERSION := 1
+const VERSION := 2
 const HEADER_SIZE := 10
 const STATE_SIZE := 36
 const MAX_STR := 32
 const DEFAULT_PORT := 27015
+## A shared track goes in TRACK events of at most TRACK_PART bytes, at most
+## TRACK_PARTS of them.
+const TRACK_PART := 1000
+const TRACK_PARTS := 16
 
 # packet types
 const HELLO := 1
@@ -34,10 +38,23 @@ const EV_LEAVE := 9
 const EV_OPP := 10
 const EV_RESULT := 11
 const EV_ERROR := 12
+const EV_WATCH := 13
+const EV_LOBBY := 14
+const EV_OFFER := 15
+const EV_TAKE := 16
+const EV_TRACK := 17
 
 const JOIN_QUICK := 0
 const JOIN_CREATE := 1
 const JOIN_CODE := 2
+
+# ERROR codes
+const ERR_ROOM_NOT_FOUND := 1
+const ERR_ROOM_FULL := 2
+const ERR_VERSION := 3
+const ERR_OFFER_GONE := 4
+## Not on the wire: the shared track of a MATCH did not arrive or is broken.
+const ERR_NO_TRACK := 100
 
 const RESULT_NONE := 255
 ## Race states in STATE packets (index = wire value).
@@ -272,6 +289,33 @@ static func ev_join(mode: int, code: String, track: String, super_league: bool) 
 	return b.data_array
 
 
+static func ev_watch(on: bool) -> PackedByteArray:
+	return PackedByteArray([1 if on else 0])
+
+
+static func ev_offer(track: String, super_league: bool) -> PackedByteArray:
+	var b := StreamPeerBuffer.new()
+	put_str(b, track)
+	b.put_u8(1 if super_league else 0)
+	return b.data_array
+
+
+static func ev_take(offer_id: int) -> PackedByteArray:
+	var b := StreamPeerBuffer.new()
+	b.put_u16(offer_id & 0xFFFF)
+	return b.data_array
+
+
+## Part of a shared track (TrackLibrary.share_data).
+static func ev_track(part: int, parts: int, data: PackedByteArray) -> PackedByteArray:
+	var b := StreamPeerBuffer.new()
+	b.put_u8(part)
+	b.put_u8(parts)
+	b.put_u16(data.size())
+	b.put_data(data)
+	return b.data_array
+
+
 static func ev_lap(laps: int, race_s: float) -> PackedByteArray:
 	var b := StreamPeerBuffer.new()
 	b.put_u8(laps)
@@ -325,4 +369,20 @@ static func decode_event(b: StreamPeerBuffer) -> Dictionary:
 			e["reason"] = b.get_u8()
 		EV_ERROR:
 			e["code"] = b.get_u8()
+		EV_LOBBY:
+			# open races: [{id, name, color, track, super}], oldest first
+			e["online"] = b.get_u16()
+			var offers := []
+			for i in b.get_u8():
+				if b.get_available_bytes() < 2:
+					break
+				offers.append({"id": b.get_u16(), "name": get_str(b), "color": get_color(b),
+					"track": get_str(b), "super": b.get_u8() != 0})
+			e["offers"] = offers
+		EV_TRACK:
+			e["part"] = b.get_u8()
+			e["parts"] = b.get_u8()
+			var n := b.get_u16()
+			var r: Array = b.get_data(mini(n, b.get_available_bytes()))
+			e["data"] = r[1] if r[1].size() == n else PackedByteArray()
 	return e

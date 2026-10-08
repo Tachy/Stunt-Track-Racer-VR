@@ -8,6 +8,7 @@ package main
 import (
 	"log"
 	"math/rand"
+	"sort"
 	"time"
 )
 
@@ -21,6 +22,8 @@ const (
 	RatePerSecond  = 120 // packets per session and second
 	MaxSpeed       = 150 // m/s, STATE above this is dropped
 	MinLapMs       = 5000
+	// LobbyInterval: the LOBBY list goes out at most this often.
+	LobbyInterval = 500 * time.Millisecond
 	// FinishSlackMs: a finisher wins once the other car's race clock is this
 	// far past the finish time without a FINISH of its own.
 	FinishSlackMs = 500
@@ -44,6 +47,13 @@ type Session struct {
 	out       []outEvent
 	inAck     uint16 // last reliable event id handled in order
 
+	watching bool // gets the LOBBY list
+
+	// upload: the TRACK parts received so far, of uploadParts; the next
+	// OFFER / JOIN (create) takes them along
+	upload      [][]byte
+	uploadParts int
+
 	room     *Room
 	slot     int
 	ready    bool
@@ -65,8 +75,10 @@ func (s *Session) isOut() bool { return s.wrecked || s.left }
 type Room struct {
 	Code       string
 	Quick      bool
+	OfferID    uint16 // != 0: listed in the LOBBY while waiting
 	Track      string
 	Super      bool
+	TrackData  [][]byte // shared track of the first player (TRACK parts)
 	Players    [2]*Session
 	Started    bool // MATCH sent
 	Racing     bool // START sent
@@ -89,8 +101,12 @@ type Server struct {
 	rooms    map[string]*Room
 	quick    *Room
 	rng      *rand.Rand
-	send     func(addr string, data []byte)
-	Verbose  bool
+
+	nextOffer  uint16
+	lobbyDirty bool
+	lobbySent  time.Time
+	send       func(addr string, data []byte)
+	Verbose    bool
 }
 
 func NewServer(start time.Time, seed int64, send func(addr string, data []byte)) *Server {
@@ -226,6 +242,7 @@ func (sv *Server) hello(body []byte, addr string, now time.Time) {
 		}
 		sv.sessions[s.Token] = s
 		sv.byAddr[addr] = s
+		sv.lobbyDirty = true
 		sv.logf("hello %q from %s (token %08x)", hl.Name, addr, s.Token)
 	}
 	s.Name = hl.Name
@@ -301,6 +318,21 @@ func (sv *Server) event(s *Session, e Event, now time.Time) {
 		}
 	case EvLeave:
 		sv.leave(s, now)
+	case EvWatch:
+		s.watching = e.On
+		if e.On {
+			sv.sendLobby(s, now)
+		}
+	case EvOffer:
+		if r != nil && r.Started {
+			return
+		}
+		sv.leave(s, now) // an offer of its own before: replaced
+		sv.offer(s, e, now)
+	case EvTake:
+		sv.take(s, e.OfferID, now)
+	case EvTrack:
+		sv.receiveTrack(s, e)
 	}
 }
 
@@ -347,7 +379,7 @@ func (sv *Server) join(s *Session, e Event, now time.Time) {
 	}
 	if r == nil {
 		// create (also: first quick-match player waits in a fresh room)
-		r = &Room{Code: sv.newCode(), Quick: e.Mode == JoinQuick, Track: e.Track, Super: e.Super}
+		r = &Room{Code: sv.newCode(), Quick: e.Mode == JoinQuick, Track: e.Track, Super: e.Super, TrackData: s.takeUpload()}
 		r.Players[0] = s
 		sv.rooms[r.Code] = r
 		if r.Quick {
@@ -358,14 +390,104 @@ func (sv *Server) join(s *Session, e Event, now time.Time) {
 		sv.logf("room %s created by %q (track %s)", r.Code, s.Name, r.Track)
 		return
 	}
+	sv.match(s, r, now)
+}
+
+// match makes s the second player of r and sends MATCH to both.
+func (sv *Server) match(s *Session, r *Room, now time.Time) {
 	r.Players[1] = s
 	sv.attach(s, r, 1)
 	r.Started = true
+	if r.OfferID != 0 {
+		sv.lobbyDirty = true
+	}
+	// the shared track first: the reliable events arrive in order
+	for i, d := range r.TrackData {
+		sv.queue(s, Event{Kind: EvTrack, Part: byte(i), Parts: byte(len(r.TrackData)), Data: d}, now)
+	}
 	for i, p := range r.Players {
 		o := r.Players[1-i]
 		sv.queue(p, Event{Kind: EvMatch, Slot: byte(i), Track: r.Track, Super: r.Super, OppName: o.Name, OppColor: o.Color}, now)
 	}
 	sv.logf("room %s: %q vs %q on %s", r.Code, r.Players[0].Name, r.Players[1].Name, r.Track)
+}
+
+// offer opens a room listed in the LOBBY; the first one to TAKE it races.
+func (sv *Server) offer(s *Session, e Event, now time.Time) {
+	sv.nextOffer++
+	if sv.nextOffer == 0 {
+		sv.nextOffer = 1
+	}
+	r := &Room{Code: sv.newCode(), Track: e.Track, Super: e.Super, OfferID: sv.nextOffer, TrackData: s.takeUpload()}
+	r.Players[0] = s
+	sv.rooms[r.Code] = r
+	sv.attach(s, r, 0)
+	sv.lobbyDirty = true
+	sv.queue(s, Event{Kind: EvRoom, Code: r.Code}, now)
+	sv.logf("offer %d by %q (track %s)", r.OfferID, s.Name, r.Track)
+}
+
+// receiveTrack collects the TRACK parts of a session (part 0 starts anew,
+// anything out of line or too big drops the upload).
+func (sv *Server) receiveTrack(s *Session, e Event) {
+	if e.Part == 0 {
+		s.upload, s.uploadParts = nil, int(e.Parts)
+	}
+	if int(e.Part) != len(s.upload) || int(e.Parts) != s.uploadParts || s.uploadParts > MaxTrackParts || len(e.Data) > MaxTrackPart {
+		s.upload, s.uploadParts = nil, 0
+		return
+	}
+	s.upload = append(s.upload, e.Data)
+}
+
+// takeUpload hands over a complete upload (nil if none) and clears it.
+func (s *Session) takeUpload() [][]byte {
+	d := s.upload
+	if len(d) == 0 || len(d) != s.uploadParts {
+		d = nil
+	}
+	s.upload, s.uploadParts = nil, 0
+	return d
+}
+
+func (sv *Server) findOffer(id uint16) *Room {
+	for _, r := range sv.rooms {
+		if r.OfferID == id && !r.Started && r.Players[0] != nil && r.Players[0].room == r {
+			return r
+		}
+	}
+	return nil
+}
+
+// take accepts an open offer (an offer of its own is withdrawn first).
+func (sv *Server) take(s *Session, id uint16, now time.Time) {
+	if s.room != nil && s.room.Started {
+		return
+	}
+	r := sv.findOffer(id)
+	if r == nil || r.Players[0] == s {
+		sv.queue(s, Event{Kind: EvError, ErrNo: ErrOfferGone}, now)
+		return
+	}
+	sv.leave(s, now)
+	sv.match(s, r, now)
+}
+
+// openOffers lists the waiting offers of the others, oldest first.
+func (sv *Server) openOffers(except *Session) []Offer {
+	var list []Offer
+	for _, r := range sv.rooms {
+		if r.OfferID != 0 && !r.Started && r.Players[0] != nil && r.Players[0].room == r && r.Players[0] != except {
+			p := r.Players[0]
+			list = append(list, Offer{ID: r.OfferID, Name: p.Name, Color: p.Color, Track: r.Track, Super: r.Super})
+		}
+	}
+	sort.Slice(list, func(i, j int) bool { return SeqNewer(list[j].ID, list[i].ID) })
+	return list
+}
+
+func (sv *Server) sendLobby(s *Session, now time.Time) {
+	sv.queue(s, Event{Kind: EvLobby, Online: uint16(len(sv.sessions)), Offers: sv.openOffers(s)}, now)
 }
 
 func (sv *Server) attach(s *Session, r *Room, slot int) {
@@ -402,6 +524,9 @@ func (sv *Server) leave(s *Session, now time.Time) {
 	}
 	if gone {
 		delete(sv.rooms, r.Code)
+		if r.OfferID != 0 && !r.Started {
+			sv.lobbyDirty = true
+		}
 		if sv.quick == r {
 			sv.quick = nil
 		}
@@ -457,10 +582,12 @@ func (sv *Server) drop(s *Session, now time.Time, why string) {
 	sv.leave(s, now)
 	delete(sv.sessions, s.Token)
 	delete(sv.byAddr, s.Addr)
+	sv.lobbyDirty = true
 	sv.logf("session %q dropped (%s)", s.Name, why)
 }
 
-// Tick resends unacknowledged events and drops silent sessions.
+// Tick resends unacknowledged events, drops silent sessions and sends the
+// LOBBY list to its watchers when it changed.
 func (sv *Server) Tick(now time.Time) {
 	for _, s := range sv.sessions {
 		if now.Sub(s.lastSeen) > SessionTimeout || len(s.out) > MaxQueue {
@@ -471,6 +598,15 @@ func (sv *Server) Tick(now time.Time) {
 			if now.Sub(s.out[i].lastSent) >= ResendInterval {
 				s.out[i].lastSent = now
 				sv.sendPkt(s, PktEvent, EncodeEvent(s.out[i].ev))
+			}
+		}
+	}
+	if sv.lobbyDirty && now.Sub(sv.lobbySent) >= LobbyInterval {
+		sv.lobbyDirty = false
+		sv.lobbySent = now
+		for _, s := range sv.sessions {
+			if s.watching {
+				sv.sendLobby(s, now)
 			}
 		}
 	}

@@ -418,10 +418,46 @@ static func load_custom(id: String) -> Dictionary:
 	return data if data is Dictionary else {}
 
 
+## Online: the editor track of another player, kept for this race only
+## (never saved): {name, def}. Its id is SHARED_ID.
+const SHARED_ID := "net/shared"
+const SHARED_MAX_SIZE := 256 * 1024
+static var shared := {}
+
+
+## Online: a custom track to send along with an offer (name and def as
+## compact JSON, deflated); empty if there is none.
+static func share_data(id: String) -> PackedByteArray:
+	var data := load_custom(id)
+	if not data.get("def") is Dictionary:
+		return PackedByteArray()
+	var out := {"name": data.get("name", id.trim_prefix(CUSTOM_PREFIX)), "def": data["def"]}
+	return JSON.stringify(out).to_utf8_buffer().compress(FileAccess.COMPRESSION_DEFLATE)
+
+
+## Online: keeps a track received with share_data as SHARED_ID (replacing
+## the one before) and returns that id; "" if the data is broken.
+static func install_shared(blob: PackedByteArray) -> String:
+	if blob.is_empty():
+		return ""
+	var text := blob.decompress_dynamic(SHARED_MAX_SIZE, FileAccess.COMPRESSION_DEFLATE).get_string_from_utf8()
+	var data = JSON.parse_string(text) if text != "" else null
+	if not (data is Dictionary and data.get("def") is Dictionary and data["def"].get("pieces") is Array):
+		return ""
+	shared = {"name": str(data.get("name", "")), "def": data["def"]}
+	return SHARED_ID
+
+
+static func clear_shared() -> void:
+	shared = {}
+
+
 static func get_def(id: String) -> Dictionary:
 	var d: Dictionary
 	if is_custom(id):
 		d = load_custom(id).get("def", {})
+	elif id == SHARED_ID:
+		d = shared.get("def", {}).duplicate(true)
 	else:
 		d = TRACKS[id].duplicate(true)
 	d["id"] = id
@@ -431,11 +467,13 @@ static func get_def(id: String) -> Dictionary:
 static func display_name(id: String) -> String:
 	if is_custom(id):
 		return str(load_custom(id).get("name", id.trim_prefix(CUSTOM_PREFIX)))
+	if id == SHARED_ID:
+		return str(shared.get("name", ""))
 	return TRACKS[id]["name"]
 
 
 static func division_of(id: String) -> int:
-	if is_custom(id):
+	if is_custom(id) or id == SHARED_ID:
 		return 1
 	if TRACKS.has(id) and TRACKS[id].has("division"):
 		return TRACKS[id]["division"]

@@ -12,10 +12,15 @@ import (
 
 const (
 	Magic      = 0xB1
-	Version    = 1
+	Version    = 2
+	MaxOffers  = 20 // entries in one LOBBY
 	HeaderSize = 10
 	StateSize  = 36
 	MaxStr     = 32
+	// A shared track goes in TRACK events of at most MaxTrackPart bytes,
+	// at most MaxTrackParts of them.
+	MaxTrackPart  = 1000
+	MaxTrackParts = 16
 )
 
 // packet types
@@ -44,6 +49,11 @@ const (
 	EvOpp     = 10
 	EvResult  = 11
 	EvError   = 12
+	EvWatch   = 13
+	EvLobby   = 14
+	EvOffer   = 15
+	EvTake    = 16
+	EvTrack   = 17
 )
 
 const (
@@ -56,6 +66,7 @@ const (
 	ErrRoomNotFound = 1
 	ErrRoomFull     = 2
 	ErrVersion      = 3
+	ErrOfferGone    = 4
 )
 
 const (
@@ -344,6 +355,15 @@ func DecodeHello(p []byte) (Hello, error) {
 	return h, r.Err
 }
 
+// Offer is one open race in the LOBBY list.
+type Offer struct {
+	ID    uint16
+	Name  string
+	Color [3]byte
+	Track string
+	Super bool
+}
+
 // Event is one reliable message: id, kind and its fields (only those of the kind).
 type Event struct {
 	ID   uint16
@@ -368,6 +388,15 @@ type Event struct {
 	Winner byte
 	Reason byte
 	ErrNo  byte
+	// WATCH / LOBBY / TAKE
+	On      bool
+	Online  uint16
+	Offers  []Offer
+	OfferID uint16
+	// TRACK
+	Part  byte
+	Parts byte
+	Data  []byte
 }
 
 func b2u(b bool) byte {
@@ -412,6 +441,29 @@ func EncodeEvent(e Event) []byte {
 		w.U8(e.Reason)
 	case EvError:
 		w.U8(e.ErrNo)
+	case EvWatch:
+		w.U8(b2u(e.On))
+	case EvLobby:
+		w.U16(e.Online)
+		n := min(len(e.Offers), MaxOffers)
+		w.U8(byte(n))
+		for _, o := range e.Offers[:n] {
+			w.U16(o.ID)
+			w.Str(o.Name)
+			w.Color(o.Color)
+			w.Str(o.Track)
+			w.U8(b2u(o.Super))
+		}
+	case EvOffer:
+		w.Str(e.Track)
+		w.U8(b2u(e.Super))
+	case EvTake:
+		w.U16(e.OfferID)
+	case EvTrack:
+		w.U8(e.Part)
+		w.U8(e.Parts)
+		w.U16(uint16(len(e.Data)))
+		w.B = append(w.B, e.Data...)
 	}
 	return w.B
 }
@@ -450,6 +502,23 @@ func DecodeEvent(p []byte) (Event, error) {
 		e.Reason = r.U8()
 	case EvError:
 		e.ErrNo = r.U8()
+	case EvWatch:
+		e.On = r.U8() != 0
+	case EvLobby:
+		e.Online = r.U16()
+		n := int(r.U8())
+		for i := 0; i < n && r.Err == nil; i++ {
+			e.Offers = append(e.Offers, Offer{ID: r.U16(), Name: r.Str(), Color: r.Color(), Track: r.Str(), Super: r.U8() != 0})
+		}
+	case EvOffer:
+		e.Track = r.Str()
+		e.Super = r.U8() != 0
+	case EvTake:
+		e.OfferID = r.U16()
+	case EvTrack:
+		e.Part = r.U8()
+		e.Parts = r.U8()
+		e.Data = append([]byte{}, r.take(int(r.U16()))...)
 	}
 	return e, r.Err
 }

@@ -5,7 +5,9 @@ extends Node
 
 signal welcomed
 signal room_created(code: String)
+signal lobby_changed                      # players_online / offers
 signal matched(info: Dictionary)          # {slot, track, super, opp_name, opp_color}
+                                          # (a shared track: track = TrackLibrary.SHARED_ID)
 signal start_at(server_s: float)          # drop time on the server clock
 signal opponent_event(what: int, laps: int, race_s: float)
 signal result_received(winner: int, reason: int)
@@ -31,6 +33,10 @@ var opp_state_ms := 0
 ## Server clock (s) when the latest opponent state arrived.
 var opp_state_server_s := 0.0
 var opp_states_received := 0
+## LOBBY (while watching): players on the server and the open races
+## [{id, name, color, track, super}], oldest first.
+var players_online := 0
+var offers: Array = []
 
 var _udp: PacketPeerUDP
 var _seq := 0
@@ -45,6 +51,8 @@ var _ping_t := 0.0
 var _last_rx := 0
 var _clock: Array = []    # [{rtt, offset}] newest last
 var _offset_ms := 0.0     # server_ms - local ms
+var _watching := false
+var _track_in: Array = [] # TRACK parts received for the next MATCH
 
 
 func _ready() -> void:
@@ -89,6 +97,8 @@ func connect_to(address: String, player_name: String, color: Color) -> bool:
 	status = "connecting"
 	_hello_t = HELLO_RESEND
 	_last_rx = local_ms()
+	if _watching:
+		_event(NetCodec.EV_WATCH, NetCodec.ev_watch(true))
 	print("[Net] connecting to %s:%d as %s" % [ip, port, player_name])
 	return true
 
@@ -108,10 +118,13 @@ func disconnect_from() -> void:
 	_out_id = 0
 	_out.clear()
 	_clock.clear()
+	players_online = 0
+	offers = []
 	_reset_race()
 
 
 func _reset_race() -> void:
+	_track_in = []
 	opp_state = {}
 	opp_states_received = 0
 	_opp_seq = -1
@@ -123,7 +136,36 @@ func join(mode: int, code: String, track: String, super_league: bool) -> void:
 	slot = -1
 	match_info = {}
 	_reset_race()
+	if mode != NetCodec.JOIN_CODE:
+		_send_track(track)
 	_event(NetCodec.EV_JOIN, NetCodec.ev_join(mode, code, track, super_league))
+
+
+## Receive the LOBBY list (kept across reconnects until switched off).
+func watch(on: bool) -> void:
+	_watching = on
+	if not on:
+		players_online = 0
+		offers = []
+	_event(NetCodec.EV_WATCH, NetCodec.ev_watch(on))
+
+
+## Puts an open race on the track into the LOBBY list (replaces one of our own).
+## A track from the editor goes along: the one who takes the race gets it.
+func offer(track: String, super_league: bool) -> void:
+	slot = -1
+	match_info = {}
+	_reset_race()
+	_send_track(track)
+	_event(NetCodec.EV_OFFER, NetCodec.ev_offer(track, super_league))
+
+
+## Accepts the open race offer_id of another player: MATCH follows (or ERROR).
+func take(offer_id: int) -> void:
+	slot = -1
+	match_info = {}
+	_reset_race()
+	_event(NetCodec.EV_TAKE, NetCodec.ev_take(offer_id))
 
 
 func send_ready() -> void:
@@ -154,6 +196,31 @@ func leave() -> void:
 func send_state(s: Dictionary) -> void:
 	if is_online():
 		_send(NetCodec.STATE, NetCodec.encode_state(s))
+
+
+## A track from the editor goes to the server in TRACK parts before the
+## OFFER / JOIN that names it (the reliable events arrive in order).
+func _send_track(track: String) -> void:
+	if not TrackLibrary.is_custom(track):
+		return
+	var data := TrackLibrary.share_data(track)
+	var parts := ceili(data.size() / float(NetCodec.TRACK_PART))
+	if parts == 0 or parts > NetCodec.TRACK_PARTS:
+		push_warning("[Net] track %s cannot be shared (%d bytes)" % [track, data.size()])
+		return
+	for i in parts:
+		_event(NetCodec.EV_TRACK, NetCodec.ev_track(i, parts, data.slice(i * NetCodec.TRACK_PART, (i + 1) * NetCodec.TRACK_PART)))
+
+
+## The shared track of a MATCH, kept for this race: TrackLibrary.SHARED_ID,
+## or "" if it did not arrive whole or is broken.
+func _install_track() -> String:
+	var data := PackedByteArray()
+	for p in _track_in:
+		data.append_array(p["data"])
+	if _track_in.is_empty() or _track_in.size() != int(_track_in[0]["parts"]):
+		return ""
+	return TrackLibrary.install_shared(data)
 
 
 # --- transport -----------------------------------------------------------------------
@@ -277,11 +344,30 @@ func _handle_event(e: Dictionary) -> void:
 		NetCodec.EV_ROOM:
 			print("[Net] room %s, waiting for an opponent" % e["code"])
 			room_created.emit(e["code"])
+		NetCodec.EV_TRACK:
+			if e["part"] == 0:
+				_track_in = []
+			if e["part"] == _track_in.size():
+				_track_in.append(e)
 		NetCodec.EV_MATCH:
+			if e["slot"] == 1 and TrackLibrary.is_custom(e["track"]):
+				var id := _install_track()
+				_track_in = []
+				if id == "":
+					push_warning("[Net] the shared track %s did not arrive" % e["track"])
+					_event(NetCodec.EV_LEAVE)
+					failed.emit(NetCodec.ERR_NO_TRACK)
+					return
+				print("[Net] shared track %s received (%s)" % [e["track"], TrackLibrary.display_name(id)])
+				e["track"] = id
 			slot = e["slot"]
 			match_info = e
 			print("[Net] match: slot %d vs %s on %s" % [slot, e["opp_name"], e["track"]])
 			matched.emit(e)
+		NetCodec.EV_LOBBY:
+			players_online = e["online"]
+			offers = e["offers"]
+			lobby_changed.emit()
 		NetCodec.EV_START:
 			start_at.emit(e["drop_ms"] / 1000.0)
 		NetCodec.EV_OPP:

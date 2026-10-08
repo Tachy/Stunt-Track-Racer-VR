@@ -221,3 +221,173 @@ func TestJoinErrors(t *testing.T) {
 		t.Fatalf("full: %+v", c.events)
 	}
 }
+
+func lobbyTick(h *harness) {
+	h.now = h.now.Add(LobbyInterval)
+	h.sv.Tick(h.now)
+}
+
+func TestLobbyOfferTake(t *testing.T) {
+	h := newHarness(t)
+	a := h.client("1.1.1.1:5000", "Ann")
+	b := h.client("2.2.2.2:6000", "Bob")
+	h.event(b, Event{Kind: EvWatch, On: true})
+	if l := b.last(EvLobby); l == nil || l.Online != 2 || len(l.Offers) != 0 {
+		t.Fatalf("first lobby: %+v", l)
+	}
+	h.event(a, Event{Kind: EvOffer, Track: "camel_back", Super: true})
+	lobbyTick(h)
+	l := b.last(EvLobby)
+	if l == nil || len(l.Offers) != 1 || l.Offers[0].Name != "Ann" || l.Offers[0].Track != "camel_back" || !l.Offers[0].Super {
+		t.Fatalf("offer not listed: %+v", l)
+	}
+	if a.last(EvLobby) != nil {
+		t.Fatal("lobby sent to a non-watcher")
+	}
+	h.event(a, Event{Kind: EvWatch, On: true})
+	if l := a.last(EvLobby); l == nil || len(l.Offers) != 0 {
+		t.Fatalf("own offer listed: %+v", l)
+	}
+	// own offer: not to be taken
+	h.event(a, Event{Kind: EvTake, OfferID: l.Offers[0].ID})
+	if e := a.last(EvError); e == nil || e.ErrNo != ErrOfferGone {
+		t.Fatalf("own offer taken: %+v", a.events)
+	}
+	h.event(b, Event{Kind: EvTake, OfferID: l.Offers[0].ID})
+	ma, mb := a.last(EvMatch), b.last(EvMatch)
+	if ma == nil || mb == nil || ma.Slot != 0 || mb.Slot != 1 || mb.Track != "camel_back" || !mb.Super || mb.OppName != "Ann" {
+		t.Fatalf("match: %+v / %+v", ma, mb)
+	}
+	lobbyTick(h)
+	if l := b.last(EvLobby); len(l.Offers) != 0 {
+		t.Fatalf("taken offer still listed: %+v", l)
+	}
+	// a third one comes too late
+	c := h.client("3.3.3.3:7000", "Cat")
+	h.event(c, Event{Kind: EvTake, OfferID: l.Offers[0].ID})
+	if e := c.last(EvError); e == nil || e.ErrNo != ErrOfferGone {
+		t.Fatalf("late take: %+v", c.events)
+	}
+}
+
+func TestLobbyOfferGone(t *testing.T) {
+	h := newHarness(t)
+	a := h.client("1.1.1.1:5000", "Ann")
+	b := h.client("2.2.2.2:6000", "Bob")
+	h.event(b, Event{Kind: EvWatch, On: true})
+	h.event(a, Event{Kind: EvOffer, Track: "camel_back"})
+	h.event(a, Event{Kind: EvOffer, Track: "big_dipper"}) // replaces the first
+	lobbyTick(h)
+	if l := b.last(EvLobby); len(l.Offers) != 1 || l.Offers[0].Track != "big_dipper" {
+		t.Fatalf("replaced offer: %+v", l)
+	}
+	h.event(a, Event{Kind: EvLeave})
+	lobbyTick(h)
+	if l := b.last(EvLobby); len(l.Offers) != 0 {
+		t.Fatalf("withdrawn offer listed: %+v", l)
+	}
+	// an offer of a player gone silent disappears too
+	h.event(a, Event{Kind: EvOffer, Track: "camel_back"})
+	for i := 0; i < 3; i++ {
+		h.now = h.now.Add(2 * time.Second)
+		h.send(b, PktAck, nil)
+		h.sv.Tick(h.now)
+	}
+	if l := b.last(EvLobby); len(l.Offers) != 0 || l.Online != 1 {
+		t.Fatalf("offer of a silent player: %+v", l)
+	}
+	// b offers while watching, then takes a newer offer of c instead
+	h.event(b, Event{Kind: EvOffer, Track: "little_ramp"})
+	c := h.client("3.3.3.3:7000", "Cat")
+	h.event(c, Event{Kind: EvOffer, Track: "big_dipper"})
+	lobbyTick(h)
+	l := b.last(EvLobby)
+	if len(l.Offers) != 1 || l.Offers[0].Name != "Cat" {
+		t.Fatalf("own offer listed: %+v", l)
+	}
+	d := h.client("4.4.4.4:8000", "Dan")
+	h.event(d, Event{Kind: EvWatch, On: true})
+	if l := d.last(EvLobby); len(l.Offers) != 2 || l.Offers[0].Name != "Bob" || l.Offers[1].Name != "Cat" {
+		t.Fatalf("order: %+v", l)
+	}
+	h.event(b, Event{Kind: EvTake, OfferID: l.Offers[0].ID})
+	if m := b.last(EvMatch); m == nil || m.Track != "big_dipper" {
+		t.Fatalf("take while offering: %+v", m)
+	}
+	lobbyTick(h)
+	if l := b.last(EvLobby); len(l.Offers) != 0 {
+		t.Fatalf("both offers should be gone: %+v", l)
+	}
+}
+
+// A shared track goes with the offer to the one who takes it, before MATCH.
+func TestSharedTrack(t *testing.T) {
+	h := newHarness(t)
+	a := h.client("1.1.1.1:5000", "Ann")
+	b := h.client("2.2.2.2:6000", "Bob")
+	parts := [][]byte{[]byte("first part"), []byte("second")}
+	for i, p := range parts {
+		h.event(a, Event{Kind: EvTrack, Part: byte(i), Parts: 2, Data: p})
+	}
+	h.event(a, Event{Kind: EvOffer, Track: "custom/my_track"})
+	h.event(b, Event{Kind: EvWatch, On: true})
+	l := b.last(EvLobby)
+	if l == nil || len(l.Offers) != 1 || l.Offers[0].Track != "custom/my_track" {
+		t.Fatalf("offer: %+v", l)
+	}
+	h.event(b, Event{Kind: EvTake, OfferID: l.Offers[0].ID})
+	var got [][]byte
+	matched := false
+	for _, e := range b.events {
+		switch e.Kind {
+		case EvTrack:
+			if matched || int(e.Part) != len(got) || e.Parts != 2 {
+				t.Fatalf("track part out of order: %+v", e)
+			}
+			got = append(got, e.Data)
+		case EvMatch:
+			matched = true
+		}
+	}
+	if !matched || len(got) != 2 || string(got[0]) != "first part" || string(got[1]) != "second" {
+		t.Fatalf("shared track: %q matched=%v", got, matched)
+	}
+	for _, e := range a.events {
+		if e.Kind == EvTrack {
+			t.Fatal("track sent back to its owner")
+		}
+	}
+	// the upload went with that offer: a new offer without TRACK has none
+	c := h.client("3.3.3.3:7000", "Cat")
+	h.event(a, Event{Kind: EvLeave})
+	h.event(a, Event{Kind: EvOffer, Track: "camel_back"})
+	lobbyTick(h)
+	h.event(c, Event{Kind: EvWatch, On: true})
+	h.event(c, Event{Kind: EvTake, OfferID: c.last(EvLobby).Offers[0].ID})
+	if c.last(EvTrack) != nil || c.last(EvMatch) == nil {
+		t.Fatalf("built-in track: %+v", c.events)
+	}
+}
+
+// Incomplete or oversized uploads are dropped.
+func TestSharedTrackRejected(t *testing.T) {
+	h := newHarness(t)
+	a := h.client("1.1.1.1:5000", "Ann")
+	b := h.client("2.2.2.2:6000", "Bob")
+	h.event(a, Event{Kind: EvTrack, Part: 0, Parts: 2, Data: []byte("only one")})
+	h.event(a, Event{Kind: EvOffer, Track: "custom/x"})
+	h.event(b, Event{Kind: EvWatch, On: true})
+	h.event(b, Event{Kind: EvTake, OfferID: b.last(EvLobby).Offers[0].ID})
+	if b.last(EvTrack) != nil || b.last(EvMatch) == nil {
+		t.Fatalf("incomplete upload sent: %+v", b.events)
+	}
+	s := h.sv.sessions[a.token]
+	h.event(a, Event{Kind: EvTrack, Part: 0, Parts: 1, Data: make([]byte, MaxTrackPart+1)})
+	if s.upload != nil {
+		t.Fatal("oversized part kept")
+	}
+	h.event(a, Event{Kind: EvTrack, Part: 0, Parts: MaxTrackParts + 1, Data: []byte("x")})
+	if s.upload != nil {
+		t.Fatal("too many parts kept")
+	}
+}

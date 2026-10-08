@@ -17,8 +17,11 @@ extends Node
 ##   --fps               log frame rate every second
 ##   --joydump           print joypad axes/buttons twice a second
 ##   --lang=<en|de>      UI language for this run (not saved)
-##   --online=<host[:port]> quick match on that server (with --track=<id>)
+##   --online=<host[:port]> quick match on that server (with --track=<id>);
+##                       with --offer: offer the track in the list, with
+##                       --take: race the first open race in the list
 ##   --name=<name>       online player name for this run
+##   --server=<host[:port]>  online server for this run (menu; not saved)
 ##   --car-photos        save close-ups of the car model, then quit
 ##   --editor[=<name>]   open the track editor (desktop), optionally a saved track
 
@@ -35,6 +38,8 @@ func _ready() -> void:
 			_args[kv[0]] = kv[1] if kv.size() > 1 else "1"
 	if _args.get("lang", "") in Lang.LANGUAGES:
 		Lang.current = _args["lang"]
+	if _args.has("server"):
+		Settings.server_address = _args["server"]
 	if _args.has("render-scale"):
 		# benchmark: render the 3D scene at a multiple of the window size
 		get_viewport().scaling_3d_scale = float(_args["render-scale"])
@@ -82,8 +87,19 @@ func _process(delta: float) -> void:
 ## Command line: connect, quick match, race (testing without the menu).
 func _start_online() -> void:
 	var nm: String = _args.get("name", Settings.player_name)
-	Net.matched.connect(func(info: Dictionary): _start_race(GameState.online_request(info)))
-	Net.welcomed.connect(func(): Net.join(NetCodec.JOIN_QUICK, "", _args.get("track", "first_flight"), _args.has("super")), CONNECT_ONE_SHOT)
+	Net.matched.connect(func(info: Dictionary):
+		Net.watch(false)
+		_start_race(GameState.online_request(info)))
+	var track: String = _args.get("track", "first_flight")
+	if _args.has("take"):
+		Net.watch(true)
+		Net.lobby_changed.connect(func():
+			if Net.slot < 0 and not Net.offers.is_empty():
+				Net.take(Net.offers[0]["id"]))
+	elif _args.has("offer"):
+		Net.welcomed.connect(func(): Net.offer(track, _args.has("super")), CONNECT_ONE_SHOT)
+	else:
+		Net.welcomed.connect(func(): Net.join(NetCodec.JOIN_QUICK, "", track, _args.has("super")), CONNECT_ONE_SHOT)
 	if not Net.connect_to(_args["online"], nm, Settings.player_color):
 		push_error("[Main] cannot connect to %s" % _args["online"])
 		get_tree().quit(1)

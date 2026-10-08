@@ -12,7 +12,7 @@ time, laps, finish order, timeouts). It runs no physics.
 
 | offset | type | field |
 |---|---|---|
-| 0 | u8  | `magic` = 0xB1 (protocol version 1) |
+| 0 | u8  | `magic` = 0xB1 (header format; the protocol version is in HELLO) |
 | 1 | u8  | `type` |
 | 2 | u16 | `seq`: packet counter of the sender (drops stale STATE packets) |
 | 4 | u16 | `ack`: highest reliable event id received in order from the peer |
@@ -22,7 +22,7 @@ time, laps, finish order, timeouts). It runs no physics.
 
 | type | name | dir | payload |
 |---|---|---|---|
-| 1 | HELLO | C→S | u8 version, u8 r, u8 g, u8 b, str name |
+| 1 | HELLO | C→S | u8 version (2), u8 r, u8 g, u8 b, str name |
 | 2 | WELCOME | S→C | u32 token, u32 server_ms |
 | 3 | PING | C→S | u32 client_ms |
 | 4 | PONG | S→C | u32 client_ms, u32 server_ms |
@@ -53,10 +53,25 @@ every 100 ms.
 | 9 | LEAVE | C→S | empty: retire / back to the menu |
 | 10 | OPP | S→C | u8 kind (6 lap, 7 finish, 8 wrecked, 9 left), u8 laps, u32 ms |
 | 11 | RESULT | S→C | u8 winner slot (255 = none), u8 reason |
-| 12 | ERROR | S→C | u8 code (1 room not found, 2 room full, 3 version) |
+| 12 | ERROR | S→C | u8 code (1 room not found, 2 room full, 3 version, 4 offer gone) |
+| 13 | WATCH | C→S | u8 on: 1 = send me the LOBBY list, 0 = stop |
+| 14 | LOBBY | S→C | u16 players online, u8 n (≤ 20), n × {u16 offer id, str name, u8 r, g, b, str track, u8 super} |
+| 15 | OFFER | C→S | str track, u8 super: an open race in the list (replaces an own one) |
+| 16 | TAKE | C→S | u16 offer id: race that open race |
+| 17 | TRACK | both | u8 part, u8 parts (≤ 16), u16 n (≤ 1000), n bytes: part of a shared track |
 
 RESULT reasons: 0 finished first, 1 opponent wrecked, 2 opponent left /
 timed out, 3 both out.
+
+### Shared tracks
+A track from the editor (id `custom/<name>`) goes along with the race: the
+client sends its name and definition (compact JSON, deflated with zlib) as
+TRACK parts right before the OFFER or JOIN (create / quick) that names it.
+The server keeps the parts with that room without reading them and sends
+them to the second player right before MATCH. That client keeps the track
+in memory for this race only (never saved). Parts out of line, more than 16
+parts or parts over 1000 bytes drop the upload; an offer without a complete
+upload has no track along.
 
 ## STATE payload (36 bytes)
 
@@ -87,9 +102,14 @@ direction at 30 Hz.
 
 ## Room flow
 1. HELLO → WELCOME (resent every 0.5 s until answered).
-2. JOIN. Quick match pairs two waiting quick-match players; create returns
-   ROOM with a 4-letter code; join with that code. When two players are in a
-   room both get MATCH (track and league of the creator / first player).
+2. The menu sends WATCH and gets LOBBY: the open races of the others, oldest
+   first, sent again when the list or the player count changes (at most
+   twice a second). OFFER puts an own open race in the list (ROOM answers);
+   TAKE races one of the list: both get MATCH with the track and league of
+   the offer. A TAKE on an offer no longer there gets ERROR 4. An offer goes
+   when it is taken, on LEAVE, or when its player leaves or times out.
+   Without the list: JOIN. Quick match pairs two waiting quick-match
+   players; create returns ROOM with a 4-letter code; join with that code.
 3. Both build the race and send READY. The server sends START with a drop
    time 3 s ahead.
 4. STATE flows both ways. LAP / FINISH / WRECKED / LEAVE go to the server,

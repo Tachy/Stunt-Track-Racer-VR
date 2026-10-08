@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_league_track_features", "test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -577,6 +577,25 @@ func test_net_golden() -> void:
 	check(e.get("kind", 0) == NetCodec.EV_MATCH and e["id"] == 3 and e["slot"] == 1, "match event")
 	check(e.get("track", "") == "camel_back" and e.get("opp_name", "") == "Max" and e.get("super", true) == false, "match fields")
 	check((e["opp_color"] as Color).is_equal_approx(Color8(34, 102, 221)), "match colour")
+	pkt = NetCodec.packet(NetCodec.EVENT, 12, 5, 42, NetCodec.encode_event(2, NetCodec.EV_OFFER,
+		NetCodec.ev_offer("big_dipper", true)))
+	check(pkt.hex_encode() == _golden("offer"), "offer packet matches Go: %s" % pkt.hex_encode())
+	pkt = NetCodec.packet(NetCodec.EVENT, 13, 5, 42, NetCodec.encode_event(3, NetCodec.EV_TAKE, NetCodec.ev_take(513)))
+	check(pkt.hex_encode() == _golden("take"), "take packet matches Go: %s" % pkt.hex_encode())
+	var part := PackedByteArray([0x78, 0x9c, 0x01, 0xff])
+	pkt = NetCodec.packet(NetCodec.EVENT, 14, 5, 42, NetCodec.encode_event(4, NetCodec.EV_TRACK, NetCodec.ev_track(1, 3, part)))
+	check(pkt.hex_encode() == _golden("track"), "track packet matches Go: %s" % pkt.hex_encode())
+	h = NetCodec.parse(_golden("track").hex_decode())
+	e = NetCodec.decode_event(h["body"])
+	check(e.get("kind", 0) == NetCodec.EV_TRACK and e["part"] == 1 and e["parts"] == 3 and e["data"] == part, "track event")
+	h = NetCodec.parse(_golden("lobby").hex_decode())
+	e = NetCodec.decode_event(h["body"])
+	var offers: Array = e.get("offers", [])
+	check(e.get("kind", 0) == NetCodec.EV_LOBBY and e["id"] == 5 and e["online"] == 300 and offers.size() == 2, "lobby event")
+	if offers.size() == 2:
+		check(offers[0]["id"] == 513 and offers[0]["name"] == "Max" and offers[0]["track"] == "camel_back" and not offers[0]["super"], "lobby offer 1")
+		check(offers[1]["id"] == 7 and offers[1]["name"] == "Jöhn" and offers[1]["track"] == "big_dipper" and offers[1]["super"], "lobby offer 2")
+		check((offers[1]["color"] as Color).is_equal_approx(Color8(255, 128, 0)), "lobby colour")
 
 
 func test_net_roundtrip() -> void:
@@ -1141,6 +1160,30 @@ func test_custom_track_delete() -> void:
 	check(not FileAccess.file_exists(TrackLibrary.custom_path(id)), "file gone")
 	check(not TrackLibrary.delete_custom(id), "nothing left to delete")
 	check(not TrackLibrary.delete_custom("camel_back"), "built-in tracks cannot be deleted")
+
+
+## A shared editor track: kept in memory for the race, never saved.
+func test_track_share() -> void:
+	var src := TrackLibrary.CUSTOM_PREFIX + "zz_test_share"
+	var def := TrackLibrary.get_def("camel_back")
+	def.erase("id")
+	DirAccess.make_dir_recursive_absolute(TrackLibrary.CUSTOM_DIR)
+	var f := FileAccess.open(TrackLibrary.custom_path(src), FileAccess.WRITE)
+	f.store_string(JSON.stringify({"name": "ZZ Share", "closed": true, "pieces": [], "def": def}))
+	f.close()
+	var files := DirAccess.get_files_at(TrackLibrary.CUSTOM_DIR).size()
+	var id := TrackLibrary.install_shared(TrackLibrary.share_data(src))
+	TrackLibrary.delete_custom(src)
+	check(id == TrackLibrary.SHARED_ID, "shared track kept as %s" % id)
+	check(TrackLibrary.display_name(id) == "ZZ Share" and TrackLibrary.division_of(id) == 1, "shared name")
+	var d := TrackLibrary.get_def(id)
+	check(d.get("id") == id and d.get("pieces") == JSON.parse_string(JSON.stringify(def["pieces"])), "shared def")
+	check(TrackPath.new(d).total_length > 100.0, "shared track drivable")
+	check(DirAccess.get_files_at(TrackLibrary.CUSTOM_DIR).size() == files - 1, "nothing saved")
+	check(TrackLibrary.install_shared(PackedByteArray([1, 2, 3])) == "", "garbage refused")
+	check(TrackLibrary.install_shared(JSON.stringify({"name": "x"}).to_utf8_buffer().compress(FileAccess.COMPRESSION_DEFLATE)) == "", "no def refused")
+	TrackLibrary.clear_shared()
+	check(TrackLibrary.get_def(id).get("pieces") == null, "cleared")
 
 
 func test_editor_crossing_heights() -> void:

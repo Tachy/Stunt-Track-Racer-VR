@@ -29,10 +29,13 @@ var _preview: TrackPreview3D
 var _cal: Dictionary = {}
 var _time := 0.0
 var _pedals_shown := true
-# online screen
+# online screen: the open races of the others (a window of OFFER_ROWS rows),
+# then our own offer
+const OFFER_ROWS := 4
 var _online_track := 0
 var _online_msg := ""
-var _searching := false
+var _searching := false          # our offer is waiting in the list
+var _offer_top := 0              # first open race shown
 # text entry ("edit" screen): {title, value, chars, max, done: Callable}
 var _edit := {}
 const NAME_CHARS := "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_"
@@ -82,6 +85,7 @@ func _ready() -> void:
 	InputManager.back.connect(_on_back)
 	InputManager.device_changed.connect(_refresh)
 	Net.welcomed.connect(_on_net_change)
+	Net.lobby_changed.connect(_on_net_change)
 	Net.matched.connect(_on_net_matched)
 	Net.failed.connect(_on_net_failed)
 	Net.disconnected.connect(_on_net_lost)
@@ -98,6 +102,7 @@ func _exit_tree() -> void:
 	InputManager.back.disconnect(_on_back)
 	InputManager.device_changed.disconnect(_refresh)
 	Net.welcomed.disconnect(_on_net_change)
+	Net.lobby_changed.disconnect(_on_net_change)
 	Net.matched.disconnect(_on_net_matched)
 	Net.failed.disconnect(_on_net_failed)
 	Net.disconnected.disconnect(_on_net_lost)
@@ -111,7 +116,7 @@ func _process(delta: float) -> void:
 	if screen_name == "calibrate":
 		_calibration_step(delta)
 		_refresh()
-	elif (screen_name == "online" or screen_name == "edit") and Engine.get_process_frames() % 30 == 0:
+	elif screen_name in ["online", "online_setup", "edit"] and Engine.get_process_frames() % 30 == 0:
 		_refresh()   # connection state, ping
 	elif screen_name == "main" and InputManager.pedals_ready() != _pedals_shown:
 		_pedals_shown = InputManager.pedals_ready()
@@ -123,6 +128,8 @@ func _process(delta: float) -> void:
 func open(s: String) -> void:
 	screen_name = s
 	sel = 0
+	if s == "main":
+		TrackLibrary.clear_shared()   # the track of the last online race was only lent
 	if s == "calibrate":
 		_cal = {"step": "wake", "t": 0.0, "hold": 0.0, "first": InputManager.snapshot_axes(), "moved": {}}
 		InputManager.capture_mode = InputManager.device >= 0
@@ -132,6 +139,7 @@ func open(s: String) -> void:
 		_online_msg = ""
 		_searching = false
 		_online_connect()
+		Net.watch(true)
 	_refresh()
 
 
@@ -156,6 +164,8 @@ func _refresh() -> void:
 			_screen_result(sc)
 		"online":
 			_screen_online(sc)
+		"online_setup":
+			_screen_online_setup(sc)
 		"edit":
 			_screen_edit(sc)
 	sel = clampi(sel, 0, maxi(items.size() - 1, 0))   # the item list can shrink
@@ -172,8 +182,15 @@ func _update_preview() -> void:
 		return
 	if screen_name == "practice":
 		_preview.show_track(_practice_ids()[_practice_track])
-	elif screen_name == "online" and not _searching:
-		_preview.show_track(_online_ids()[_online_track])
+	elif screen_name == "online":
+		# the open race under the cursor, else the track we offer / pick
+		var it: Dictionary = items[sel] if sel < items.size() else {}
+		var id: String = it["offer"]["track"] if it.has("offer") else _online_ids()[_online_track]
+		# the editor track of another player is not here yet (it comes with MATCH)
+		if _online_ids().has(id) and not (it.has("offer") and TrackLibrary.is_custom(id)):
+			_preview.show_track(id)
+		else:
+			_preview.hide_track()
 	else:
 		_preview.hide_track()
 
@@ -188,7 +205,11 @@ func _draw_items(sc: PixelScreen) -> void:
 		var col := Palette.WHITE if active else Palette.ROAD_DARK
 		if active:
 			sc.rect(Rect2(60, y0 + i * 50 - 8, PX.x - 120, 44), Palette.DARK_BLUE)
-		sc.text(90, y0 + i * 50, ("> " if active else "  ") + str(it["label"]), col, 4.0)
+		if it.has("color"):      # e.g. the car colour of an open race
+			sc.rect(Rect2(68, y0 + i * 50 + 4, 16, 20), it["color"])
+		var label := ("> " if active else "  ") + str(it["label"])
+		var scale := minf(4.0, (PX.x - 160) / maxf(PixelFont.text_width(label, 1.0), 1.0))
+		sc.text(90, y0 + i * 50 + (4.0 - scale) * 3.5, label, it.get("text_color", col), scale)
 
 
 func _screen_main(sc: PixelScreen) -> void:
@@ -318,6 +339,48 @@ func _screen_result(sc: PixelScreen) -> void:
 
 func _screen_online(sc: PixelScreen) -> void:
 	sc.text_centered(90, Lang.t("MULTIPLAYER (1 VS 1)"), Palette.LIGHT_BLUE, 4.0)
+	_online_status(sc)
+	var id: String = _online_ids()[_online_track]
+	if Net.is_online():
+		sc.text_centered(185, Lang.t("%d PLAYERS ONLINE") % Net.players_online, Palette.LIGHT_BLUE, 2.6)
+	if _online_msg != "":
+		sc.text_centered(220, _online_msg, Palette.RED, 2.6)
+	elif _searching:
+		sc.text_centered(220, Lang.t("WAITING FOR AN OPPONENT ... (%s)") % TrackLibrary.display_name(id), Palette.YELLOW, 2.6)
+	# the open races of the others: OK = race them
+	var offers := Net.offers
+	_offer_top = clampi(_offer_top, 0, maxi(offers.size() - OFFER_ROWS, 0))
+	for k in range(_offer_top, mini(offers.size(), _offer_top + OFFER_ROWS)):
+		var o: Dictionary = offers[k]
+		var known := _can_race(o["track"])
+		var label := "%s  %s" % [str(o["name"]).left(12), _offer_track_name(o["track"])]
+		if o["super"]:
+			label += "  SUPER"
+		var row := {"label": label, "offer": o, "color": o["color"], "do": _act_take.bind(o)}
+		if not known:
+			row["text_color"] = Palette.ROAD_DARK.darkened(0.4)
+		items.append(row)
+	if _searching:
+		items.append({"label": Lang.t("WITHDRAW THE OFFER"), "do": _act_online_cancel})
+	else:
+		items.append({"label": Lang.t("TRACK: ") + TrackLibrary.display_name(id), "side": _side_online_track})
+		items.append({"label": Lang.t("OFFER A RACE"), "do": _act_offer})
+		items.append({"label": Lang.t("SETTINGS"), "do": func(): open("online_setup")})
+	items.append({"label": Lang.t("BACK"), "do": _act_online_back})
+	# heading of the list, right above the items
+	var y0 := PX.y - 90 - items.size() * 50
+	if offers.is_empty():
+		if Net.is_online():
+			sc.text_centered(y0 - 50, Lang.t("NO OPEN RACES YET - OFFER ONE"), Palette.ROAD_DARK, 2.6)
+	else:
+		var head := Lang.t("OPEN RACES")
+		if offers.size() > OFFER_ROWS:
+			head += "  %d-%d / %d" % [_offer_top + 1, mini(offers.size(), _offer_top + OFFER_ROWS), offers.size()]
+		sc.text(90, y0 - 44, head, Palette.LIGHT_BLUE, 2.6)
+
+
+## Connection state line of the online screens.
+func _online_status(sc: PixelScreen) -> void:
 	var status := Lang.t("NOT CONNECTED")
 	var col := Palette.RED
 	if Net.status == "connecting":
@@ -328,24 +391,32 @@ func _screen_online(sc: PixelScreen) -> void:
 		col = Palette.GREEN
 	if Settings.server_address == "":
 		status = Lang.t("ENTER THE SERVER ADDRESS FIRST")
-	sc.text_centered(150, status, col, 3.0)
-	if _searching:
-		sc.text_centered(260, Lang.t("SEARCHING FOR AN OPPONENT ..."), Palette.YELLOW, 3.0)
-	if _online_msg != "":
-		sc.text_centered(340, _online_msg, Palette.RED, 3.0)
-	if _searching:
-		items = [{"label": Lang.t("CANCEL"), "do": _act_online_cancel}]
-		return
-	var id: String = _online_ids()[_online_track]
+	sc.text_centered(140, status, col, 3.0)
+
+
+func _screen_online_setup(sc: PixelScreen) -> void:
+	sc.text_centered(90, Lang.t("ONLINE SETTINGS"), Palette.LIGHT_BLUE, 4.0)
+	_online_status(sc)
 	var server := Settings.server_address if Settings.server_address != "" else "-"
 	items = [
 		{"label": Lang.t("NAME: %s") % Settings.player_name, "do": _act_edit_name},
 		{"label": Lang.t("CAR COLOUR: ") + _color_name(), "side": _side_color},
 		{"label": Lang.t("SERVER: %s") % server, "do": _act_edit_server},
-		{"label": Lang.t("TRACK: ") + TrackLibrary.display_name(id), "side": _side_online_track},
-		{"label": Lang.t("FIND AN OPPONENT"), "do": _act_online_join},
-		{"label": Lang.t("BACK"), "do": _act_online_back},
+		{"label": Lang.t("BACK"), "do": func(): open("online")},
 	]
+
+
+## Wheel / arrows on the online screen: past the last (first) visible open
+## race the list scrolls instead of the cursor moving on.
+func _online_scroll(dir: int) -> bool:
+	var shown := mini(Net.offers.size() - _offer_top, OFFER_ROWS)
+	if dir > 0 and sel == shown - 1 and _offer_top + shown < Net.offers.size():
+		_offer_top += 1
+		return true
+	if dir < 0 and sel == 0 and _offer_top > 0:
+		_offer_top -= 1
+		return true
+	return false
 
 
 # --- calibration -------------------------------------------------------------------
@@ -520,7 +591,8 @@ func _held(cond: bool, dt: float) -> bool:
 func _on_nav(dir: int) -> void:
 	if items.is_empty():
 		return
-	sel = wrapi(sel + dir, 0, items.size())
+	if not (screen_name == "online" and _online_scroll(dir)):
+		sel = wrapi(sel + dir, 0, items.size())
 	Sfx.play("beep", -16.0, 1.5)
 	_refresh()
 
@@ -575,6 +647,8 @@ func _on_back() -> void:
 		"result":
 			_on_accept()
 		"edit":
+			open("online_setup")
+		"online_setup":
 			open("online")
 		"online":
 			if _searching:
@@ -608,7 +682,8 @@ func _online_connect() -> void:
 		_online_msg = Lang.t("SERVER NOT FOUND")
 
 
-func _act_online_join() -> void:
+## Our own open race on the chosen track: it shows in the list of the others.
+func _act_offer() -> void:
 	if not Net.is_online():
 		_online_msg = Lang.t("NOT CONNECTED")
 		_online_connect()
@@ -616,8 +691,17 @@ func _act_online_join() -> void:
 		return
 	_online_msg = ""
 	_searching = true
-	# the first one waiting picks the track
-	Net.join(NetCodec.JOIN_QUICK, "", _online_ids()[_online_track], GameState.league != null and GameState.league.super_league)
+	Net.offer(_online_ids()[_online_track], GameState.league != null and GameState.league.super_league)
+	_refresh()
+
+
+## Races the open race o of another player (MATCH starts it).
+func _act_take(o: Dictionary) -> void:
+	if not _can_race(o["track"]):
+		_online_msg = Lang.t("TRACK NOT AVAILABLE")
+	else:
+		_online_msg = ""
+		Net.take(o["id"])
 	_refresh()
 
 
@@ -628,6 +712,7 @@ func _act_online_cancel() -> void:
 
 
 func _act_online_back() -> void:
+	Net.watch(false)
 	Net.disconnect_from()
 	open("main")
 
@@ -658,7 +743,7 @@ func _screen_edit(sc: PixelScreen) -> void:
 		{"label": Lang.t("LETTER: ") + (v.right(1) if v != "" else "-"), "side": _side_edit_char, "do": _act_edit_add},
 		{"label": Lang.t("DELETE LETTER"), "do": _act_edit_delete},
 		{"label": Lang.t("OK"), "do": _act_edit_ok},
-		{"label": Lang.t("CANCEL"), "do": func(): open("online")},
+		{"label": Lang.t("CANCEL"), "do": func(): open("online_setup")},
 	]
 
 
@@ -691,7 +776,8 @@ func _act_edit_ok() -> void:
 	_edit["done"].call(_edit["value"])
 	Settings.save_settings()
 	Net.disconnect_from()   # name or server changed: connect anew
-	open("online")
+	_online_connect()
+	open("online_setup")
 
 
 ## Keyboard typing on the text entry screen (arrows, Enter, Esc still
@@ -734,24 +820,49 @@ func _side_online_track(d: int) -> void:
 	_online_track = wrapi(_online_track + d, 0, _online_ids().size())
 
 
-## Online only built-in tracks: the other player must have the same track.
+## Online: the built-in tracks and the closed ones from the track editor
+## (an editor track goes along to the other player).
 func _online_ids() -> Array:
-	return TrackLibrary.ORDER + TrackLibrary.CUSTOM
+	return _practice_ids()
+
+
+## An open race we can take: a built-in track of ours (a newer game version
+## may have more) or an editor track (it comes along).
+func _can_race(id: String) -> bool:
+	return TrackLibrary.is_custom(id) or (TrackLibrary.ORDER + TrackLibrary.CUSTOM).has(id)
+
+
+## Track of an open race: built-in by its name, an editor track by the name
+## it has at the other player's (ours of that name may differ).
+func _offer_track_name(id: String) -> String:
+	if TrackLibrary.is_custom(id):
+		return id.trim_prefix(TrackLibrary.CUSTOM_PREFIX).replace("_", " ").to_upper() + " *"
+	return TrackLibrary.display_name(id) if _can_race(id) else id.to_upper()
 
 
 func _on_net_change() -> void:
-	if screen_name == "online":
+	if screen_name == "online" or screen_name == "online_setup":
 		_refresh()
 
 
 func _on_net_matched(info: Dictionary) -> void:
 	if screen_name == "online":
+		Net.watch(false)
 		start_race.emit(GameState.online_request(info))
 
 
 func _on_net_failed(code: int) -> void:
-	_searching = false
-	_online_msg = Lang.t("SERVER VERSION DIFFERS - UPDATE THE GAME") if code == 3 else "ERROR %d" % code
+	match code:
+		NetCodec.ERR_VERSION:
+			_searching = false
+			_online_msg = Lang.t("SERVER VERSION DIFFERS - UPDATE THE GAME")
+		NetCodec.ERR_OFFER_GONE:
+			_online_msg = Lang.t("THE OFFER IS GONE")   # our own offer (if any) still waits
+		NetCodec.ERR_NO_TRACK:
+			_online_msg = Lang.t("THE TRACK DID NOT ARRIVE")
+		_:
+			_searching = false
+			_online_msg = "ERROR %d" % code
 	_refresh()
 
 
