@@ -34,6 +34,8 @@ const GHOST := Color(1.0, 0.85, 0.2, 0.55)
 const GHOST_CLOSE := Color(0.3, 1.0, 0.4, 0.6)
 const CROSSING := Color(1.0, 0.25, 0.2, 0.9)
 const STEEP := Color(1.0, 0.6, 0.1, 0.9)
+## Head start of curves with the radius of the latest one (screen pixels).
+const RADIUS_STICK_PX := 9.0
 const SELECT := Color(1.0, 0.9, 0.2)
 const PREVIEW_RATE := 4.0               # 3D preview updates per second while dragging
 const MODE_BUTTON := Color("#2f6db5")   # heights / plan
@@ -289,7 +291,9 @@ func _update() -> void:
 		_preview = model.closing_group()
 		_preview_closes = not _preview.is_empty()
 	if _preview.is_empty():
-		_preview = model.candidate(_mouse_world)
+		# zoomed in, another radius is easier to pick (the head start of the
+		# radius kept is a fixed number of pixels)
+		_preview = model.candidate(_mouse_world, RADIUS_STICK_PX / zoom)
 	_crossings = model.crossings()
 	_info.text = _info_text()
 	_status.position = Vector2(12, size.y - 34)

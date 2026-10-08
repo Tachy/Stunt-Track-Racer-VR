@@ -820,6 +820,30 @@ func _closes(m: TrackEditorModel) -> bool:
 	return p.closure_error < 0.5 and p.heading_error < 0.01
 
 
+## Two flat wide curves in a row (the ends of the 30 deg curves of all radii
+## lie only metres apart): the radius of the latest curve is kept; zoomed in
+## (smaller head start) another radius can be picked.
+func _check_curve_chain() -> void:
+	var m := TrackEditorModel.new()
+	m.set_start(Vector2(0, 0))
+	m.place_first(Vector2(0, -200))
+	m.place(m.group_for(TrackEditorModel.curve("R", 30, 100)))
+	var e: Array = m.end_pose()
+	var ends := {}
+	for r in TrackEditorModel.RADII:
+		var pose := e
+		for p in m.group_for(TrackEditorModel.curve("R", 30, r)):   # with its run-out
+			pose = TrackEditorModel.advance(pose[0], pose[1], p)
+		ends[r] = pose[0]
+	for k in 8:
+		var c := m.candidate(ends[100] + Vector2.from_angle(TAU * k / 8.0) * 4.0)
+		check(c.size() == 1 and c[0]["t"] == "R" and c[0]["a"] == 30 and c[0]["r"] == 100, "second R30 r100 near its end (%s)" % [c])
+	var c := m.candidate(ends[75], 1.5)
+	check(c[-1]["a"] == 30 and c[-1]["r"] == 75, "zoomed in: another radius (%s)" % [c])
+	c = m.candidate(ends[75])
+	check(c.size() == 1 and c[0]["r"] == 100, "zoomed out: the radius is kept (%s)" % [c])
+
+
 func test_editor_basics() -> void:
 	var m := TrackEditorModel.new()
 	m.set_start(Vector2(0, 0))
@@ -845,6 +869,7 @@ func test_editor_basics() -> void:
 	check(m.pieces.size() == n - 2, "Esc removes the curve with its run-out")
 	m.redo()
 	check(m.pieces.size() == n, "redo puts it back")
+	_check_curve_chain()
 	# loops get a run-up after a curve
 	var lg := m.loop_group(1)
 	check(lg.size() == 2 and lg[0]["l"] == TrackEditorModel.LOOP_RUNWAY and lg[1]["t"] == "O", "loop with run-up")

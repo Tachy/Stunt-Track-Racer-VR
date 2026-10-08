@@ -21,6 +21,10 @@ const TRANSITION_FULL := 40.0
 const LOOP_RUNWAY := 30.0
 ## Mouse this near the start: the closing pieces are offered.
 const CLOSE_RADIUS := 60.0
+## Curves of the radius of the latest curve win by this much (m, default of
+## candidate()): the ends of flat curves with different radii lie only a few
+## metres apart. The editor scales it with the zoom.
+const RADIUS_STICK := 10.0
 const DEFAULT_BASE := 6.0
 
 var start := Vector2.ZERO
@@ -188,8 +192,9 @@ func first_straight_for(mouse: Vector2) -> Array:
 	return [dir, snap(absf(d.dot(dir)))]
 
 
-## Best group of pieces for the mouse point: [] if nothing fits.
-func candidate(mouse: Vector2) -> Array:
+## Best group of pieces for the mouse point: [] if nothing fits. stick: the
+## head start (m) of curves with the radius of the latest curve.
+func candidate(mouse: Vector2, stick := RADIUS_STICK) -> Array:
 	if not has_start or closed:
 		return []
 	if start_dir == Vector2.ZERO:
@@ -198,14 +203,19 @@ func candidate(mouse: Vector2) -> Array:
 	var e := end_pose()
 	var pos: Vector2 = e[0]
 	var dir: Vector2 = e[1]
+	# the mouse marks where the piece ends: the curve whose end is nearest
+	# (by the exit direction alone, curves of one angle and different radii
+	# all point the same way and the wide ones were hardly ever chosen);
+	# the radius of the latest curve is kept unless the mouse clearly asks
+	# for another one
+	var keep := 0
+	for i in range(pieces.size() - 1, -1, -1):
+		if is_curve(pieces[i]):
+			keep = int(pieces[i]["r"])
+			break
 	var best := []
 	var best_err := INF
-	# straight on: its length follows the mouse along the current direction
-	var along := (mouse - pos).dot(dir)
-	var straight_err := INF
-	if along > 0.0:
-		straight_err = atan2(absf(dir.cross(mouse - pos)), along)
-	# curves: the one whose exit points most nearly at the mouse
+	var best_dist := INF
 	for t in ["L", "R"]:
 		for a in ANGLES:
 			for r in RADII:
@@ -216,14 +226,16 @@ func candidate(mouse: Vector2) -> Array:
 					var adv := advance(pe, de, p)
 					pe = adv[0]
 					de = adv[1]
-				var v := mouse - pe
-				if v.length() < 1.0:
-					continue
-				var err := acos(clampf(de.dot(v.normalized()), -1.0, 1.0))
+				var dist := pe.distance_to(mouse)
+				var err := dist + (stick if keep != 0 and r != keep else 0.0)
 				if err < best_err:
 					best_err = err
+					best_dist = dist
 					best = g
-	if straight_err <= best_err + deg_to_rad(2.0):
+	# straight on: its length follows the mouse, so only the sideways
+	# distance counts
+	var along := (mouse - pos).dot(dir)
+	if along > 0.0 and absf(dir.cross(mouse - pos)) <= best_dist:
 		return [straight(snap(along))]
 	return best
 
