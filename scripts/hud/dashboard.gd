@@ -8,6 +8,8 @@ const PX := Vector2i(640, 140)
 const SIZE := Vector2(0.42, 0.42 * 140.0 / 640.0)
 ## Height of the earlier 4-row panel: the bottom edge stays where it was.
 const OLD_HEIGHT := 0.138
+## The whole display shrunk around its centre (content and layout unchanged).
+const DISPLAY_SCALE := 0.8
 const REFRESH := 1.0 / 15.0
 
 var _timer := 0.0
@@ -19,6 +21,7 @@ func _init() -> void:
 	setup(PX, SIZE)
 	name = "Dashboard"
 	position.y = -(OLD_HEIGHT - SIZE.y) * 0.5
+	scale = Vector3.ONE * DISPLAY_SCALE
 
 
 func set_data(d: Dictionary) -> void:
