@@ -97,18 +97,6 @@ static func _is_flight_device(lower_name: String) -> bool:
 	return false
 
 
-func cycle_device() -> void:
-	var pads := Input.get_connected_joypads()
-	if pads.is_empty():
-		device = -1
-		return
-	var idx := pads.find(device)
-	device = pads[(idx + 1) % pads.size()]
-	_live_axes.clear()
-	calibrated = false
-	device_changed.emit()
-
-
 func current_device_name() -> String:
 	return Input.get_joy_name(device) if device >= 0 else Lang.t("KEYBOARD")
 

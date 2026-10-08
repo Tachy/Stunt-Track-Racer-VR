@@ -11,7 +11,6 @@ const WHEEL_POS := [Vector3(-1.1, 0.0, -1.75), Vector3(1.1, 0.0, -1.75),
 		Vector3(-1.1, 0.0, 1.15), Vector3(1.1, 0.0, 1.15)]
 const WHEEL_R := [0.42, 0.42, 0.48, 0.48]
 const WHEEL_W := [0.30, 0.30, 0.44, 0.44]
-const WHEEL_RADIUS := 0.42
 ## Tyre spikes (visual only): edge of the square base, height above the
 ## tyre, spacing around the tyre and across its width.
 ## Visual roundness of tyre and rim (the physics wheel is an exact circle:

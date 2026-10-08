@@ -478,12 +478,7 @@ func piece_x(k: int) -> float:
 ## All profile points [x, h, corner]: 0 = start, then the free points, last =
 ## end of the lap (always at the start height).
 func points() -> Array:
-	return TrackPath.spline_points(base, heights, profile_length())
-
-
-## Height of the spline at x (without the jump tools).
-func height_at(x: float) -> float:
-	return TrackPath.spline_height(points(), x)
+	return HeightSpline.points(base, heights, profile_length())
 
 
 func _snapshot() -> void:
@@ -526,10 +521,10 @@ static func _max_slope(pts: Array, x0: float, x1: float) -> float:
 			continue
 		var x := maxf(a, x0)
 		var end := minf(b, x1)
-		var prev := TrackPath.segment_height(pts, i, x)
+		var prev := HeightSpline.segment_height(pts, i, x)
 		while x < end - 1e-6:
 			var nx := minf(x + 1.0, end)
-			var h := TrackPath.segment_height(pts, i, nx)
+			var h := HeightSpline.segment_height(pts, i, nx)
 			m = maxf(m, absf(h - prev) / maxf(nx - x, 0.01))
 			prev = h
 			x = nx
@@ -562,9 +557,9 @@ static func _with_point(pts: Array, i: int, x: float, h: float) -> Array:
 
 ## The other point of the wall point i stands in (-1 if none).
 static func _wall_partner(pts: Array, i: int) -> int:
-	if TrackPath.is_wall(pts, i - 1):
+	if HeightSpline.is_wall(pts, i - 1):
 		return i - 1
-	if TrackPath.is_wall(pts, i):
+	if HeightSpline.is_wall(pts, i):
 		return i + 1
 	return -1
 
@@ -581,7 +576,7 @@ func add_point(x: float, h: float, record := true) -> int:
 	var i := 1
 	while float(pts[i][0]) < x:
 		i += 1
-	var on_curve := snappedf(TrackPath.spline_height(pts, x), HEIGHT_STEP)
+	var on_curve := snappedf(HeightSpline.height(pts, x), HEIGHT_STEP)
 	pts.insert(i, [x, on_curve, false, 0])
 	var limit := maxf(MAX_SLOPE, _slope_near(pts, i))
 	h = _limit_move(pts, i, Vector2(x, on_curve), Vector2(x, h), limit).y
@@ -711,7 +706,7 @@ func _set_point(i: int, q: Array, record: bool) -> void:
 ## Takes the new free points only if every one of them stays (a move never
 ## removes a point - only delete_point does).
 func _set_heights(hs: Array, record: bool) -> bool:
-	var pts := TrackPath.spline_points(base, hs, profile_length())
+	var pts := HeightSpline.points(base, hs, profile_length())
 	if pts.size() != hs.size() + 2:
 		return false
 	if record:

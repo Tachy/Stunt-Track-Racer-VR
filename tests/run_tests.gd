@@ -953,7 +953,7 @@ func test_editor_heights() -> void:
 	var id := m.add_point(130.0, 30.0)
 	check(m.points()[id][1] < 30.0, "a normal point stays within the slope")
 	m.move_point(id, 115.0, 10.0)
-	check(TrackPath.is_wall(m.points(), ic), "pulled over its neighbour: a wall up")
+	check(HeightSpline.is_wall(m.points(), ic), "pulled over its neighbour: a wall up")
 	p = TrackPath.new(m.to_def("t"))
 	var walls := 0
 	for j in p.n:
@@ -972,12 +972,12 @@ func test_editor_heights() -> void:
 	check(near(m.points()[ia][0], 104.0) and near(m.points()[ib][0], 104.0), "the wall moves with its top")
 	# pulled away to the right: a spline point again
 	m.move_point(ib, 112.0, 7.0)
-	check(m.points()[ib][3] == 0 and not TrackPath.is_wall(m.points(), ia), "pulled off: a spline point again")
+	check(m.points()[ib][3] == 0 and not HeightSpline.is_wall(m.points(), ia), "pulled off: a spline point again")
 	m.undo_height()
-	check(TrackPath.is_wall(m.points(), ia), "undo: the wall is back")
+	check(HeightSpline.is_wall(m.points(), ia), "undo: the wall is back")
 	var back := TrackEditorModel.from_dict(JSON.parse_string(JSON.stringify(m.to_dict("x"))))
-	check(TrackPath.is_wall(back.points(), ia) and TrackPath.is_wall(back.points(), ic), "walls saved")
-	check(m.delete_point(ib) and not TrackPath.is_wall(m.points(), ia), "deleting a wall point removes the wall")
+	check(HeightSpline.is_wall(back.points(), ia) and HeightSpline.is_wall(back.points(), ic), "walls saved")
+	check(m.delete_point(ib) and not HeightSpline.is_wall(m.points(), ia), "deleting a wall point removes the wall")
 	# a lower wall point near the ground snaps onto it (the top does not)
 	m = _editor_oval()
 	m.move_point(0, 0.0, 9.0)
@@ -997,7 +997,7 @@ func test_editor_heights() -> void:
 	m.move_point(0, 0.0, 9.0)
 	m.heights = [[150.169602069447, 20.5, false, 0], [150.169602069447, 10.0, false, 1]]
 	m.move_point(2, 151.0, 12.0)
-	check(near(m.points()[2][1], 12.0) and TrackPath.is_wall(m.points(), 1), "wall point at a fractional x moves")
+	check(near(m.points()[2][1], 12.0) and HeightSpline.is_wall(m.points(), 1), "wall point at a fractional x moves")
 	# a pit down to the ground in a banked curve: a gap too (no road, no
 	# cut), vertical walls
 	m = _editor_oval()

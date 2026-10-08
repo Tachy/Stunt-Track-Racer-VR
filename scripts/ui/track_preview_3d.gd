@@ -34,29 +34,10 @@ func setup(pixel_size: Vector2i, world_size: Vector2) -> TrackPreview3D:
 	_cam.far = 8000.0
 	viewport.add_child(_cam)
 
-	var mesh := QuadMesh.new()
-	mesh.size = world_size
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_texture = viewport.get_texture()
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
-	quad = MeshInstance3D.new()
-	quad.mesh = mesh
-	quad.material_override = mat
-	quad.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	quad = Panel3D.make_quad(world_size, viewport.get_texture())
 	add_child(quad)
 	# a frame like the menu panel's, just behind the picture
-	var frame_mesh := QuadMesh.new()
-	frame_mesh.size = world_size + Vector2(FRAME, FRAME) * 2.0
-	var frame_mat := StandardMaterial3D.new()
-	frame_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	frame_mat.albedo_color = Palette.LIGHT_BLUE
-	frame_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	var frame := MeshInstance3D.new()
-	frame.mesh = frame_mesh
-	frame.material_override = frame_mat
-	frame.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var frame := Panel3D.make_quad(world_size + Vector2(FRAME, FRAME) * 2.0, null, Palette.LIGHT_BLUE)
 	frame.position = Vector3(0, 0, -0.003)
 	add_child(frame)
 	visible = false

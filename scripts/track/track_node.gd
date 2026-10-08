@@ -11,7 +11,6 @@ const LAYER_WALL := 2
 const LAYER_GROUND := 4
 const LAYER_CAR := 8
 const EDGE_BAND := 0.35
-const STEEP_SLOPE := 0.33
 const DECK_THICKNESS := 0.8
 ## Render layer of everything the tunnel lamps light (tunnel inside, cars):
 ## the lamps would otherwise shine through the ground onto the world above.

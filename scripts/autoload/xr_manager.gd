@@ -103,10 +103,6 @@ func set_base(base: Transform3D) -> void:
 	_apply()
 
 
-func get_base() -> Transform3D:
-	return _base
-
-
 func _apply() -> void:
 	var rec := Settings.recenter_offset if xr_active else Transform3D.IDENTITY
 	# optional seat height trim along the (blended) up axis
@@ -190,10 +186,6 @@ func _update_fps(delta: float) -> void:
 	_fps_worst = 0.0
 	if fps_visible:
 		_show_fps()
-
-
-func current_fps_text() -> String:
-	return _fps_text
 
 
 func _show_fps() -> void:

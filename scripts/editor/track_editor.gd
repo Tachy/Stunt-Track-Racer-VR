@@ -39,9 +39,6 @@ const WALL_LINE := Color("#ffd400")     # vertical walls and their lower points 
 const POINT_ON := Color("#4fd8ff")      # selected / hovered profile point
 const PIECE_ON := Color("#e0302a")      # piece selected in the height stage
 const PROFILE_ASPECT := 4.0             # profile: metres along per metre of height
-const FOCUS_DIST := 140.0               # 3D preview distance onto a selected point / piece
-const CAM_SPEED := 5.0                  # 3D preview camera travel (1/s)
-const PREVIEW_FOV := 60.0               # 3D preview: horizontal field of view (deg)
 const PREVIEW_RATE := 4.0               # 3D preview updates per second while dragging
 const PROFILE_BG := Color(0, 0, 0, 0.55)
 const MODE_BUTTON := Color("#2f6db5")   # heights / plan
@@ -71,17 +68,9 @@ var _prof_pan := false            # pushing the profile with the right mouse but
 var _hr := Vector2(-10.0, 25.0)   # height range of the profile (see _h_range)
 var _hover := -1
 var _orbiting := false
-var _orbit := Vector3(0.7, 0.6, 0.0)    # yaw, pitch, distance (0 = fit)
-var _cam_c := Vector3.ZERO               # preview camera: look-at point and distance now ...
-var _cam_d := 0.0
-var _cam_target_c := Vector3.ZERO        # ... and where it travels to
-var _cam_target_d := 0.0
 var _preview_dirty := false              # a dragged point moved since the last preview
 var _preview_t := 0.0
-var _preview_box: SubViewportContainer
-var _sub: SubViewport
-var _world: Node3D
-var _cam: Camera3D
+var _preview_box: EditorPreview
 var _mode_btn: Button
 
 var _name_edit: LineEdit
@@ -180,21 +169,8 @@ func _build_bar() -> void:
 	_status = Label.new()
 	add_child(_status)
 	# 3D preview of the height stage
-	_preview_box = SubViewportContainer.new()
-	_preview_box.stretch = true
-	_preview_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_preview_box.visible = false
+	_preview_box = EditorPreview.new()
 	add_child(_preview_box)
-	_sub = SubViewport.new()
-	_sub.own_world_3d = true
-	_preview_box.add_child(_sub)
-	_world = Node3D.new()
-	_sub.add_child(_world)
-	_cam = Camera3D.new()
-	_cam.far = 6000.0
-	_cam.keep_aspect = Camera3D.KEEP_WIDTH   # fov is horizontal
-	_cam.fov = PREVIEW_FOV
-	_sub.add_child(_cam)
 
 
 func _fill_load_menu() -> void:
@@ -300,7 +276,7 @@ func _update() -> void:
 	if _mode == "height":
 		_info.text = _height_info()
 		if _preview_box.visible:
-			_place_camera()      # follows the selected point / piece
+			_preview_box.set_focus(_preview_focus())   # follows the selected point / piece
 		_status.text = Lang.t("CLICK = POINT  PULL HARD UNDER A NEIGHBOUR = WALL  RIGHT CLICK = REMOVE  C KINK  UP/DOWN HEIGHT  B BRIDGE  ESC UNDO  V 3D")
 		queue_redraw()
 		return
@@ -710,9 +686,7 @@ func _height_mouse(event: InputEvent) -> bool:
 			queue_redraw()
 			return true
 		if _orbiting:
-			_orbit.x -= mm.relative.x * 0.01
-			_orbit.y = clampf(_orbit.y + mm.relative.y * 0.01, 0.05, 1.5)
-			_place_camera()
+			_preview_box.orbit(mm.relative)
 			return true
 		var h := _point_at(mm.position) if prof.has_point(mm.position) else -1
 		if h != _hover:
@@ -768,8 +742,7 @@ func _height_mouse(event: InputEvent) -> bool:
 			_prof_pan = false
 			return true
 		if (mb.button_index == MOUSE_BUTTON_WHEEL_UP or mb.button_index == MOUSE_BUTTON_WHEEL_DOWN) and _preview_box.visible and prev.has_point(mb.position):
-			_orbit.z = _orbit_dist() * (0.87 if mb.button_index == MOUSE_BUTTON_WHEEL_UP else 1.15)
-			_place_camera()
+			_preview_box.zoom(0.87 if mb.button_index == MOUSE_BUTTON_WHEEL_UP else 1.15)
 			return true
 	return false
 
@@ -887,21 +860,21 @@ func _draw_heights() -> void:
 	var seg := 0
 	while seg < pts.size() - 2 and x >= float(pts[seg + 1][0]):
 		seg += 1
-	var prev := Vector2(x, TrackPath.segment_height(pts, seg, x))
+	var prev := Vector2(x, HeightSpline.segment_height(pts, seg, x))
 	var px_step := 2.0 / _prof_xscale()
 	while x < x_end:
 		x = minf(x + px_step, x_end)
 		var h := 0.0
 		# walls on the way: a yellow vertical line
 		while seg < pts.size() - 2 and x >= float(pts[seg + 1][0]):
-			if TrackPath.is_wall(pts, seg + 1):
+			if HeightSpline.is_wall(pts, seg + 1):
 				var wx := float(pts[seg + 1][0])
-				var top := TrackPath.segment_height(pts, seg, wx)
+				var top := HeightSpline.segment_height(pts, seg, wx)
 				draw_line(_profile_point(prev.x, prev.y), _profile_point(wx, top), _height_color(top).lightened(0.2), 2.0)
 				draw_line(_profile_point(wx, top), _profile_point(wx, float(pts[seg + 2][1])), WALL_LINE, 2.0)
 				prev = Vector2(wx, float(pts[seg + 2][1]))
 			seg += 1
-		h = TrackPath.segment_height(pts, seg, x)
+		h = HeightSpline.segment_height(pts, seg, x)
 		draw_line(_profile_point(prev.x, prev.y), _profile_point(x, h), _height_color(h).lightened(0.2), 2.0)
 		prev = Vector2(x, h)
 	# the points (start and end: the same height)
@@ -910,8 +883,8 @@ func _draw_heights() -> void:
 		if c.x < r.position.x - 1.0 or c.x > r.end.x + 1.0:
 			continue
 		var col := Color.WHITE
-		if (TrackPath.is_wall(pts, i - 1) and float(pts[i][1]) < float(pts[i - 1][1])) \
-				or (TrackPath.is_wall(pts, i) and float(pts[i][1]) < float(pts[i + 1][1])):
+		if (HeightSpline.is_wall(pts, i - 1) and float(pts[i][1]) < float(pts[i - 1][1])) \
+				or (HeightSpline.is_wall(pts, i) and float(pts[i][1]) < float(pts[i + 1][1])):
 			col = WALL_LINE      # the lower point of a wall
 		if i == _pt or i == _hover or i == _drag:
 			col = POINT_ON
@@ -950,23 +923,8 @@ func _draw_metre_scale(r: Rect2, font: Font) -> void:
 ## path: while a point is dragged a path of its own (the editor's _path,
 ## its checks and the profile scale follow only on release).
 func _rebuild_preview(path: TrackPath = null) -> void:
-	if path == null:
-		path = _path
-	for c in _world.get_children():
-		c.queue_free()
-	var track := TrackNode.new().build(path)
-	_world.add_child(track)
-	EnvironmentBuilder.build(_world, 0, path.bounds(), path.ground_holes())
-	_place_camera()
-
-
-func _orbit_dist() -> float:
-	if _orbit.z > 0.0:
-		return _orbit.z
-	if _preview_focus() != null:
-		return FOCUS_DIST
-	var b := _path.bounds()
-	return maxf(b.size.x, b.size.z) * 0.9 + 60.0
+	_preview_box.build(path if path != null else _path)
+	_preview_box.set_focus(_preview_focus())
 
 
 ## What the 3D preview looks at: the selected (light blue) profile point,
@@ -986,27 +944,6 @@ func _preview_focus() -> Variant:
 	return null
 
 
-## Sets where the preview camera goes (the selection, the distance); it
-## travels there smoothly in _process - a real camera move, the field of
-## view stays.
-func _place_camera() -> void:
-	if _path == null:
-		return
-	var focus = _preview_focus()
-	_cam_target_c = focus if focus != null else _path.bounds().get_center()
-	_cam_target_d = _orbit_dist()
-	if _cam_d <= 0.0:      # first view: no travel
-		_cam_c = _cam_target_c
-		_cam_d = _cam_target_d
-	_aim_camera()
-
-
-func _aim_camera() -> void:
-	var eye := _cam_c + Vector3(sin(_orbit.x) * cos(_orbit.y), sin(_orbit.y), cos(_orbit.x) * cos(_orbit.y)) * _cam_d
-	_cam.look_at_from_position(eye, _cam_c, Vector3.UP)
-	_cam.current = true
-
-
 func _process(dt: float) -> void:
 	# while dragging: the preview follows PREVIEW_RATE times a second
 	_preview_t += dt
@@ -1014,14 +951,3 @@ func _process(dt: float) -> void:
 		_preview_t = 0.0
 		_preview_dirty = false
 		_rebuild_preview(TrackPath.new(model.to_def(track_name)))
-	if not _preview_box.visible or _cam_d <= 0.0:
-		return
-	if _cam_c.is_equal_approx(_cam_target_c) and is_equal_approx(_cam_d, _cam_target_d):
-		return
-	var k := 1.0 - exp(-dt * CAM_SPEED)
-	_cam_c = _cam_c.lerp(_cam_target_c, k)
-	_cam_d = lerpf(_cam_d, _cam_target_d, k)
-	if _cam_c.distance_to(_cam_target_c) < 0.05 and absf(_cam_d - _cam_target_d) < 0.05:
-		_cam_c = _cam_target_c
-		_cam_d = _cam_target_d
-	_aim_camera()
