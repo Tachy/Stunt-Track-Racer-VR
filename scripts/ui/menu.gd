@@ -5,6 +5,7 @@ extends Node3D
 ## keyboard (arrows, Enter, Esc).
 
 signal start_race(request: Dictionary)
+signal open_editor
 
 const PX := Vector2i(1024, 768)
 const WORLD := Vector2(2.0, 1.5)
@@ -181,10 +182,13 @@ func _screen_main(sc: PixelScreen) -> void:
 		{"label": Lang.t("LEAGUE"), "do": func(): open("league")},
 		{"label": Lang.t("PRACTICE"), "do": func(): open("practice")},
 		{"label": Lang.t("MULTIPLAYER"), "do": func(): open("online")},
+		{"label": Lang.t("TRACK EDITOR"), "do": func(): open_editor.emit(), "desktop": true},
 		{"label": Lang.t("CALIBRATE WHEEL"), "do": func(): open("calibrate")},
 		{"label": Lang.t("SETTINGS"), "do": func(): open("settings")},
 		{"label": Lang.t("QUIT"), "do": func(): get_tree().quit()},
 	]
+	if XrManager.xr_active:
+		items = items.filter(func(it): return not it.get("desktop", false))
 
 
 func _screen_league(sc: PixelScreen) -> void:
@@ -307,7 +311,7 @@ func _screen_online(sc: PixelScreen) -> void:
 	if _searching:
 		items = [{"label": Lang.t("CANCEL"), "do": _act_online_cancel}]
 		return
-	var id: String = _practice_ids()[_online_track]
+	var id: String = _online_ids()[_online_track]
 	var server := Settings.server_address if Settings.server_address != "" else "-"
 	items = [
 		{"label": Lang.t("NAME: %s") % Settings.player_name, "do": _act_edit_name},
@@ -568,7 +572,8 @@ func _act_practice_start() -> void:
 
 
 func _practice_ids() -> Array:
-	return TrackLibrary.ORDER + TrackLibrary.CUSTOM
+	# built-in tracks, then the closed ones from the track editor
+	return TrackLibrary.ORDER + TrackLibrary.CUSTOM + TrackLibrary.custom_ids()
 
 
 func _online_connect() -> void:
@@ -587,7 +592,7 @@ func _act_online_join() -> void:
 	_online_msg = ""
 	_searching = true
 	# the first one waiting picks the track
-	Net.join(NetCodec.JOIN_QUICK, "", _practice_ids()[_online_track], GameState.league != null and GameState.league.super_league)
+	Net.join(NetCodec.JOIN_QUICK, "", _online_ids()[_online_track], GameState.league != null and GameState.league.super_league)
 	_refresh()
 
 
@@ -701,7 +706,12 @@ func _side_color(d: int) -> void:
 
 
 func _side_online_track(d: int) -> void:
-	_online_track = wrapi(_online_track + d, 0, _practice_ids().size())
+	_online_track = wrapi(_online_track + d, 0, _online_ids().size())
+
+
+## Online only built-in tracks: the other player must have the same track.
+func _online_ids() -> Array:
+	return TrackLibrary.ORDER + TrackLibrary.CUSTOM
 
 
 func _on_net_change() -> void:

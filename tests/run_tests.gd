@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_league_track_features", "test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -101,8 +101,8 @@ func test_track_heights() -> void:
 		for i in p.n:
 			var j := (i + 1) % p.n
 			min_h = minf(min_h, p.center[i].y - TrackPath.HALF_WIDTH * absf(p.right[i].y))
-			# steps only where the road is a (black) pit wall
-			if p.road[i] == 1 and p.road[j] == 1 and p.steep[i] == 0 and absf(p.center[j].y - p.center[i].y) > 1.0:
+			# steps only at the vertical walls of pits and ski jumps
+			if p.road[i] == 1 and p.road[j] == 1 and p.steep[i] == 0 and p.step[i] == 0 and absf(p.center[j].y - p.center[i].y) > 1.0:
 				ok = false
 		check(ok, "%s no height steps on road" % id)
 		check(min_h > 0.5, "%s road above ground (min %.2f)" % [id, min_h])
@@ -792,3 +792,383 @@ func _poly_area(poly: PackedVector2Array) -> float:
 		var j := (i + 1) % poly.size()
 		a += poly[i].x * poly[j].y - poly[j].x * poly[i].y
 	return a * 0.5
+
+
+# --- track editor ---------------------------------------------------------------------
+
+func _closes(m: TrackEditorModel) -> bool:
+	var p := TrackPath.new(m.to_def("t"))
+	return p.closure_error < 0.5 and p.heading_error < 0.01
+
+
+func test_editor_basics() -> void:
+	var m := TrackEditorModel.new()
+	m.set_start(Vector2(0, 0))
+	var f := m.first_straight_for(Vector2(3, -52))
+	check(f[0] == Vector2(0, -1) and near(f[1], 50.0), "first straight: axis direction, 5 m grid (%s)" % [f])
+	m.place_first(Vector2(3, -52))
+	# straight ahead
+	var c := m.candidate(Vector2(1, -130))
+	check(c.size() == 1 and c[0]["t"] == "S" and near(c[0]["l"], 80.0), "straight on to the mouse (%s)" % [c])
+	# off to the right: a right curve
+	c = m.candidate(Vector2(80, -60))
+	check(c.size() == 1 and c[0]["t"] == "R", "curve towards the mouse (%s)" % [c])
+	m.place(c)
+	# a left curve now needs a run-out for the change of banking
+	var e: Array = m.end_pose()
+	var d: Vector2 = e[1]
+	c = m.candidate(e[0] + d * 120.0 + d.rotated(-PI * 0.5) * 120.0)
+	check(c.size() == 2 and c[0].get("auto", false) and c[0]["t"] == "S" and c[1]["t"] == "L", "run-out before a counter curve (%s)" % [c])
+	check(near(c[0]["l"], TrackEditorModel.snap(TrackEditorModel.TRANSITION_FULL * absf(c[1]["bank"] - m.last_piece()["bank"]) / 72.0)), "run-out length from the change of banking")
+	m.place(c)
+	var n := m.pieces.size()
+	m.undo()
+	check(m.pieces.size() == n - 2, "Esc removes the curve with its run-out")
+	m.redo()
+	check(m.pieces.size() == n, "redo puts it back")
+	# loops get a run-up after a curve
+	var lg := m.loop_group(1)
+	check(lg.size() == 2 and lg[0]["l"] == TrackEditorModel.LOOP_RUNWAY and lg[1]["t"] == "O", "loop with run-up")
+
+
+func test_editor_closing() -> void:
+	# square: three right turns, the solver adds the last one
+	var m := TrackEditorModel.new()
+	m.set_start(Vector2(0, 0))
+	m.place_first(Vector2(0, -100))
+	m.place([TrackEditorModel.curve("R", 90, 55)])
+	m.place([TrackEditorModel.straight(100)])
+	m.place([TrackEditorModel.curve("R", 90, 55)])
+	m.place([TrackEditorModel.straight(100)])
+	m.place([TrackEditorModel.curve("R", 90, 55)])
+	var g := m.closing_group()
+	check(not g.is_empty(), "closing pieces found")
+	m.place(g, true)
+	check(m.closed and _closes(m), "square closes exactly")
+	# irregular: odd angles and an S-bend, closed by the solver
+	var m2 := TrackEditorModel.new()
+	m2.set_start(Vector2(10, 20))
+	m2.place_first(Vector2(150, 22))
+	for p in [TrackEditorModel.curve("L", 60, 75), TrackEditorModel.straight(85), TrackEditorModel.curve("R", 30, 40),
+			TrackEditorModel.curve("L", 120, 55), TrackEditorModel.straight(40), TrackEditorModel.curve("L", 45, 100)]:
+		m2.place(m2.group_for(p))
+	var g2 := m2.closing_group()
+	check(not g2.is_empty(), "irregular layout: closing pieces found")
+	m2.place(g2, true)
+	check(_closes(m2), "irregular layout closes exactly")
+	var bad := false
+	for p in m2.pieces:
+		if p["t"] == "S" and float(p["l"]) < 0.0:
+			bad = true
+	check(not bad, "no negative straights")
+	# save / load
+	var j: Dictionary = JSON.parse_string(JSON.stringify(m2.to_dict("x")))
+	var m3 := TrackEditorModel.from_dict(j)
+	check(m3.closed and m3.pieces.size() == m2.pieces.size() and _closes(m3), "save/load round trip")
+
+
+func test_editor_crossings() -> void:
+	# figure eight crosses itself once
+	var m := TrackEditorModel.new()
+	m.set_start(Vector2(0, 0))
+	m.place_first(Vector2(0, -200))
+	for p in [TrackEditorModel.curve("L", 90, 55), TrackEditorModel.curve("L", 90, 55), TrackEditorModel.curve("L", 90, 55),
+			TrackEditorModel.straight(220)]:
+		m.place(m.group_for(p))
+	check(m.crossings().size() >= 1, "crossing found (%d)" % m.crossings().size())
+
+
+func _editor_oval() -> TrackEditorModel:
+	var m := TrackEditorModel.new()
+	m.set_start(Vector2(0, 0))
+	m.place_first(Vector2(0, -250))
+	for p in [TrackEditorModel.curve("R", 90, 55), TrackEditorModel.straight(60), TrackEditorModel.curve("R", 90, 55),
+			TrackEditorModel.straight(250), TrackEditorModel.curve("R", 90, 55)]:
+		m.place(m.group_for(p))
+	m.place(m.closing_group(), true)
+	return m
+
+
+func test_editor_heights() -> void:
+	var m := _editor_oval()
+	var n := m.pieces.size()
+	var length := m.profile_length()
+	check(m.points().size() == 2, "at first only the start and the end point")
+	check(near(m.points()[1][0], length) and near(m.points()[1][1], m.base), "end point at the start height")
+	var p := TrackPath.new(m.to_def("t"))
+	check(near(p.profile_length, length), "profile length (%.1f / %.1f)" % [p.profile_length, length])
+	check(absf(p.center[p.n / 2].y - m.base) < 0.01, "flat at the start height")
+	# free points: the spline passes through them, not flat there
+	var i := m.add_point(length * 0.3, 15.0)
+	check(i == 1, "new point index")
+	check(m.add_point(length * 0.3 + 1.0, 3.0) == -1, "no point right next to another")
+	m.add_point(length * 0.6, 10.0)
+	p = TrackPath.new(m.to_def("t"))
+	var k := p.index_at_s(length * 0.3)
+	check(absf(p.center[k].y - 15.0) < 0.3, "spline through the point (%.2f)" % p.center[k].y)
+	var k2 := p.index_at_s(length * 0.6)
+	check(absf(p.center[k2 + 10].y - p.center[k2 - 10].y) > 0.2, "not flat at a point between a high and a low one")
+	check(absf(p.center[p.n - 1].y - p.center[0].y) < 0.3, "no step at the start line")
+	# moving, the start drags the end along, delete, corner, undo
+	m.move_point(1, length * 0.35, 20.0)
+	check(near(m.points()[1][0], roundf(length * 0.35)) and near(m.points()[1][1], 20.0), "point moved")
+	m.move_point(0, 99.0, 12.0)
+	check(near(m.base, 12.0) and near(m.points()[-1][1], 12.0) and near(m.points()[0][0], 0.0), "start and end move together")
+	m.move_point(m.points().size() - 1, 0.0, 4.0)
+	check(near(m.base, 4.0), "end point moves the start")
+	check(m.toggle_corner(2) and m.points()[2][2], "corner point")
+	check(not m.delete_point(0) and not m.delete_point(m.points().size() - 1), "start and end stay")
+	check(m.delete_point(1) and m.points().size() == 3, "point deleted")
+	for u in 5:
+		m.undo_height()
+	check(m.points().size() == 4 and near(m.base, TrackEditorModel.DEFAULT_BASE), "undo")
+	# old files: piece end heights become points
+	var old := m.to_dict("o")
+	old.erase("heights")
+	old["pieces"][2]["h"] = 14.0
+	var m_old := TrackEditorModel.from_dict(old)
+	check(m_old.heights.size() == 1 and near(m_old.heights[0][1], 14.0) and not m_old.pieces[2].has("h"), "old heights converted")
+	# slope limit: a point asked too high stops where the curve is 100 % steep
+	m = _editor_oval()
+	i = m.add_point(30.0, 60.0)
+	p = TrackPath.new(m.to_def("t"))
+	var steepest := 0.0
+	for j in p.n - 1:
+		if p.loop_mask[j] == 0 and p.loop_mask[j + 1] == 0:
+			steepest = maxf(steepest, absf(p.center[j + 1].y - p.center[j].y) / maxf(p.px[j + 1] - p.px[j], 0.01))
+	check(m.points()[i][1] > m.base + 5.0 and m.points()[i][1] < 40.0, "point stopped by the slope limit (%.1f)" % m.points()[i][1])
+	check(steepest <= TrackEditorModel.MAX_SLOPE + 0.05, "spline at most 100 %% steep (%.3f)" % steepest)
+	m.move_point(i, 30.0, 60.0)
+	check(m.points()[i][1] < 40.0, "dragging up stops too")
+	# walls: a point pulled hard under its neighbour snaps there
+	m = _editor_oval()
+	m.move_point(0, 0.0, 9.0)
+	var count := 0
+	var ia := m.add_point(100.0, 11.0)
+	var ib := m.add_point(120.0, 11.0)
+	m.move_point(ib, 101.0, 6.0)
+	var pts := m.points()
+	check(near(pts[ib][0], 100.0) and near(pts[ib][1], 6.0) and pts[ib][3] == 1, "pulled under its neighbour: a wall down")
+	var ic := m.add_point(114.0, 6.0)
+	var id := m.add_point(130.0, 30.0)
+	check(m.points()[id][1] < 30.0, "a normal point stays within the slope")
+	m.move_point(id, 115.0, 10.0)
+	check(TrackPath.is_wall(m.points(), ic), "pulled over its neighbour: a wall up")
+	p = TrackPath.new(m.to_def("t"))
+	var walls := 0
+	for j in p.n:
+		walls += p.step[j]
+	check(walls == 2 and p.pits.size() == 1, "wall down + wall up = pit (%d walls, %d pits)" % [walls, p.pits.size()])
+	var pit: Array = p.pits[0]
+	check(near(p.px[pit[1]] - p.px[pit[0]], 15.0, 1.5), "pit 14 m wide (%.1f)" % (p.px[pit[1]] - p.px[pit[0]]))
+	check(near(p.center[pit[0]].y - p.center[(pit[0] + 1) % p.n].y, 5.0, 0.3), "wall 5 m down")
+	check(m.problems(p).filter(func(o): return o["kind"] == "steep").is_empty(), "walls are not reported as steep")
+	var node := TrackNode.new().build(p)
+	node.free()
+	# the wall point moves only up and down; the top point takes the wall along
+	m.move_point(ib, 101.0, 7.0)
+	check(near(m.points()[ib][0], 100.0) and near(m.points()[ib][1], 7.0), "wall point: only height")
+	m.move_point(ia, 104.0, 11.0)
+	check(near(m.points()[ia][0], 104.0) and near(m.points()[ib][0], 104.0), "the wall moves with its top")
+	# pulled away to the right: a spline point again
+	m.move_point(ib, 112.0, 7.0)
+	check(m.points()[ib][3] == 0 and not TrackPath.is_wall(m.points(), ia), "pulled off: a spline point again")
+	m.undo_height()
+	check(TrackPath.is_wall(m.points(), ia), "undo: the wall is back")
+	var back := TrackEditorModel.from_dict(JSON.parse_string(JSON.stringify(m.to_dict("x"))))
+	check(TrackPath.is_wall(back.points(), ia) and TrackPath.is_wall(back.points(), ic), "walls saved")
+	check(m.delete_point(ib) and not TrackPath.is_wall(m.points(), ia), "deleting a wall point removes the wall")
+	# a lower wall point near the ground snaps onto it (the top does not)
+	m = _editor_oval()
+	m.move_point(0, 0.0, 9.0)
+	ia = m.add_point(100.0, 11.0)
+	ib = m.add_point(110.0, 11.0)
+	m.move_point(ib, 101.0, 3.5)
+	check(near(m.points()[ib][1], 0.0), "lower wall point 3.5 m up snaps to the ground")
+	m.move_point(ib, 100.0, -4.0)
+	check(near(m.points()[ib][1], 0.0), "4 m below snaps up to the ground")
+	m.move_point(ib, 100.0, 6.0)
+	check(near(m.points()[ib][1], 6.0), "6 m up stays")
+	m.move_point(ib, 100.0, 0.0)
+	m.move_point(ia, 100.0, 4.0)
+	check(near(m.points()[ia][1], 4.0), "the top of a wall does not snap")
+	# a wall at a fractional x (older files) can still be moved up and down
+	m = _editor_oval()
+	m.move_point(0, 0.0, 9.0)
+	m.heights = [[150.169602069447, 20.5, false, 0], [150.169602069447, 10.0, false, 1]]
+	m.move_point(2, 151.0, 12.0)
+	check(near(m.points()[2][1], 12.0) and TrackPath.is_wall(m.points(), 1), "wall point at a fractional x moves")
+	# a pit down to the ground in a banked curve: a gap too (no road, no
+	# cut), vertical walls
+	m = _editor_oval()
+	m.move_point(0, 0.0, 9.0)
+	m.add_point(270.0, 9.0)
+	ib = m.add_point(280.0, 9.0)
+	m.move_point(ib, 271.0, 1.0)
+	m.add_point(285.0, 0.0)
+	id = m.add_point(295.0, 9.0)
+	m.move_point(id, 286.0, 9.0)
+	p = TrackPath.new(m.to_def("t"))
+	var cuts := 0
+	var ground := 0
+	walls = 0
+	for j in p.n:
+		if p.px[j] > 268.0 and p.px[j] < 290.0:
+			cuts += p.cut[j]
+			walls += p.step[j]
+			ground += p.ground_floor[j]
+	check(cuts == 0 and walls == 2 and ground >= 10, "ground pit in a curve: a gap with walls (%d cuts, %d walls, %d ground)" % [cuts, walls, ground])
+	node = TrackNode.new().build(p)
+	node.free()
+	# pulled off a wall with a point close beside it: it stays a wall point
+	m = _editor_oval()
+	ia = m.add_point(100.0, 11.0)
+	ib = m.add_point(110.0, 11.0)
+	m.move_point(ib, 101.0, 4.0)
+	m.add_point(102.0, 4.0)
+	count = m.points().size()
+	m.move_point(ib, 110.0, 4.0)
+	check(m.points().size() == count, "pulling a wall point off next to a close point keeps every point")
+	# dragging never removes a point: random drags around the walls
+	m = TrackEditorModel.from_dict(back.to_dict("x"))
+	count = m.points().size()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	var lost := 0
+	for t in 400:
+		var kk := rng.randi_range(1, count - 2)
+		var q: Array = m.points()[kk]
+		m.move_point(kk, float(q[0]) + rng.randf_range(-12.0, 12.0), float(q[1]) + rng.randf_range(-8.0, 8.0), false, 8.0)
+		if m.points().size() != count:
+			lost += 1
+			count = m.points().size()
+	check(lost == 0, "no point lost while dragging (%d)" % lost)
+	# a single wall down: ski jump; a pit floor on the ground is the ground
+	m = _editor_oval()
+	m.move_point(0, 0.0, 4.0)
+	ia = m.add_point(100.0, 5.0)
+	ib = m.add_point(110.0, 5.0)
+	m.move_point(ib, 100.0, 0.0)
+	ic = m.add_point(116.0, 0.0)
+	id = m.add_point(130.0, 4.0)
+	m.move_point(id, 117.0, 5.0)
+	m.add_point(500.0, 9.0)
+	var ie := m.add_point(520.0, 9.0)
+	m.move_point(ie, 500.0, 5.0)
+	p = TrackPath.new(m.to_def("t"))
+	var gf := 0
+	for j in p.n:
+		gf += p.ground_floor[j]
+	check(p.pits.size() == 1 and p.ramps.size() == 1, "pit and ski jump (%d, %d)" % [p.pits.size(), p.ramps.size()])
+	check(gf >= 10, "pit floor on the ground (%d samples)" % gf)
+	node = TrackNode.new().build(p)
+	node.free()
+
+
+func test_editor_deep_tunnel() -> void:
+	# long oval, the back straight 100 m below the ground
+	var m := TrackEditorModel.new()
+	m.set_start(Vector2(0, 0))
+	m.place_first(Vector2(0, -400))
+	for q in [TrackEditorModel.curve("R", 90, 100), TrackEditorModel.straight(100), TrackEditorModel.curve("R", 90, 100),
+			TrackEditorModel.straight(800), TrackEditorModel.curve("R", 90, 100)]:
+		m.place(m.group_for(q))
+	m.place(m.closing_group(), true)
+	check(m.closed, "deep oval closes")
+	var k := 0
+	for i in m.pieces.size():
+		if m.pieces[i]["t"] == "S" and float(m.pieces[i]["l"]) >= 800.0:
+			k = i
+	var x := m.piece_x(k) + 400.0
+	var i := m.add_point(x, -130.0)
+	check(near(m.points()[i][1], -100.0), "clamped to -100 m")
+	var p := TrackPath.new(m.to_def("t"))
+	var low := INF
+	var tunnel := 0
+	for j in p.n:
+		low = minf(low, p.center[j].y)
+		tunnel += p.tunnel[j]
+	check(near(low, -100.0, 0.5), "road down to -100 m (%.1f)" % low)
+	check(tunnel > 300, "long covered tunnel (%d m)" % tunnel)
+	check(m.problems(p).filter(func(o): return o["kind"] == "steep").is_empty(), "the way down is not too steep")
+	var node := TrackNode.new().build(p)
+	check(node.has_node("TunnelMesh"), "deep tunnel mesh")
+	node.free()
+
+
+func test_league_pits_vertical() -> void:
+	for id in ["camel_back", "stone_hopper", "the_tower"]:
+		var p := TrackPath.new(TrackLibrary.get_def(id))
+		var walls := 0
+		var steep := 0
+		for i in p.n:
+			walls += p.step[i]
+			if p.pit_mask[i] == 1:
+				steep += p.steep[i]
+		check(walls >= 2 * p.pits.size() and steep == 0, "%s: pit walls vertical (%d walls, %d steep)" % [id, walls, steep])
+		for pt in p.pits:
+			var lip: int = pt[0]
+			check(p.center[lip].y - p.center[(lip + 1) % p.n].y > 3.0, "%s: drop right after the lip" % id)
+
+
+func test_road_stripes() -> void:
+	for id in ["camel_back", "grand_tour", "stone_hopper"]:
+		var p := TrackPath.new(TrackLibrary.get_def(id))
+		var node := TrackNode.new().build(p)
+		var ok_border := true
+		var longest := 0.0
+		var run := 0.0
+		for i in p.n:
+			var j := (i + 1) % p.n
+			if p.piece_of[i] != p.piece_of[j] and node._stripe[i] == node._stripe[j]:
+				ok_border = false
+			run += p.delta_s(p.s_arr[i], p.s_arr[j])
+			if node._stripe[i] != node._stripe[j]:
+				longest = maxf(longest, run)
+				run = 0.0
+		check(ok_border, "%s: colour changes at every piece border (also at the start)" % id)
+		check(longest <= TrackNode.STRIPE_MAX + 1.5, "%s: stripes at most %d m (%.1f)" % [id, TrackNode.STRIPE_MAX, longest])
+		node.free()
+
+
+func test_custom_track_delete() -> void:
+	var id := TrackLibrary.CUSTOM_PREFIX + "zz_test_delete"
+	DirAccess.make_dir_recursive_absolute(TrackLibrary.CUSTOM_DIR)
+	var f := FileAccess.open(TrackLibrary.custom_path(id), FileAccess.WRITE)
+	f.store_string("{}")
+	f.close()
+	check(TrackLibrary.delete_custom(id), "custom track deleted")
+	check(not FileAccess.file_exists(TrackLibrary.custom_path(id)), "file gone")
+	check(not TrackLibrary.delete_custom(id), "nothing left to delete")
+	check(not TrackLibrary.delete_custom("camel_back"), "built-in tracks cannot be deleted")
+
+
+func test_editor_crossing_heights() -> void:
+	# figure eight: the third straight crosses the start straight
+	var m := TrackEditorModel.new()
+	m.set_start(Vector2(0, 0))
+	m.place_first(Vector2(0, -150))
+	for p in [TrackEditorModel.curve("L", 90, 55), TrackEditorModel.straight(100), TrackEditorModel.curve("L", 90, 55),
+			TrackEditorModel.straight(50), TrackEditorModel.curve("L", 90, 55), TrackEditorModel.straight(300),
+			TrackEditorModel.curve("R", 90, 55), TrackEditorModel.straight(100), TrackEditorModel.curve("R", 90, 55),
+			TrackEditorModel.straight(150)]:
+		m.place(m.group_for(p))
+	var g := m.closing_group()
+	check(not g.is_empty(), "figure closes")
+	m.place(g, true)
+	var p := TrackPath.new(m.to_def("t"))
+	var crossings := m.problems(p).filter(func(o): return o["kind"] == "crossing")
+	check(crossings.size() >= 1, "flat crossing reported (%d)" % crossings.size())
+	# lift the branch that crosses the start straight (the straight after the
+	# third left curve and its neighbours), back down before the start
+	var k := 0
+	var lefts := 0
+	while lefts < 3:
+		if m.pieces[k]["t"] == "L":
+			lefts += 1
+		k += 1
+	m.add_point(m.piece_x(k - 2), 22.0)
+	m.add_point(m.piece_x(k + 2), 22.0)
+	p = TrackPath.new(m.to_def("t"))
+	crossings = m.problems(p).filter(func(o): return o["kind"] == "crossing")
+	check(crossings.is_empty(), "no crossing problem once 16 m apart (%d)" % crossings.size())

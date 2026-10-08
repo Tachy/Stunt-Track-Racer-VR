@@ -20,6 +20,7 @@ extends Node
 ##   --online=<host[:port]> quick match on that server (with --track=<id>)
 ##   --name=<name>       online player name for this run
 ##   --car-photos        save close-ups of the car model, then quit
+##   --editor[=<name>]   open the track editor (desktop), optionally a saved track
 
 var current: Node
 var _args := {}
@@ -41,7 +42,9 @@ func _ready() -> void:
 		print("[Main] window %s, 3D render scale %.2f -> %s px" % [DisplayServer.window_get_size(), vp.scaling_3d_scale, Vector2(DisplayServer.window_get_size()) * vp.scaling_3d_scale])
 	if _args.has("vr-bench"):
 		add_child(VrBench.new())
-	if _args.has("car-photos"):
+	if _args.has("editor"):
+		show_editor(TrackLibrary.CUSTOM_PREFIX + _args["editor"] if _args["editor"] != "1" else "")
+	elif _args.has("car-photos"):
 		_swap(CarPhotos.new())   # debug: close-ups of the car model, then quit
 	elif _args.has("online"):
 		_start_online()
@@ -107,7 +110,16 @@ func _swap(node: Node) -> void:
 func show_menu(screen: String) -> void:
 	var m := Menu.new(screen)
 	m.start_race.connect(_start_race)
+	m.open_editor.connect(func(): show_editor())
 	_swap(m)
+
+
+## Track editor (desktop only); file_id = a saved custom track to open.
+func show_editor(file_id := "") -> void:
+	var e := TrackEditor.new(file_id)
+	e.start_race.connect(_start_race)
+	e.leave.connect(func(): show_menu("main"))
+	_swap(e)
 
 
 func _start_race(req: Dictionary) -> void:
@@ -119,6 +131,9 @@ func _start_race(req: Dictionary) -> void:
 
 func _on_race_finished(result: Dictionary) -> void:
 	print("[Main] race finished: ", result)
+	if GameState.request.has("from_editor"):
+		show_editor(GameState.request["from_editor"])   # test drive: back to the editor
+		return
 	if _args.has("track") or _args.has("online"):
 		_report_and_quit()
 		return

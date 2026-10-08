@@ -78,9 +78,11 @@ var _chase := OS.get_cmdline_user_args().has("--chase")
 var _overview := OS.get_cmdline_user_args().has("--overview")
 ## debug: a fixed view onto the first tunnel portal (--view-portal[=<side>])
 ## or onto the start of the first cut (--view-cut[=<side>]); side -1/1 =
-## from the left/right, 0 = down the road
+## from the left/right, 0 = down the road; --view-wall[=<side>,<n>]: onto
+## the n-th vertical wall of a pit or ski jump
 var _view_portal := ""
 var _view_cut := ""
+var _view_wall := ""
 
 ## Pose the crane holds the car in. While held the view uses it instead of the
 ## interpolated transform, which lags a few frames behind a teleport.
@@ -110,6 +112,8 @@ func _ready() -> void:
 			_view_portal = a.get_slice("=", 1) if "=" in a else "1"
 		if a.begins_with("--view-cut"):
 			_view_cut = a.get_slice("=", 1) if "=" in a else "1"
+		if a.begins_with("--view-wall"):
+			_view_wall = a.get_slice("=", 1) if "=" in a else "1"
 	Sfx.stop_music()
 	def = TrackLibrary.get_def(req["track"])
 	var super_league: bool = req.get("super", false)
@@ -737,7 +741,7 @@ func _update_view() -> void:
 	var eye := CarModel.SEAT_EYE
 	if _chase:
 		eye = Vector3(-2.6, 1.6, 6.5)   # debug: external view, behind-left
-	if (_view_portal != "" or _view_cut != "") and _feature_view():
+	if (_view_portal != "" or _view_cut != "" or _view_wall != "") and _feature_view():
 		return
 	if _overview:
 		# debug: oblique bird's-eye view of the whole track
@@ -754,6 +758,22 @@ func _update_view() -> void:
 
 func _feature_view() -> bool:
 	var k := -1
+	if _view_wall != "":
+		var wa := _view_wall.split(",")
+		var nth := int(wa[1]) if wa.size() > 1 else 0
+		for i in path.n:
+			if path.step[i] == 1:
+				if nth == 0:
+					k = i
+					break
+				nth -= 1
+		if k < 0:
+			return false
+		var side := float(wa[0]) if wa[0].is_valid_float() else 1.0
+		var eye_w := path.center[(k + 25) % path.n] + path.right_flat[k] * side * 14.0
+		eye_w.y = maxf(path.center[k].y, path.center[(k + 1) % path.n].y) + 6.0
+		XrManager.set_base(Transform3D(Basis.looking_at(path.center[k] - eye_w, Vector3.UP), eye_w))
+		return true
 	for i in path.n:
 		var prev := (i - 1 + path.n) % path.n
 		if (_view_portal != "" and path.tunnel[i] == 1 and path.cut[prev] == 1) 				or (_view_cut != "" and path.cut[i] == 1 and path.cut[prev] == 0 and path.tunnel[prev] == 0):

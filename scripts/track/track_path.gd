@@ -5,6 +5,14 @@ extends RefCounted
 ## lap counting, the crane and the dashboard.
 ## Piece types: "S" straight, "L"/"R" curve, "O" loop (vertical circle that
 ## ends shifted sideways so entry and exit pass each other).
+## Heights: either per piece ("h" end height, "p" profile, "bump"), or - own
+## tracks from the editor - a spline along the lap: def "heights" =
+## [[x, h, corner, wall], ...] between the start and the end of the lap (both
+## at "base"). x is the profile coordinate: the distance along the lap
+## without the loops (a loop keeps the height it starts at). Corner points
+## get a kink instead of a smooth tangent; two points at the same x make a
+## vertical wall (see spline_points): a wall down and one up again form a
+## pit, a wall down alone a ski jump.
 
 const ROAD_WIDTH := 10.0
 const HALF_WIDTH := ROAD_WIDTH * 0.5
@@ -30,6 +38,15 @@ const TUNNEL_ROOF := 0.6        # roof thickness
 var def: Dictionary
 var pieces: Array = []
 var total_length := 0.0
+## Length of the lap without the loops (x range of the height profile).
+var profile_length := 0.0
+## Spline points [x, h, corner] incl. start and end; empty = piece heights.
+var spline: Array = []
+## 1 = segment i -> i+1 is a vertical wall (pit, ski jump): built as a step.
+var step := PackedByteArray()
+## Ski jumps [lip_index, landing_index] (also in gaps() for the AI).
+var ramps: Array = []
+var _floor_ranges: Array = []    # [first, end) sample ranges of pit floors
 var closure_error := 0.0
 var heading_error := 0.0
 
@@ -41,11 +58,13 @@ var right_flat := PackedVector3Array()
 var up := PackedVector3Array()
 var forward := PackedVector3Array()
 var piece_of := PackedInt32Array()
+## Profile coordinate per sample (see profile_length).
+var px := PackedFloat32Array()
 var road := PackedByteArray()
 var bridge_zone := PackedByteArray()
 ## Half road width per sample (original tracks: 4 m, own tracks: 5 m).
 var half_width := PackedFloat32Array()
-## 1 = drawn black (very steep segment, e.g. pit walls).
+## 1 = very steep segment (e.g. pit walls; the editor reports these).
 var steep := PackedByteArray()
 ## Pits: [lip_index, landing_index] - steep drop followed by a steep rise,
 ## to be jumped over (original tracks have no missing road).
@@ -61,6 +80,8 @@ var tunnel := PackedByteArray()
 var cut := PackedByteArray()
 ## Distance (m) from a tunnel sample to the nearest portal, 0 outside.
 var tunnel_depth := PackedFloat32Array()
+## 1 = pit floor on the ground (y = 0): no road there, the ground is the floor.
+var ground_floor := PackedByteArray()
 
 
 
@@ -70,6 +91,8 @@ func _init(track_def: Dictionary) -> void:
 	_sample()
 	_finish_frames()
 	_detect_pits()
+	_finish_frames()      # again: pit walls are vertical now
+	_find_ground_floors()
 	_detect_tunnels()
 	_detect_decks()
 
@@ -80,6 +103,7 @@ func _layout() -> void:
 	var pos := Vector2.ZERO
 	var dir := Vector2(0, -1)
 	var s := 0.0
+	var x := 0.0
 	var h: float = def.get("base", 5.0)
 	for raw in def["pieces"]:
 		var p := {}
@@ -87,6 +111,7 @@ func _layout() -> void:
 		p["start"] = pos
 		p["dir"] = dir
 		p["s0"] = s
+		p["x0"] = x
 		p["h0"] = h
 		p["h1"] = float(raw.get("h", h))
 		p["profile"] = raw.get("p", "ramp")
@@ -120,9 +145,17 @@ func _layout() -> void:
 			dir = dir.rotated(sgn * a)
 		p["length"] = length
 		s += length
+		if p["type"] != "O":
+			x += length
 		h = p["h1"]
 		pieces.append(p)
 	total_length = s
+	profile_length = x
+	if def.has("heights"):
+		spline = spline_points(float(def.get("base", 5.0)), def["heights"], x)
+		for p in pieces:
+			p["h0"] = spline_height(spline, p["x0"])
+			p["h1"] = p["h0"] if p["type"] == "O" else spline_height(spline, p["x0"] + p["length"])
 	closure_error = pos.length()
 	heading_error = absf(dir.angle_to(Vector2(0, -1)))
 
@@ -157,9 +190,88 @@ static func profile_value(profile: String, u: float) -> float:
 			return u * u * (3.0 - 2.0 * u)
 
 
+## Start, the points inside the lap (sorted, clipped to it) and the end, each
+## [x, h, corner, wall]. wall = 1: the point stands right below / above its
+## left neighbour (same x, a vertical wall between them), -1: the same on
+## the left of its right neighbour.
+static func spline_points(base: float, pts: Array, length: float) -> Array:
+	var out := [[0.0, base, false, 0]]
+	var sorted := []
+	for q in pts:
+		sorted.append([float(q[0]), float(q[1]), bool(q[2]) if q.size() > 2 else false, int(q[3]) if q.size() > 3 else 0])
+	sorted.sort_custom(func(a, b): return a[3] < b[3] if absf(a[0] - b[0]) < WALL_EPS else a[0] < b[0])
+	for q in sorted:
+		var x: float = q[0]
+		if x < 0.5 or x > length - 0.5:
+			continue
+		var prev: Array = out[-1]
+		var wall_pair: bool = absf(x - prev[0]) < WALL_EPS and out.size() > 1 and (q[3] == 1 or prev[3] == -1) \
+			and not (out.size() > 2 and absf(out[-2][0] - x) < WALL_EPS)
+		if wall_pair:
+			q[0] = prev[0]      # exactly on the wall
+		if x > prev[0] + 0.5 or wall_pair:
+			out.append(q)
+	out.append([length, base, false, 0])
+	return out
+
+
+## Two points this close in x stand on one wall (float precision).
+const WALL_EPS := 0.01
+
+## True if points i and i+1 form a vertical wall.
+static func is_wall(pts: Array, i: int) -> bool:
+	return i >= 0 and i < pts.size() - 1 and absf(float(pts[i][0]) - float(pts[i + 1][0])) < WALL_EPS
+
+
+## Smooth tangent at point i (finite difference of the neighbours; the lap
+## wraps, so start and end share one tangent).
+static func _spline_tangent(pts: Array, i: int) -> float:
+	var last := pts.size() - 1
+	var length: float = pts[last][0]
+	if last < 2:
+		return 0.0
+	var a: Array = pts[i - 1] if i > 0 else [pts[last - 1][0] - length, pts[last - 1][1]]
+	var b: Array = pts[i + 1] if i < last else [pts[1][0] + length, pts[1][1]]
+	return (float(b[1]) - float(a[1])) / maxf(float(b[0]) - float(a[0]), 0.01)
+
+
+## Height of the spline at profile coordinate x (Hermite segments; next to a
+## corner point the segment is a parabola, between two corners a line). At
+## a wall the height of the road after it.
+static func spline_height(pts: Array, x: float) -> float:
+	var i := 0
+	while i < pts.size() - 2 and x >= float(pts[i + 1][0]):
+		i += 1
+	return segment_height(pts, i, x)
+
+
+## Height on segment i -> i+1 at x (clamped to the segment). The point at
+## the top or foot of a wall acts as a corner on that side.
+static func segment_height(pts: Array, i: int, x: float) -> float:
+	var a: Array = pts[i]
+	var b: Array = pts[i + 1]
+	var w := maxf(float(b[0]) - float(a[0]), 0.01)
+	var sec := (float(b[1]) - float(a[1])) / w
+	var ca: bool = a[2] or is_wall(pts, i - 1)
+	var cb: bool = b[2] or is_wall(pts, i + 1)
+	var ma := sec if ca else _spline_tangent(pts, i)
+	var mb := sec if cb else _spline_tangent(pts, i + 1)
+	if ca and not cb:
+		ma = 2.0 * sec - mb
+	elif cb and not ca:
+		mb = 2.0 * sec - ma
+	var u := clampf((x - float(a[0])) / w, 0.0, 1.0)
+	var u2 := u * u
+	var u3 := u2 * u
+	return (2.0 * u3 - 3.0 * u2 + 1.0) * float(a[1]) + (u3 - 2.0 * u2 + u) * w * ma \
+		+ (-2.0 * u3 + 3.0 * u2) * float(b[1]) + (u3 - u2) * w * mb
+
+
 func piece_height(p: Dictionary, u: float) -> float:
 	if p["type"] == "O":
 		return float(p["h0"]) + _loop_point(p, u).y
+	if not spline.is_empty():
+		return spline_height(spline, float(p["x0"]) + float(p["length"]) * u)
 	var h0: float = p["h0"]
 	var h1: float = p["h1"]
 	return h0 + (h1 - h0) * profile_value(p["profile"], u) + float(p["bump"]) * sin(PI * u)
@@ -205,6 +317,7 @@ func _sample() -> void:
 			right_flat.append(rf)
 			right.append(rf)
 			piece_of.append(pi_)
+			px.append(float(p["x0"]) + (0.0 if p["type"] == "O" else length * u))
 			var in_bridge: bool = p["bridge"] and u >= BRIDGE_U0 and u < BRIDGE_U1
 			road.append(0 if (p["gap"] or in_bridge) else 1)
 			bridge_zone.append(1 if in_bridge else 0)
@@ -213,12 +326,25 @@ func _sample() -> void:
 		p["i1"] = s_arr.size()
 	n = s_arr.size()
 	_apply_banking()
+	step.resize(n)
+	step.fill(0)
+	for k in range(1, spline.size() - 2):
+		if is_wall(spline, k):
+			step[(_index_at_x(spline[k][0]) - 1 + n) % n] = 1
 	steep.resize(n)
 	for i in n:
 		var j := (i + 1) % n
 		var d := Vector2(center[j].x - center[i].x, center[j].z - center[i].z).length()
 		var is_steep := absf(center[j].y - center[i].y) > 0.33 * maxf(d, 0.01)
-		steep[i] = 1 if is_steep and loop_mask[i] == 0 and loop_mask[j] == 0 else 0
+		steep[i] = 1 if is_steep and loop_mask[i] == 0 and loop_mask[j] == 0 and step[i] == 0 else 0
+
+
+## First sample at or after profile x.
+func _index_at_x(x: float) -> int:
+	for i in n:
+		if px[i] >= x and loop_mask[i] == 0:
+			return i
+	return 0
 
 
 ## Banking: a curve is banked over its whole length; the road twists in and
@@ -296,7 +422,10 @@ func _finish_frames() -> void:
 	forward.resize(n)
 	up.resize(n)
 	for i in n:
-		var f := (center[(i + 1) % n] - center[(i - 1 + n) % n]).normalized()
+		# one-sided next to a vertical wall (the wall is no slope)
+		var a := i if step[(i - 1 + n) % n] == 1 else (i - 1 + n) % n
+		var b := i if step[i] == 1 else (i + 1) % n
+		var f := (center[b] - center[a]).normalized() if a != b else forward[i]
 		var u3 := right[i].cross(f).normalized()
 		forward[i] = f
 		up[i] = u3
@@ -331,7 +460,7 @@ func _detect_tunnels() -> void:
 	cut.resize(n)
 	cut.fill(0)
 	for i in n:
-		if road[i] == 0 or loop_mask[i] == 1:
+		if road[i] == 0 or loop_mask[i] == 1 or ground_floor[i] == 1:
 			continue
 		var c := tunnel_corners(i)
 		var roof_top := maxf(c[2].y, c[3].y) + TUNNEL_ROOF
@@ -348,6 +477,16 @@ func _detect_tunnels() -> void:
 		while d < n and tunnel[(i + d) % n] == 1 and tunnel[(i - d + n) % n] == 1:
 			d += 1
 		tunnel_depth[i] = d * STEP
+
+
+## Where a cut wall from road corner c along the tunnel's up vector u meets
+## the ground (c itself if it is above the ground).
+static func to_ground(c: Vector3, u: Vector3) -> Vector3:
+	if c.y >= 0.0 or u.y <= 0.01:
+		return Vector3(c.x, maxf(c.y, 0.0), c.z)
+	var g := c + u * (-c.y / u.y)
+	g.y = 0.0
+	return g
 
 
 ## Openings in the ground over the open cuts, as plan-view polygons (x, z):
@@ -374,9 +513,16 @@ func ground_holes() -> Array:
 		var poly := PackedVector2Array()
 		var rights := PackedVector2Array()
 		for idx in run:
+			# the hole ends where the tilted cut walls meet the ground
 			var c := tunnel_corners(idx)
-			poly.append(Vector2(c[0].x, c[0].z))
-			rights.append(Vector2(c[1].x, c[1].z))
+			var u := tunnel_up(idx)
+			var gl := to_ground(c[0], u)
+			var gr := to_ground(c[1], u)
+			if tunnel[idx] == 1:      # the portal: the line of its top edge
+				gl = to_ground(c[2], u)
+				gr = to_ground(c[3], u)
+			poly.append(Vector2(gl.x, gl.z))
+			rights.append(Vector2(gr.x, gr.z))
 		rights.reverse()
 		poly.append_array(rights)
 		holes.append(poly)
@@ -385,6 +531,11 @@ func ground_holes() -> Array:
 
 func _detect_pits() -> void:
 	pits.clear()
+	ramps.clear()
+	if not spline.is_empty():
+		_spline_pits()
+		return
+	var walls := []   # [lip, top of the far wall] of each pit
 	var i := 0
 	while i < n:
 		var j := (i + 1) % n
@@ -395,6 +546,7 @@ func _detect_pits() -> void:
 		var lip := i
 		var k := i
 		var found := -1
+		var wall_top := -1
 		for step in 140:
 			var a := (k + 1) % n
 			var b := (k + 2) % n
@@ -404,6 +556,7 @@ func _detect_pits() -> void:
 				while steep[e] == 1 and center[(e + 1) % n].y > center[e].y:
 					e = (e + 1) % n
 				found = e
+				wall_top = e
 				break
 			k = a
 		if found < 0:
@@ -417,6 +570,7 @@ func _detect_pits() -> void:
 				found = a2
 			else:
 				break
+		walls.append([lip, wall_top])
 		if not pits.is_empty() and _fwd_dist(pits[-1][1], lip) < 20:
 			pits[-1][1] = found
 		else:
@@ -430,6 +584,78 @@ func _detect_pits() -> void:
 		var k: int = pt[0]
 		while k != pt[1]:
 			pit_mask[k] = 1
+			k = (k + 1) % n
+	for w in walls:
+		_vertical_pit(w[0], w[1])
+
+
+## League pits are built with short steep ramps as walls: the floor runs on
+## to the foot of both (lip and top keep their place, so the jump stays as
+## long) and the walls stand vertical there.
+func _vertical_pit(lip: int, top: int) -> void:
+	var floor_y := INF
+	var k := (lip + 1) % n
+	while k != top:
+		floor_y = minf(floor_y, center[k].y)
+		k = (k + 1) % n
+	if floor_y == INF:
+		return
+	k = (lip + 1) % n
+	while k != top:
+		center[k].y = floor_y
+		steep[k] = 0
+		k = (k + 1) % n
+	steep[lip] = 0
+	steep[(top - 1 + n) % n] = 0
+	step[lip] = 1
+	step[(top - 1 + n) % n] = 1
+	_floor_ranges.append([(lip + 1) % n, top])
+
+
+## Pits and ski jumps from the walls of the spline: a wall down followed by
+## a wall up (within PIT_MAX) is a pit that lands on top of the far wall; a
+## wall down alone a ski jump (landing 15 m on, for the AI). lip = last
+## sample before the wall.
+const PIT_MAX := 80.0
+
+func _spline_pits() -> void:
+	pit_mask.resize(n)
+	pit_mask.fill(0)
+	var walls := []    # [x, down]
+	for k in range(1, spline.size() - 2):
+		if is_wall(spline, k):
+			walls.append([float(spline[k][0]), float(spline[k + 1][1]) < float(spline[k][1])])
+	var w := 0
+	while w < walls.size():
+		if not walls[w][1]:
+			w += 1
+			continue
+		var lip := (_index_at_x(walls[w][0]) - 1 + n) % n
+		if w + 1 < walls.size() and not walls[w + 1][1] and walls[w + 1][0] - walls[w][0] <= PIT_MAX:
+			var landing := _index_at_x(walls[w + 1][0])
+			pits.append([lip, landing])
+			_floor_ranges.append([(lip + 1) % n, landing])
+			var k := lip
+			while k != landing:
+				pit_mask[k] = 1
+				k = (k + 1) % n
+			w += 2
+		else:
+			ramps.append([lip, _index_at_x(walls[w][0] + 15.0)])
+			w += 1
+
+
+## Pit floors at ground level (between two lower wall points snapped to 0):
+## no road there, also in a banked curve - a gap, the car lands on the
+## ground. These samples are no cut either (see _detect_tunnels).
+func _find_ground_floors() -> void:
+	ground_floor.resize(n)
+	ground_floor.fill(0)
+	for r in _floor_ranges:
+		var k: int = r[0]
+		while k != r[1]:
+			if center[k].y <= 0.05:
+				ground_floor[k] = 1
 			k = (k + 1) % n
 
 
@@ -583,6 +809,14 @@ func is_crane_allowed(piece_index: int) -> bool:
 	for i in range(p["i0"], p["i1"]):
 		if deck[i] == 1 or tunnel[i] == 1 or cut[i] == 1:
 			return false
+	if not spline.is_empty():
+		for i in range(p["i0"], p["i1"]):
+			if step[i] == 1 or pit_mask[i] == 1:
+				return false
+		for i in range(p["i0"], p["i1"] - 1):
+			if absf(center[i + 1].y - center[i].y) > 0.3 * STEP:
+				return false
+		return true
 	if p["profile"] == "kick" or p["profile"] == "land":
 		return false
 	return absf(float(p["h1"]) - float(p["h0"])) / float(p["length"]) < 0.3
@@ -613,6 +847,7 @@ func gaps() -> Array:
 				guard += 1
 			result.append([i, k])
 	result.append_array(pits)
+	result.append_array(ramps)
 	return result
 
 

@@ -377,17 +377,66 @@ const TRACKS := {
 }
 
 
+## Tracks built in the editor live in user://tracks/<name>.json; their id is
+## "custom/<name>".
+const CUSTOM_DIR := "user://tracks"
+const CUSTOM_PREFIX := "custom/"
+
+
+static func is_custom(id: String) -> bool:
+	return id.begins_with(CUSTOM_PREFIX)
+
+
+## Ids of the saved editor tracks that are closed (drivable).
+static func custom_ids() -> Array:
+	var ids := []
+	if not DirAccess.dir_exists_absolute(CUSTOM_DIR):
+		return ids
+	var files := DirAccess.get_files_at(CUSTOM_DIR)
+	files.sort()
+	for f in files:
+		if f.ends_with(".json"):
+			var data := load_custom(CUSTOM_PREFIX + f.get_basename())
+			if data.get("closed", false):
+				ids.append(CUSTOM_PREFIX + f.get_basename())
+	return ids
+
+
+static func custom_path(id: String) -> String:
+	return CUSTOM_DIR.path_join(id.trim_prefix(CUSTOM_PREFIX) + ".json")
+
+
+## Deletes the editor file of a custom track; false if there is none.
+static func delete_custom(id: String) -> bool:
+	return is_custom(id) and FileAccess.file_exists(custom_path(id)) 		and DirAccess.remove_absolute(custom_path(id)) == OK
+
+
+## The editor file of a custom track ({} if missing).
+static func load_custom(id: String) -> Dictionary:
+	var text := FileAccess.get_file_as_string(custom_path(id))
+	var data = JSON.parse_string(text) if text != "" else null
+	return data if data is Dictionary else {}
+
+
 static func get_def(id: String) -> Dictionary:
-	var d: Dictionary = TRACKS[id].duplicate(true)
+	var d: Dictionary
+	if is_custom(id):
+		d = load_custom(id).get("def", {})
+	else:
+		d = TRACKS[id].duplicate(true)
 	d["id"] = id
 	return d
 
 
 static func display_name(id: String) -> String:
+	if is_custom(id):
+		return str(load_custom(id).get("name", id.trim_prefix(CUSTOM_PREFIX)))
 	return TRACKS[id]["name"]
 
 
 static func division_of(id: String) -> int:
+	if is_custom(id):
+		return 1
 	if TRACKS.has(id) and TRACKS[id].has("division"):
 		return TRACKS[id]["division"]
 	for div in DIVISION_TRACKS:

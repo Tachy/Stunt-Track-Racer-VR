@@ -21,38 +21,61 @@ const TUNNEL_DIM := 0.45
 const LAMP_SPACING := 12          # samples (m) between ceiling lamps
 const LIGHT_SPACING := 24         # samples (m) between real lights
 const LAMP_COLOR := Color(1.0, 0.92, 0.72)
+## The road colour changes at every piece border and, inside a piece, at
+## least every STRIPE_MAX metres (the piece is cut into equal stripes).
+const STRIPE_MAX := 30.0
 
 var path: TrackPath
 var time := 0.0
 var _leaves: Array = []
+var _stripe := PackedByteArray()      # per sample: 0 = dark, 1 = light
 
 
 
 func build(p: TrackPath) -> TrackNode:
 	path = p
 	name = "Track"
+	_stripes()
 	_build_static()
 	_build_bridges()
 	return self
 
 
+## Alternating stripes along the lap. An even number in all, so the colour
+## also changes where the lap ends at the start (the longest piece gets one
+## stripe more if needed).
+func _stripes() -> void:
+	var counts := []
+	var total := 0
+	var longest := 0
+	for k in path.pieces.size():
+		var length: float = path.pieces[k]["length"]
+		counts.append(maxi(1, ceili(length / STRIPE_MAX - 0.01)))
+		total += counts[k]
+		if length > float(path.pieces[longest]["length"]):
+			longest = k
+	if total % 2 == 1:
+		counts[longest] += 1
+	_stripe.resize(path.n)
+	var first := 0
+	for k in path.pieces.size():
+		var pc: Dictionary = path.pieces[k]
+		for i in range(pc["i0"], pc["i1"]):
+			var u := (path.s_arr[i] - float(pc["s0"])) / float(pc["length"])
+			_stripe[i] = (first + mini(int(u * counts[k]), counts[k] - 1)) % 2
+		first += counts[k]
+
+
 func _road_color(i: int) -> Color:
 	if path.piece_of[i] == 0 and path.s_arr[i] < 3.0:
 		return Palette.START_LINE
-	if path.steep[i] == 1:
-		return Palette.ROAD_STEEP
-	return Palette.ROAD_DARK if path.piece_of[i] % 2 == 0 else Palette.ROAD_LIGHT
+	return Palette.ROAD_DARK if _stripe[i] == 0 else Palette.ROAD_LIGHT
 
 
 func _wall(kit: MeshKit, faces: PackedVector3Array, a: Vector3, b: Vector3) -> void:
 	var ag := Vector3(a.x, 0.0, a.z)
 	var bg := Vector3(b.x, 0.0, b.z)
-	# white band below the road edge; a wall lower than the band is white
-	# right down to the ground (per end, so it never steps)
-	var a2 := a - Vector3(0, minf(EDGE_BAND, maxf(a.y, 0.0)), 0)
-	var b2 := b - Vector3(0, minf(EDGE_BAND, maxf(b.y, 0.0)), 0)
-	kit.quad(a, b, b2, a2, Palette.WALL_EDGE)
-	kit.quad(a2, b2, bg, ag, Palette.WALL)
+	kit.quad(a, b, bg, ag, Palette.WALL)
 	faces.append_array([a, b, bg, a, bg, ag])
 
 
@@ -81,18 +104,30 @@ func _build_static() -> void:
 	add_child(_static_body("WallBody", wall_faces, LAYER_WALL))
 
 
-## Road quad + side walls (+ end caps at gaps) from sample i to i+1.
-## Road quad + side walls (+ end caps at gaps) from sample i to i+1.
+## Road quad with the white edge strips (as wide as in the tunnels) + side
+## walls (+ end caps at gaps) from sample i to i+1.
 ## Deck samples (overhead loop part, sections above an underpass) get a slab
 ## with thickness instead of walls down to the ground.
 func _emit_segment(kit: MeshKit, road_faces: PackedVector3Array, wall_faces: PackedVector3Array, i: int) -> void:
 	var j := (i + 1) % path.n
-	var li := path.center[i] - path.right[i] * path.half_width[i]
-	var ri := path.center[i] + path.right[i] * path.half_width[i]
-	var lj := path.center[j] - path.right[j] * path.half_width[j]
-	var rj := path.center[j] + path.right[j] * path.half_width[j]
+	var ri_ := path.center[i] + path.right[i] * path.half_width[i]
+	var li_ := path.center[i] - path.right[i] * path.half_width[i]
+	var rj_ := path.center[j] + path.right[j] * path.half_width[j]
+	var lj_ := path.center[j] - path.right[j] * path.half_width[j]
+	# outer edges of the strips: walls, slabs and caps start there
+	var li := path.center[i] - path.right[i] * path.tunnel_half_width(i)
+	var ri := path.center[i] + path.right[i] * path.tunnel_half_width(i)
+	var lj := path.center[j] - path.right[j] * path.tunnel_half_width(j)
+	var rj := path.center[j] + path.right[j] * path.tunnel_half_width(j)
+	if path.ground_floor[i] == 1 and path.ground_floor[j] == 1:
+		return     # pit floor on the ground: the ground is the road
+	if path.road[i] == 1 and path.step[i] == 1 and path.deck[i] == 0:
+		_emit_step(kit, road_faces, wall_faces, [li, li_, ri_, ri], [lj, lj_, rj_, rj], i)
+		return
 	if path.road[i] == 1:
-		kit.quad(li, lj, rj, ri, _road_color(i))
+		kit.quad(li_, lj_, rj_, ri_, _road_color(i))
+		kit.quad(li, lj, lj_, li_, Palette.WALL_EDGE)
+		kit.quad(ri_, rj_, rj, ri, Palette.WALL_EDGE)
 		road_faces.append_array([li, lj, rj, li, rj, ri])
 		if path.deck[i] == 1:
 			_slab(kit, wall_faces, li, lj, ri, rj, path.up[i], path.up[j])
@@ -105,6 +140,39 @@ func _emit_segment(kit: MeshKit, road_faces: PackedVector3Array, wall_faces: Pac
 				_cap(kit, wall_faces, lj, rj)
 	elif path.road[j] == 1:
 		_cap(kit, wall_faces, lj, rj)
+
+
+## Vertical wall of a pit or ski jump between samples i and j = i+1 (black,
+## as in the original): the lower road runs on under the higher end, the
+## wall stands at that end. A pit floor on the ground gets no road.
+## a, b: cross-sections [outer left, road left, road right, outer right].
+func _emit_step(kit: MeshKit, road_faces: PackedVector3Array, wall_faces: PackedVector3Array, a: Array, b: Array, i: int) -> void:
+	var dh: float = b[0].y - a[0].y
+	var low_a := a
+	var low_b := b
+	var high: Array
+	var low: Array
+	if dh < 0.0:      # down: the wall at i, the road at j's height from i on
+		low_a = a.map(func(v): return v + Vector3(0, dh, 0))
+		high = a
+		low = low_a
+	else:             # up: the road at i's height up to j, the wall at j
+		low_b = b.map(func(v): return v - Vector3(0, dh, 0))
+		high = b
+		low = low_b
+	var floor_i := (i + 1) % path.n if dh < 0.0 else i
+	if path.ground_floor[floor_i] == 0:
+		kit.quad(low_a[1], low_b[1], low_b[2], low_a[2], _road_color(i))
+		kit.quad(low_a[0], low_b[0], low_b[1], low_a[1], Palette.WALL_EDGE)
+		kit.quad(low_a[2], low_b[2], low_b[3], low_a[3], Palette.WALL_EDGE)
+		road_faces.append_array([low_a[0], low_b[0], low_b[3], low_a[0], low_b[3], low_a[3]])
+		_wall(kit, wall_faces, low_a[0], low_b[0])
+		_wall(kit, wall_faces, low_a[3], low_b[3])
+	if path.ground_floor[floor_i] == 1:
+		# a gap down to the ground: the wall reaches the ground all across
+		low = high.map(func(v): return Vector3(v.x, 0.0, v.z))
+	kit.quad(high[0], high[3], low[3], low[0], Palette.JUMP_WALL)
+	wall_faces.append_array([high[0], high[3], low[3], high[0], low[3], low[0]])
 
 
 # --- tunnels ----------------------------------------------------------------------
@@ -149,59 +217,59 @@ func _emit_tunnel_segment(kit: MeshKit, road_faces: PackedVector3Array, wall_fac
 			ci[1], cj[1], cj[3], ci[1], cj[3], ci[3],
 			ci[2], cj[2], cj[3], ci[2], cj[3], ci[3]])
 		return
-	# open cut: retaining walls from the road edge up (or down) to the ground
-	_to_ground(kit, wall_faces, ci[0], cj[0])
-	_to_ground(kit, wall_faces, ci[1], cj[1])
+	# open cut: the tunnel walls go on, tilted with the banking as in the
+	# tunnel, and end where they reach the ground; a road edge above the
+	# ground gets a wall down to it instead
+	var ui := path.tunnel_up(i)
+	var uj := path.tunnel_up(j)
+	_cut_wall(kit, wall_faces, ci[0], cj[0], ui, uj)
+	_cut_wall(kit, wall_faces, ci[1], cj[1], ui, uj)
 	# portal over the tunnel mouth
 	if path.tunnel[i] == 1:
-		_portal(kit, wall_faces, ci)
+		_portal(kit, wall_faces, ci, ui)
 	if path.tunnel[j] == 1:
-		_portal(kit, wall_faces, cj)
+		_portal(kit, wall_faces, cj, uj)
 
 
-## Wall from a road edge a-b to the ground: down from a road above the
-## ground (like the ramps), up as a retaining wall from a road below it.
-## Where the edge crosses ground level the piece is split there.
-func _to_ground(kit: MeshKit, faces: PackedVector3Array, a: Vector3, b: Vector3) -> void:
+## Wall of an open cut from the road edge a-b along the tunnel's up vectors
+## ua / ub up to the ground (TrackPath.to_ground), with a white band along
+## its top; a road edge above the ground: a wall down to it. Where the edge
+## crosses ground level the piece is split there.
+func _cut_wall(kit: MeshKit, faces: PackedVector3Array, a: Vector3, b: Vector3, ua: Vector3, ub: Vector3) -> void:
 	if (a.y > 0.0 and b.y < 0.0) or (a.y < 0.0 and b.y > 0.0):
-		var m := a.lerp(b, a.y / (a.y - b.y))
+		var t := a.y / (a.y - b.y)
+		var m := a.lerp(b, t)
 		m.y = 0.0
-		_to_ground(kit, faces, a, m)
-		_to_ground(kit, faces, m, b)
+		var um := ua.lerp(ub, t).normalized()
+		_cut_wall(kit, faces, a, m, ua, um)
+		_cut_wall(kit, faces, m, b, um, ub)
 		return
 	if a.y >= 0.0 and b.y >= 0.0:
 		_wall(kit, faces, a, b)
 		return
-	# retaining wall: white band along the top edge at ground level, as high
-	# as the ramps' band (a wall lower than that is white all over)
-	var ag := Vector3(a.x, 0.0, a.z)
-	var bg := Vector3(b.x, 0.0, b.z)
-	var a2 := Vector3(a.x, -minf(EDGE_BAND, -a.y), a.z)
-	var b2 := Vector3(b.x, -minf(EDGE_BAND, -b.y), b.z)
-	kit.quad(a, b, b2, a2, Palette.WALL)
-	kit.quad(a2, b2, bg, ag, Palette.WALL_EDGE)
-	faces.append_array([a, b, bg, a, bg, ag])
+	var ga := TrackPath.to_ground(a, ua)
+	var gb := TrackPath.to_ground(b, ub)
+	# white band as high as the ramps' band (a lower wall is white all over)
+	var ea := ga - ua * (minf(EDGE_BAND, -a.y) / ua.y)
+	var eb := gb - ub * (minf(EDGE_BAND, -b.y) / ub.y)
+	kit.quad(a, b, eb, ea, Palette.WALL)
+	kit.quad(ea, eb, gb, ga, Palette.WALL_EDGE)
+	faces.append_array([a, b, gb, a, gb, ga])
 
 
-## Portal face above the tunnel mouth at a cross-section c, from the roof
-## line up to the ground. Its white edge runs along the top at exactly the
-## height of the cut walls' white band, and its sides reach out to the cut
-## walls (straight above the road edges), so a banked portal has no gap.
-func _portal(kit: MeshKit, faces: PackedVector3Array, c: Array) -> void:
-	var bl0: Vector3 = c[0]
-	var br0: Vector3 = c[1]
+## Portal face above the tunnel mouth at a cross-section c (tilted with the
+## tunnel, up vector u): from the roof line up to the ground, its sides on
+## the lines of the cut walls, a white band along the top.
+func _portal(kit: MeshKit, faces: PackedVector3Array, c: Array, u: Vector3) -> void:
 	var tl: Vector3 = c[2]
 	var tr: Vector3 = c[3]
-	var gl := Vector3(bl0.x, 0.0, bl0.z)
-	var gr := Vector3(br0.x, 0.0, br0.z)
-	var el := Vector3(bl0.x, -EDGE_BAND, bl0.z)
-	var er := Vector3(br0.x, -EDGE_BAND, br0.z)
+	var gl := TrackPath.to_ground(tl, u)
+	var gr := TrackPath.to_ground(tr, u)
+	var el := gl - u * (minf(EDGE_BAND, -tl.y) / u.y)
+	var er := gr - u * (minf(EDGE_BAND, -tr.y) / u.y)
 	kit.quad(tl, tr, er, el, Palette.WALL)
 	kit.quad(el, er, gr, gl, Palette.WALL_EDGE)
-	# corners between the tunnel wall, the cut wall and the face
-	kit.tri(bl0, tl, el, Palette.WALL)
-	kit.tri(br0, er, tr, Palette.WALL)
-	faces.append_array([tl, tr, gr, tl, gr, gl, bl0, tl, gl, br0, gr, tr])
+	faces.append_array([tl, tr, gr, tl, gr, gl])
 
 
 ## Lamp strips under the ceiling (always bright) and, every LIGHT_SPACING,
@@ -242,8 +310,8 @@ func _slab(kit: MeshKit, faces: PackedVector3Array, li: Vector3, lj: Vector3, ri
 	var lbj := lj - uj * DECK_THICKNESS
 	var rbi := ri - ui * DECK_THICKNESS
 	var rbj := rj - uj * DECK_THICKNESS
-	kit.quad(li, lj, lbj, lbi, Palette.WALL_EDGE)
-	kit.quad(ri, rj, rbj, rbi, Palette.WALL_EDGE)
+	kit.quad(li, lj, lbj, lbi, Palette.WALL)
+	kit.quad(ri, rj, rbj, rbi, Palette.WALL)
 	kit.quad(lbi, lbj, rbj, rbi, Palette.WALL.darkened(0.3))
 	faces.append_array([li, lj, lbj, li, lbj, lbi, ri, rj, rbj, ri, rbj, rbi, lbi, lbj, rbj, lbi, rbj, rbi])
 
