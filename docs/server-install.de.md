@@ -53,10 +53,10 @@ journalctl -u stunt-racer -f        # Live-Log: hello "JOHAN" from …, Rennen, 
 
 ## 6. Im Spiel verbinden
 
-1. **MULTIPLAYER** → **SERVER** → Adresse eintragen, z. B. `203.0.113.5` oder `racer.example.de` (ohne Port, `host:port` geht auch).
+1. **MULTIPLAYER** → **EINSTELLUNGEN** → **SERVER** → Adresse eintragen, z. B. `203.0.113.5` oder `racer.example.de` (ohne Port, `host:port` geht auch).
 2. Optional **NAME** und **AUTOFARBE** anpassen.
 3. Oben muss „VERBUNDEN, PING … MS“ stehen.
-4. Beide Spieler wählen **GEGNER SUCHEN**. Wer zuerst sucht, bestimmt die Strecke.
+4. Ein Spieler wählt eine **STRECKE** (eingebaut oder aus dem Streckeneditor) und dann **RENNEN ANBIETEN**. Der andere sieht das Angebot unter **OFFENE RENNEN** und wählt es aus; das Rennen startet sofort. Eine Strecke aus dem Editor bekommt der andere für dieses Rennen mitgeschickt.
 
 ## Update
 

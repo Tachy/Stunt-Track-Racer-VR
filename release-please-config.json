@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "d68664dad7b52402281dbf2cf03f4e6cfd9f7624",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "stunt-track-racer-vr",
+      "changelog-path": "CHANGELOG.md",
+      "include-component-in-tag": false
+    }
+  }
+}

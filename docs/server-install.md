@@ -53,10 +53,10 @@ journalctl -u stunt-racer -f        # live log: hello "NAME" from …, races, re
 
 ## 6. Connect from the game
 
-1. **MULTIPLAYER** → **SERVER** → enter the address, e.g. `203.0.113.5` or `racer.example.org` (no port needed; `host:port` works too).
+1. **MULTIPLAYER** → **SETTINGS** → **SERVER** → enter the address, e.g. `203.0.113.5` or `racer.example.org` (no port needed; `host:port` works too).
 2. Optionally change **NAME** and **CAR COLOUR**.
 3. The top line must read "CONNECTED, PING … MS".
-4. Both players choose **FIND AN OPPONENT**. Whoever searches first picks the track.
+4. One player picks a **TRACK** (built-in or from the track editor) and chooses **OFFER A RACE**. The other one sees it under **OPEN RACES** and selects it; the race starts at once. A track from the editor goes along to the other player for that race.
 
 ## Updating
 
