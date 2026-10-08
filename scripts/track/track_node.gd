@@ -23,6 +23,10 @@ const LAMP_COLOR := Color(1.0, 0.92, 0.72)
 ## The road colour changes at every piece border and, inside a piece, at
 ## least every STRIPE_MAX metres (the piece is cut into equal stripes).
 const STRIPE_MAX := 30.0
+## The road surface is cut into this many strips across: a single quad over
+## the whole width is folded along its diagonal where the road twists into or
+## out of a banked curve - a bump of up to 6 cm every metre under the wheels.
+const ROAD_COLUMNS := 8
 
 var path: TrackPath
 var time := 0.0
@@ -124,10 +128,10 @@ func _emit_segment(kit: MeshKit, road_faces: PackedVector3Array, wall_faces: Pac
 		_emit_step(kit, road_faces, wall_faces, [li, li_, ri_, ri], [lj, lj_, rj_, rj], i)
 		return
 	if path.road[i] == 1:
-		kit.quad(li_, lj_, rj_, ri_, _road_color(i))
+		_road_quads(kit, li_, lj_, rj_, ri_, _road_color(i))
 		kit.quad(li, lj, lj_, li_, Palette.WALL_EDGE)
 		kit.quad(ri_, rj_, rj, ri, Palette.WALL_EDGE)
-		road_faces.append_array([li, lj, rj, li, rj, ri])
+		_road_faces(road_faces, li, lj, rj, ri)
 		if path.deck[i] == 1:
 			_slab(kit, wall_faces, li, lj, ri, rj, path.up[i], path.up[j])
 			if path.deck[j] == 0 and path.road[j] == 1:
@@ -139,6 +143,27 @@ func _emit_segment(kit: MeshKit, road_faces: PackedVector3Array, wall_faces: Pac
 				_cap(kit, wall_faces, lj, rj)
 	elif path.road[j] == 1:
 		_cap(kit, wall_faces, lj, rj)
+
+
+## Road surface from the cross-section li-ri (sample i) to lj-rj (sample j),
+## in ROAD_COLUMNS strips across (see there).
+func _road_quads(kit: MeshKit, li: Vector3, lj: Vector3, rj: Vector3, ri: Vector3, col: Color) -> void:
+	for c in ROAD_COLUMNS:
+		var u0 := float(c) / ROAD_COLUMNS
+		var u1 := float(c + 1) / ROAD_COLUMNS
+		kit.quad(li.lerp(ri, u0), lj.lerp(rj, u0), lj.lerp(rj, u1), li.lerp(ri, u1), col)
+
+
+## Collision of the same surface (strips as in _road_quads).
+func _road_faces(faces: PackedVector3Array, li: Vector3, lj: Vector3, rj: Vector3, ri: Vector3) -> void:
+	for c in ROAD_COLUMNS:
+		var u0 := float(c) / ROAD_COLUMNS
+		var u1 := float(c + 1) / ROAD_COLUMNS
+		var a := li.lerp(ri, u0)
+		var b := lj.lerp(rj, u0)
+		var d := li.lerp(ri, u1)
+		var e := lj.lerp(rj, u1)
+		faces.append_array([a, b, e, a, e, d])
 
 
 ## Vertical wall of a pit or ski jump between samples i and j = i+1 (black,
@@ -161,10 +186,10 @@ func _emit_step(kit: MeshKit, road_faces: PackedVector3Array, wall_faces: Packed
 		low = low_b
 	var floor_i := (i + 1) % path.n if dh < 0.0 else i
 	if path.ground_floor[floor_i] == 0:
-		kit.quad(low_a[1], low_b[1], low_b[2], low_a[2], _road_color(i))
+		_road_quads(kit, low_a[1], low_b[1], low_b[2], low_a[2], _road_color(i))
 		kit.quad(low_a[0], low_b[0], low_b[1], low_a[1], Palette.WALL_EDGE)
 		kit.quad(low_a[2], low_b[2], low_b[3], low_a[3], Palette.WALL_EDGE)
-		road_faces.append_array([low_a[0], low_b[0], low_b[3], low_a[0], low_b[3], low_a[3]])
+		_road_faces(road_faces, low_a[0], low_b[0], low_b[3], low_a[3])
 		_wall(kit, wall_faces, low_a[0], low_b[0])
 		_wall(kit, wall_faces, low_a[3], low_b[3])
 	if path.ground_floor[floor_i] == 1:
@@ -199,10 +224,11 @@ func _emit_tunnel_segment(kit: MeshKit, road_faces: PackedVector3Array, wall_fac
 	var lj := path.center[j] - path.right[j] * path.half_width[j]
 	var rj := path.center[j] + path.right[j] * path.half_width[j]
 	var col := _road_color(i).darkened(dim)
-	kit.quad(li, lj, rj, ri, col)
+	_road_quads(kit, li, lj, rj, ri, col)
 	kit.quad(ci[0], cj[0], lj, li, Palette.WALL_EDGE)   # pure white, also inside
 	kit.quad(ri, rj, cj[1], ci[1], Palette.WALL_EDGE)   # pure white, also inside
-	road_faces.append_array([li, lj, rj, li, rj, ri, ci[0], cj[0], lj, ci[0], lj, li, ri, rj, cj[1], ri, cj[1], ci[1]])
+	_road_faces(road_faces, li, lj, rj, ri)
+	road_faces.append_array([ci[0], cj[0], lj, ci[0], lj, li, ri, rj, cj[1], ri, cj[1], ci[1]])
 	if inside:
 		var wall := Palette.WALL.darkened(TUNNEL_DIM)
 		kit.quad(ci[0], cj[0], cj[2], ci[2], wall)
