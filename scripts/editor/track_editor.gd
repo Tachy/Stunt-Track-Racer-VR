@@ -615,6 +615,7 @@ func _set_mode(m: String) -> void:
 			view = EditorView.new(XrManager.desktop_camera)
 		XrManager.free_look = false
 		_h3d = HeightEditor3D.new()
+		_h3d.track_cursor = view.dome != null      # VR: the pointer is drawn in 3D
 		_h3d.setup(model, view, track_name)
 		# deferred: the parent may still be setting up its children (VR host)
 		(world_parent if world_parent != null else get_parent()).add_child.call_deferred(_h3d)
@@ -629,6 +630,23 @@ func _set_mode(m: String) -> void:
 		_close_3d()
 		if is_inside_tree():
 			_fit_window()
+
+
+## The 3D height editor (null outside the height stage).
+func height_editor() -> HeightEditor3D:
+	return _h3d
+
+
+## Whether screen point pos is on a control (VR: the pointer stays on the
+## screen sphere there): the top bar, the navigation window, an open menu or
+## dialog; in the plan stage all of the plan.
+func ui_at(pos: Vector2) -> bool:
+	if _mode != "height":
+		return true
+	for w in get_viewport().get_embedded_subwindows():
+		if w.visible and Rect2(Vector2(w.position), Vector2(w.size)).has_point(pos):
+			return true
+	return _bar.get_global_rect().has_point(pos) or (_nav.visible and _nav.get_global_rect().has_point(pos))
 
 
 func _close_3d() -> void:

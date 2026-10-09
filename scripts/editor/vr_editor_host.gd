@@ -10,6 +10,11 @@ extends Node3D
 ## (EditorView). The sphere is fixed to the XR rig at the seat's eye point:
 ## it moves with the camera (in the height stage it circles the pivot with
 ## it), and the head moves and turns freely inside it (6DOF).
+## The pointer is a 3D arrow, not part of the screen: on the sphere it would
+## sit at another depth than the track behind it and the eyes would not
+## agree what it points at. So it is drawn where it points: on a dragged
+## point, on the point or the road under it - and on the sphere over a
+## control or over nothing (HeightEditor3D.cursor_world, TrackEditor.ui_at).
 
 const DEG_PER_PX := 0.05
 const DOME_DEG := Vector2(160.0, 110.0)     # yaw, pitch range of the screen
@@ -28,7 +33,7 @@ var dome: Node3D
 var screen: MeshInstance3D
 var cursor := Vector2.ZERO
 var _px := Vector2.ZERO
-var _pointer: Control
+var _pointer: Node3D
 var _last_press_time := -10.0
 var _last_press_pos := Vector2(-100, -100)
 
@@ -48,8 +53,9 @@ func _init(e: TrackEditor) -> void:
 	editor.world_parent = self
 	editor.ui_rect = Rect2((_px - UI_PX) * 0.5, UI_PX)
 	viewport.add_child(editor)
-	_pointer = _Pointer.new()
-	viewport.add_child(_pointer)
+	_pointer = _make_pointer()
+	add_child(_pointer)
+	process_priority = 100        # after the camera (height stage) has been placed
 	dome = Node3D.new()
 	dome.name = "EditorDome"     # goes on the XR rig (see _ready)
 	screen = MeshInstance3D.new()
@@ -94,6 +100,9 @@ static func _band_mesh() -> ArrayMesh:
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	# the mouse is always "in" the screen (a SubViewportContainer would tell
+	# it so): else the viewport drops moves without a button (no hover)
+	viewport.notification(Viewport.NOTIFICATION_VP_MOUSE_ENTER)
 	XrManager.set_base(Transform3D(Basis.IDENTITY, Vector3(0, 10, 0)))
 	# on the rig: it moves exactly with the camera, no frame late
 	XrManager.origin.add_child(dome)
@@ -107,7 +116,23 @@ func _exit_tree() -> void:
 
 func _process(_dt: float) -> void:
 	_place()
-	_pointer.position = cursor
+	_place_pointer()
+
+
+## The pointer where it points (see the class comment), facing the eyes,
+## always the same size to them (DEG_PER_PX per pixel of its shape).
+func _place_pointer() -> void:
+	var h := editor.height_editor()
+	var at: Vector3
+	if h != null and h.dragging() and h.cursor_world != null:
+		at = h.cursor_world
+	elif h != null and h.cursor_world != null and not editor.ui_at(cursor):
+		at = h.cursor_world
+	else:
+		at = editor.view.sphere_point(cursor)
+	var cam := XrManager.active_camera()
+	var k := deg_to_rad(DEG_PER_PX) * cam.global_position.distance_to(at)
+	_pointer.global_transform = Transform3D(cam.global_transform.basis.orthonormalized(), at).scaled_local(Vector3.ONE * k)
 
 
 ## The sphere's centre is the seat's eye point (the base pose): on the rig
@@ -157,18 +182,30 @@ func _input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 
-## The mouse pointer on the sphere (an arrow with a dark rim).
-class _Pointer extends Control:
-	func _init() -> void:
-		mouse_filter = Control.MOUSE_FILTER_IGNORE
-		z_index = 100
-		top_level = true
-
-	func _draw() -> void:
-		var arrow := PackedVector2Array([Vector2(0, 0), Vector2(0, 22), Vector2(6, 17), Vector2(10, 26), Vector2(14, 24), Vector2(10, 15), Vector2(17, 15)])
-		var rim := PackedVector2Array()
-		for p in arrow:
-			rim.append(p)
-		rim.append(arrow[0])
-		draw_colored_polygon(arrow, Color.WHITE)
-		draw_polyline(rim, Color.BLACK, 2.0)
+## The pointer: an arrow (shape in pixels, tip at the origin, x right, y
+## up) with a dark rim, unlit, never hidden.
+static func _make_pointer() -> Node3D:
+	var arrow := PackedVector2Array([Vector2(0, 0), Vector2(0, -22), Vector2(6, -17), Vector2(10, -26),
+		Vector2(14, -24), Vector2(10, -15), Vector2(17, -15)])
+	var node := Node3D.new()
+	node.name = "EditorPointer"
+	var rim: PackedVector2Array = Geometry2D.offset_polygon(arrow, 2.0)[0]
+	for part in [[rim, Color.BLACK, 30], [arrow, Color.WHITE, 31]]:
+		var poly: PackedVector2Array = part[0]
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		for i in Geometry2D.triangulate_polygon(poly):
+			st.add_vertex(Vector3(poly[i].x, poly[i].y, 0.0))
+		var mi := MeshInstance3D.new()
+		mi.mesh = st.commit()
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.albedo_color = part[1]
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA     # drawn last, by render_priority
+		mat.no_depth_test = true
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		mat.render_priority = part[2]
+		mi.material_override = mat
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		node.add_child(mi)
+	return node

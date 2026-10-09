@@ -62,6 +62,12 @@ var problems: Array = []
 var _pivot: Variant = null
 
 var _hover := -1
+## VR: where the pointer sits in 3D - on the dragged point, the point or
+## the road under it (it is drawn there, at the depth of what it points at,
+## so both eyes agree); null: nothing there (it stays on the screen sphere).
+var track_cursor := false
+var cursor_world: Variant = null
+var _mouse := Vector2(-1, -1)
 var _drag := -1
 var _drag_off := Vector2.ZERO     # point minus mouse on the surface (x, h)
 var _right_press := Vector2.ZERO
@@ -334,7 +340,11 @@ func _place_camera() -> void:
 func _process(dt: float) -> void:
 	_rebuild_t += dt
 	_poll_job()
-	if not _c.is_equal_approx(_target_c) or not is_equal_approx(_d, _target_d):
+	var travelling := not _c.is_equal_approx(_target_c) or not is_equal_approx(_d, _target_d)
+	if travelling and track_cursor and _drag < 0 and _mouse.x >= 0.0:
+		_hover = _point_at(_mouse)     # the track moves under the pointer
+		_update_cursor()
+	if travelling:
 		var k := 1.0 - exp(-dt * CAM_SPEED)
 		_c = _c.lerp(_target_c, k)
 		_d = lerpf(_d, _target_d, k)
@@ -354,6 +364,7 @@ func _process(dt: float) -> void:
 func handle(event: InputEvent) -> bool:
 	if event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
+		_mouse = mm.position
 		if _drag >= 0:
 			_drag_to(mm.position)
 		elif _right_down:
@@ -362,6 +373,7 @@ func handle(event: InputEvent) -> bool:
 				turn(mm.relative)
 		else:
 			_hover = _point_at(mm.position)
+		_update_cursor()
 		return true
 	if not (event is InputEventMouseButton):
 		return false
@@ -372,6 +384,7 @@ func handle(event: InputEvent) -> bool:
 				_left_click(mb.position, mb.double_click)
 			elif _drag >= 0:
 				_drag = -1
+				_update_cursor()
 				rebuild(true)
 				_line_dirty = true
 		MOUSE_BUTTON_RIGHT:
@@ -433,6 +446,19 @@ func _start_drag(i: int, pos: Vector2) -> void:
 	var h: Variant = ribbon.hit(r[0], r[1], float(q[0]))
 	if h != null:
 		_drag_off = Vector2(float(q[0]), float(q[1])) - h
+
+
+## VR: the pointer's place in 3D (see cursor_world).
+func _update_cursor() -> void:
+	if not track_cursor or _mouse.x < 0.0:
+		cursor_world = null
+	elif _drag >= 0:
+		cursor_world = point_pos(_drag)
+	elif _hover >= 0:
+		cursor_world = point_pos(_hover)
+	else:
+		var hit: Variant = _road_hit(_mouse)
+		cursor_world = (hit[0] as Vector3) + Vector3.UP * 0.1 if hit != null else null
 
 
 func _drag_to(pos: Vector2) -> void:
