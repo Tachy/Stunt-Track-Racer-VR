@@ -41,7 +41,8 @@ var _glass: MeshKit
 
 
 ## see_through: the editor's look into tunnels (walls, ceiling and cut walls
-## at SEE_THROUGH_ALPHA, no lamps).
+## at SEE_THROUGH_ALPHA, no lamps) and no collision (nothing drives there; the
+## editor builds this in a worker thread).
 func build(p: TrackPath, see_through := false) -> TrackNode:
 	path = p
 	_glass = MeshKit.new() if see_through else null
@@ -116,8 +117,9 @@ func _build_static() -> void:
 		gmi.name = "TunnelGlass"
 		add_child(gmi)
 
-	add_child(_static_body("RoadBody", road_faces, LAYER_ROAD))
-	add_child(_static_body("WallBody", wall_faces, LAYER_WALL))
+	if _glass == null:
+		add_child(_static_body("RoadBody", road_faces, LAYER_ROAD))
+		add_child(_static_body("WallBody", wall_faces, LAYER_WALL))
 
 
 ## Road quad with the white edge strips (as wide as in the tunnels) + side
@@ -391,7 +393,13 @@ func _build_bridges() -> void:
 		var f1 := path.frame_at_s(s1)
 		f1.basis = f1.basis * Basis(Vector3.UP, PI)
 		for hinge in [f0, f1]:
-			_leaves.append({"body": _make_leaf(leaf_len), "hinge": hinge})
+			if _glass != null:
+				# editor: the leaves lie flat, no physics (built in a thread)
+				var mi := _leaf_mesh(leaf_len)
+				mi.transform = hinge
+				add_child(mi)
+			else:
+				_leaves.append({"body": _make_leaf(leaf_len), "hinge": hinge})
 	_update_leaves()
 
 
@@ -400,6 +408,21 @@ func _make_leaf(leaf_len: float) -> AnimatableBody3D:
 	body.sync_to_physics = true
 	body.collision_layer = LAYER_ROAD
 	body.collision_mask = 0
+	var size := Vector3(TrackPath.ROAD_WIDTH, 0.6, leaf_len - 0.15)
+	var c := Vector3(0, -0.3, -size.z * 0.5)
+	body.add_child(_leaf_mesh(leaf_len))
+	var shape := BoxShape3D.new()
+	shape.size = size
+	var cs := CollisionShape3D.new()
+	cs.shape = shape
+	cs.position = c
+	body.add_child(cs)
+	add_child(body)
+	return body
+
+
+## The visible leaf (hinge at the origin, reaching along -z).
+func _leaf_mesh(leaf_len: float) -> MeshInstance3D:
 	var size := Vector3(TrackPath.ROAD_WIDTH, 0.6, leaf_len - 0.15)
 	var c := Vector3(0, -0.3, -size.z * 0.5)
 	var kit := MeshKit.new()
@@ -412,15 +435,7 @@ func _make_leaf(leaf_len: float) -> AnimatableBody3D:
 		var col := Palette.ROAD_DARK if k % 2 == 0 else Palette.ROAD_LIGHT
 		kit.quad(Vector3(-size.x * 0.5, 0.01, z0), Vector3(-size.x * 0.5, 0.01, z1),
 			Vector3(size.x * 0.5, 0.01, z1), Vector3(size.x * 0.5, 0.01, z0), col)
-	body.add_child(kit.build_instance())
-	var shape := BoxShape3D.new()
-	shape.size = size
-	var cs := CollisionShape3D.new()
-	cs.shape = shape
-	cs.position = c
-	body.add_child(cs)
-	add_child(body)
-	return body
+	return kit.build_instance()
 
 
 func _update_leaves() -> void:

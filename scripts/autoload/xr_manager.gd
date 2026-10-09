@@ -18,6 +18,15 @@ var camera: XRCamera3D
 var desktop_camera: Camera3D
 var interface: XRInterface
 var xr_active := false
+## Desktop: right mouse button looks around (off in the track editor's 3D
+## view, where it turns the camera around the track).
+var free_look := true:
+	set(v):
+		free_look = v
+		_desktop_yaw = 0.0
+		_desktop_pitch = 0.0
+		if _head:
+			_apply()
 
 var _base := Transform3D.IDENTITY
 ## Follows the active camera; fade sphere and FPS panel hang here.
@@ -98,6 +107,11 @@ func active_camera() -> Camera3D:
 	return camera if xr_active else desktop_camera
 
 
+## The eye pose last set (see set_base).
+func base_transform() -> Transform3D:
+	return _base
+
+
 func set_base(base: Transform3D) -> void:
 	_base = base
 	_apply()
@@ -149,7 +163,7 @@ func _input(event: InputEvent) -> void:
 			fps_visible = not fps_visible
 			if _fps_panel:
 				_fps_panel.visible = fps_visible
-	if not xr_active and event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_RIGHT):
+	if not xr_active and free_look and event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_RIGHT):
 		_desktop_yaw -= event.relative.x * 0.004
 		_desktop_pitch = clampf(_desktop_pitch - event.relative.y * 0.004, -1.3, 1.3)
 		_apply()

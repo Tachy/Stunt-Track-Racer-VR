@@ -915,6 +915,11 @@ func path_to_plan(v: Vector3) -> Vector2:
 	return start + Vector2(v.x, v.z).rotated(Vector2(0, -1).angle_to(start_dir))
 
 
+## Path coordinates (x, z) of a plan point (the inverse of path_to_plan).
+func plan_to_path(w: Vector2) -> Vector2:
+	return (w - start).rotated(-Vector2(0, -1).angle_to(start_dir))
+
+
 ## Problems of the built track: crossings closer than MIN_SEPARATION in
 ## height ("crossing") and very steep road outside pits ("steep"), as
 ## [{pos: plan point, kind}].

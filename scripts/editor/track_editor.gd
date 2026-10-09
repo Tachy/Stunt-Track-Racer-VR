@@ -1,7 +1,8 @@
 class_name TrackEditor
 extends Control
-## Track editor, plan view (desktop only, mouse + keyboard). Logic in
-## TrackEditorModel; this node draws the plan and turns clicks into pieces.
+## Track editor (mouse + keyboard; in VR on a screen panel, VrEditorHost).
+## Logic in TrackEditorModel; this node draws the plan and turns clicks into
+## pieces.
 ##   left click   start point / first direction / place the previewed piece
 ##   Esc          remove the last piece (Ctrl+Z / Ctrl+Y undo / redo)
 ##   O, Shift+O   loop (shifted to the right / left)
@@ -13,16 +14,20 @@ extends Control
 ## the marked ones. The gap is drawn as usual and closed onto its anchor
 ## (yellow mark) like a lap onto its start; Esc right after the cut undoes it.
 ##
-## Heights (Tab / button, closed lap only): the profile strip shows the
-## height along the lap (loops take no room there) as a spline through free
-## points; at first only the start and the end of the lap (always at the same
-## height). Click in the strip: new point, drag it; only a right click
-## removes one; C kink at the point; Up/Down (Shift: x4) its height. The
-## spline is kept within MAX_SLOPE (100 %). Dragged on by force under (or over) a neighbour, a
+## Heights (Tab / button, closed lap only): the track in 3D (HeightEditor3D)
+## with a see-through ground and tunnels; the height along the lap (loops
+## take no room there) is a spline through free points, drawn on the road;
+## at first only the start and the end of the lap (always at the same
+## height). Click a point and drag it (along the lap and up / down); double
+## click on the road: a new point; right click: remove it; C kink at the
+## point; Up/Down (Shift: x4) its height. The spline is kept within
+## MAX_SLOPE (100 %). Dragged on by force under (or over) a neighbour, a
 ## point snaps there as a vertical wall: wall down + wall up = pit (floor on
 ## the ground: the ground), wall down alone = ski jump. Dragged away to the
-## side again it is a spline point. B drawbridge (piece selected in the
-## plan), Esc undo, V 3D preview (drag = turn, wheel = zoom).
+## side again it is a spline point. A click on the road selects its piece
+## (B drawbridge); the camera turns around the selected point or piece
+## (right mouse button; wheel = distance). Top left the plan (PlanNav):
+## click = piece, right mouse = push, wheel = zoom. Esc undo.
 ## Below the ground the road becomes a cut and a tunnel by itself.
 
 signal start_race(request: Dictionary)
@@ -44,7 +49,6 @@ const SELECT := Color(1.0, 0.9, 0.2)
 const MARKED := Color(0.95, 0.35, 0.25)          # pieces marked for deleting
 const ANCHOR := Color(1.0, 0.85, 0.2)            # where a gap is closed to
 const CLICK_SLOP := 4.0                          # px a right click may move
-const PREVIEW_RATE := 4.0               # 3D preview updates per second while dragging
 const MODE_BUTTON := Color("#2f6db5")   # heights / plan
 const MENU_BUTTON := Color("#a83a32")   # leave the editor
 
@@ -64,14 +68,13 @@ var _right_press := Vector2.ZERO
 
 # height stage
 var _mode := "plan"              # plan, height
-var _path: TrackPath
-var _problems: Array = []
-var _profile: HeightProfile     # holds the selected point and piece
-var _orbiting := false
-var _preview_dirty := false              # a dragged point moved since the last preview
-var _preview_t := 0.0
-var _preview_box: EditorPreview
+var _h3d: HeightEditor3D
+var _nav: PlanNav
 var _mode_btn: Button
+## Where the 3D view goes (VR: VrEditorHost; else the editor's parent) and
+## how the screen maps to it (VR: the panel; else the desktop camera).
+var world_parent: Node
+var view: EditorView
 
 var _name_edit: LineEdit
 var _load_menu: OptionButton
@@ -101,12 +104,9 @@ func _ready() -> void:
 	if model.has_start:
 		view_center = model.start
 	if OS.get_cmdline_user_args().has("--editor-heights") and model.closed:
-		# debug / screenshots: straight into the height stage with the 3D preview
+		# debug / screenshots: straight into the height stage
 		_set_mode("height")
-		_preview_box.visible = true
-		_profile.piece = mini(3, model.pieces.size() - 1)
-		_layout_preview()
-		_rebuild_preview()
+		_h3d.select_piece(mini(3, model.pieces.size() - 1))
 	_update()
 	XrManager.set_fade(0.0)
 
@@ -168,23 +168,14 @@ func _build_bar() -> void:
 	add_child(_info)
 	_status = Label.new()
 	add_child(_status)
-	# profile strip and 3D preview of the height stage
-	_profile = HeightProfile.new()
-	_profile.model = model
-	_profile.visible = false
-	_profile.dragged.connect(func():
-		_preview_dirty = true
-		_info.text = _height_info())
-	_profile.edited.connect(func():
-		_preview_dirty = false
-		_rebuild_path(true)
-		_update())
-	_profile.selected.connect(func():
-		grab_focus()
-		_update())
-	add_child(_profile)
-	_preview_box = EditorPreview.new()
-	add_child(_preview_box)
+	for l in [_info, _status]:     # readable over the 3D view too
+		l.add_theme_constant_override("outline_size", 5)
+		l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	# navigation window of the height stage
+	_nav = PlanNav.new()
+	_nav.visible = false
+	_nav.piece_clicked.connect(func(k: int): _h3d.select_piece(k))
+	add_child(_nav)
 
 
 func _fill_load_menu() -> void:
@@ -209,7 +200,10 @@ func to_world(s: Vector2) -> Vector2:
 # --- input ---------------------------------------------------------------------------
 
 func _gui_input(event: InputEvent) -> void:
-	if _mode == "height" and _height_mouse(event):
+	if _mode == "height":
+		if event is InputEventMouseButton and event.pressed:
+			grab_focus()
+		_h3d.handle(event)
 		accept_event()
 		return
 	if event is InputEventMouseMotion:
@@ -321,15 +315,12 @@ func _delete_marked() -> void:
 func _update() -> void:
 	_mode_btn.text = Lang.t("PLAN") if _mode == "height" else Lang.t("HEIGHTS")
 	_status.position = Vector2(12, size.y - 34)
-	_layout_preview()
-	_profile.place(Rect2(10, size.y - 250, size.x - 20, 200))
 	if _mode == "height":
+		_nav.position = Vector2(10, 72)
+		_nav.size = Vector2(maxf(220.0, size.x * 0.28), maxf(160.0, size.y * 0.34))
 		_info.text = _height_info()
-		if _preview_box.visible:
-			_preview_box.set_focus(_preview_focus())   # follows the selected point / piece
-		_status.text = Lang.t("CLICK = POINT  PULL HARD UNDER A NEIGHBOUR = WALL  RIGHT CLICK = REMOVE  C KINK  UP/DOWN HEIGHT  B BRIDGE  ESC UNDO  V 3D")
+		_status.text = Lang.t("CLICK = SELECT / DRAG POINT  DOUBLE CLICK = NEW POINT  RIGHT CLICK = REMOVE  RIGHT MOUSE = TURN  WHEEL = DISTANCE  C KINK  UP/DOWN HEIGHT  B BRIDGE  ESC UNDO")
 		queue_redraw()
-		_profile.queue_redraw()
 		return
 	_preview = []
 	_preview_closes = false
@@ -386,11 +377,10 @@ func _flash(text: String) -> void:
 
 
 func _draw() -> void:
+	if _mode == "height":
+		return      # the 3D view shows through
 	draw_rect(Rect2(Vector2.ZERO, size), BG)
 	_draw_grid()
-	if _mode == "height":
-		_draw_heights()
-		return
 	var pos := model.start
 	var dir := model.start_dir
 	var k := 0
@@ -559,8 +549,8 @@ func _act_load(index: int) -> void:
 	_load_menu.select(0)
 	if data.is_empty():
 		return
+	_set_mode("plan")
 	model = TrackEditorModel.from_dict(data)
-	_profile.model = model
 	track_name = str(data.get("name", track_name))
 	_name_edit.text = track_name
 	_saved_id = id
@@ -571,8 +561,8 @@ func _act_load(index: int) -> void:
 
 
 func _act_new() -> void:
+	_set_mode("plan")
 	model = TrackEditorModel.new()
-	_profile.model = model
 	_saved_id = ""
 	_set_mode("plan")
 	_update()
@@ -598,74 +588,38 @@ func _set_mode(m: String) -> void:
 	if m == "height" and not model.closed:
 		_flash(Lang.t("CLOSE THE LAP FIRST"))
 		return
+	if m == _mode:
+		return
 	_mode = m
-	_profile.reset()
-	_profile.visible = m == "height"
+	_nav.visible = m == "height"
 	if m == "height":
-		_rebuild_path(true)
+		if view == null:
+			view = EditorView.new(XrManager.desktop_camera)
+		XrManager.free_look = false
+		_h3d = HeightEditor3D.new()
+		_h3d.level_eye = XrManager.xr_active
+		(world_parent if world_parent != null else get_parent()).add_child(_h3d)
+		_h3d.setup(model, view, track_name)
+		_h3d.dragged.connect(func(): _info.text = _height_info())
+		_h3d.edited.connect(_update)
+		_h3d.selected.connect(_update)
+		_nav.model = model
+		_nav.editor3d = _h3d
+		_update()
+		_nav.fit()
 	else:
-		_preview_box.visible = false
+		_close_3d()
 
 
-func _rebuild_path(full: bool) -> void:
-	_path = TrackPath.new(model.to_def(track_name))
-	_profile.set_path(_path)
-	_problems = model.problems(_path)
-	if full and _preview_box.visible:
-		_rebuild_preview()
+func _close_3d() -> void:
+	if _h3d:
+		_h3d.queue_free()
+		_h3d = null
+	XrManager.free_look = true
 
 
-func _preview_rect() -> Rect2:
-	return Rect2(size.x * 0.52, 76, size.x * 0.48 - 10, size.y * 0.5 - 70)
-
-
-func _layout_preview() -> void:
-	var r := _preview_rect()
-	_preview_box.position = r.position
-	_preview_box.size = r.size
-
-
-## Plan point -> nearest piece.
-func _piece_at_plan(w: Vector2) -> int:
-	var v := (w - model.start).rotated(-Vector2(0, -1).angle_to(model.start_dir))
-	var best := 0
-	var best_d := INF
-	for i in _path.n:
-		var d := Vector2(_path.center[i].x, _path.center[i].z).distance_squared_to(v)
-		if d < best_d:
-			best_d = d
-			best = i
-	return _path.piece_of[best] if best_d < 400.0 else -1
-
-
-## Mouse in the height stage outside the profile strip (which takes its own):
-## the 3D preview (drag = turn, wheel = zoom) and pieces picked in the plan.
-func _height_mouse(event: InputEvent) -> bool:
-	var prev := _preview_rect()
-	if event is InputEventMouseMotion:
-		if _orbiting:
-			_preview_box.orbit((event as InputEventMouseMotion).relative)
-			return true
-		return false    # panning etc. of the plan
-	if event is InputEventMouseButton:
-		var mb := event as InputEventMouseButton
-		if mb.button_index == MOUSE_BUTTON_LEFT and not mb.pressed:
-			_orbiting = false
-			return true
-		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
-			grab_focus()
-			if _preview_box.visible and prev.has_point(mb.position):
-				_orbiting = true
-			else:
-				_profile.piece = _piece_at_plan(to_world(mb.position))
-				_profile.point = -1
-				_profile.show_piece(_profile.piece)
-			_update()
-			return true
-		if (mb.button_index == MOUSE_BUTTON_WHEEL_UP or mb.button_index == MOUSE_BUTTON_WHEEL_DOWN) and _preview_box.visible and prev.has_point(mb.position):
-			_preview_box.zoom(0.87 if mb.button_index == MOUSE_BUTTON_WHEEL_UP else 1.15)
-			return true
-	return false
+func _exit_tree() -> void:
+	_close_3d()
 
 
 func _height_key(k: InputEventKey) -> bool:
@@ -673,109 +627,52 @@ func _height_key(k: InputEventKey) -> bool:
 		KEY_ESCAPE:
 			if not model.undo_height():
 				_flash(Lang.t("NOTHING TO UNDO"))
-			_profile.point = mini(_profile.point, model.points().size() - 1)
-		KEY_V:
-			_preview_box.visible = not _preview_box.visible
-			if _preview_box.visible:
-				_rebuild_preview()
+				return true
+			_h3d.select_point(mini(_h3d.point, model.points().size() - 1))
 		KEY_UP, KEY_DOWN:
-			var pt := _profile.point
+			var pt := _h3d.point
 			if pt < 0:
 				return true
 			var q: Array = model.points()[pt]
 			var step := TrackEditorModel.HEIGHT_STEP * (4.0 if k.shift_pressed else 1.0)
 			model.move_point(pt, float(q[0]), float(q[1]) + (step if k.keycode == KEY_UP else -step))
 		KEY_C:
-			if _profile.point <= 0 or _profile.point >= model.points().size() - 1:
+			if _h3d.point <= 0 or _h3d.point >= model.points().size() - 1:
 				_flash(Lang.t("SELECT A POINT FIRST"))
-			elif not model.toggle_corner(_profile.point):
+				return true
+			if not model.toggle_corner(_h3d.point):
 				_flash(Lang.t("NOT POSSIBLE - TOO STEEP"))
+				return true
 		KEY_B:
-			if _profile.piece < 0:
+			if _h3d.piece < 0:
 				_flash(Lang.t("SELECT A PIECE FIRST"))
 				return true
-			model.toggle_flag(_profile.piece, "bridge")
+			model.toggle_flag(_h3d.piece, "bridge")
 		_:
 			return false
-	_rebuild_path(true)
+	_h3d.changed()
 	return true
 
 
 func _height_info() -> String:
-	var t := Lang.t("LENGTH %d M  PIECES %d") % [roundi(_path.total_length), model.pieces.size()]
-	var nc := _problems.filter(func(o): return o["kind"] == "crossing").size()
-	var ns := _problems.filter(func(o): return o["kind"] == "steep").size()
+	var t := Lang.t("LENGTH %d M  PIECES %d") % [roundi(_h3d.path.total_length), model.pieces.size()]
+	var nc := _h3d.problems.filter(func(o): return o["kind"] == "crossing").size()
+	var ns := _h3d.problems.filter(func(o): return o["kind"] == "steep").size()
 	if nc > 0:
 		t += "  " + Lang.t("CROSSINGS TOO LOW %d") % nc
 	if ns > 0:
 		t += "  " + Lang.t("TOO STEEP %d") % ns
 	var pts := model.points()
-	var pt := _profile.point
+	var pt := _h3d.point
 	if pt == 0 or pt == pts.size() - 1:
 		t += "   >  " + Lang.t("START HEIGHT %.1f M") % model.base
 	elif pt > 0:
 		t += "   >  " + Lang.t("POINT AT %d M  HEIGHT %.1f M") % [roundi(pts[pt][0]), float(pts[pt][1])]
 		if pts[pt][2]:
 			t += "  " + Lang.t("CORNER")
-	elif _profile.piece >= 0:
-		var p: Dictionary = model.pieces[_profile.piece]
-		t += "   >  #%d %s" % [_profile.piece, _piece_text(p)]
+	elif _h3d.piece >= 0:
+		var p: Dictionary = model.pieces[_h3d.piece]
+		t += "   >  #%d %s" % [_h3d.piece, _piece_text(p)]
 		if p.get("bridge", false):
 			t += "  " + Lang.t("DRAWBRIDGE")
 	return t
-
-
-func _draw_heights() -> void:
-	# plan, coloured by height; the selected piece red. Drawn from low to
-	# high, so at crossings the upper road covers the lower one
-	var width := maxf(2.0, TrackPath.ROAD_WIDTH * zoom)
-	var order := []
-	for i in range(0, _path.n, 2):
-		if _path.road[i] == 1:
-			order.append(i)
-	order.sort_custom(func(p, q): return _path.center[p].y < _path.center[q].y)
-	for i in order:
-		var j := mini(i + 2, _path.n - 1) if i + 2 < _path.n else 0
-		var a := to_screen(model.path_to_plan(_path.center[i]))
-		var b := to_screen(model.path_to_plan(_path.center[j]))
-		draw_line(a, b, HeightProfile.PIECE_ON if _path.piece_of[i] == _profile.piece else HeightProfile.height_color(_path.center[i].y), width)
-	for o in _problems:
-		draw_arc(to_screen(o["pos"]), maxf(10.0, TrackPath.ROAD_WIDTH * zoom), 0.0, TAU, 24,
-			CROSSING if o["kind"] == "crossing" else STEEP, 3.0)
-	_draw_start()
-
-
-# --- 3D preview -------------------------------------------------------------------------
-
-## path: while a point is dragged a path of its own (the editor's _path,
-## its checks and the profile scale follow only on release).
-func _rebuild_preview(path: TrackPath = null) -> void:
-	_preview_box.build(path if path != null else _path)
-	_preview_box.set_focus(_preview_focus())
-
-
-## What the 3D preview looks at: the selected (light blue) profile point,
-## else the middle of the selected (red) piece; null: the whole track.
-func _preview_focus() -> Variant:
-	if _profile.point >= 0:
-		var q: Array = model.points()[mini(_profile.point, model.points().size() - 1)]
-		var best := 0
-		for i in _path.n:
-			if _path.loop_mask[i] == 0 and absf(_path.px[i] - float(q[0])) < absf(_path.px[best] - float(q[0])):
-				best = i
-		var c := _path.center[best]
-		return Vector3(c.x, float(q[1]), c.z)
-	var sel := _profile.piece
-	if sel >= 0 and sel < _path.pieces.size():
-		var pc: Dictionary = _path.pieces[sel]
-		return _path.center[(int(pc["i0"]) + int(pc["i1"])) / 2]
-	return null
-
-
-func _process(dt: float) -> void:
-	# while dragging: the preview follows PREVIEW_RATE times a second
-	_preview_t += dt
-	if _preview_dirty and _profile.dragging() and _preview_box.visible and _preview_t >= 1.0 / PREVIEW_RATE:
-		_preview_t = 0.0
-		_preview_dirty = false
-		_rebuild_preview(TrackPath.new(model.to_def(track_name)))
