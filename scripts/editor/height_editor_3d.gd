@@ -2,14 +2,14 @@ class_name HeightEditor3D
 extends Node3D
 ## The track editor's height stage in 3D (desktop and VR): the track with a
 ## see-through ground and tunnels, the height line and its points drawn on
-## the road, the camera circling the point selected last or the piece
+## the road, the camera circling the point double-clicked last or the piece
 ## picked in the navigation window (XrManager's rig: the HMD adds the head's
 ## own movement in VR).
-##   left click   a point: select and drag it (along the lap and up / down,
-##                on the vertical surface over the plan - HeightRibbon);
-##                the road: mark its piece (the camera stays put)
-##   double click the road: a new point there (not selected: a click on it
-##                selects it)
+##   left click   a point: select it (blue) and drag it (along the lap and up
+##                / down, on the vertical surface over the plan -
+##                HeightRibbon); the road: mark its piece. The camera stays.
+##   double click a point: the camera turns around it from now on;
+##                the road: a new point there (not selected)
 ##   right click  a point: delete it; dragged: turn the camera
 ##   wheel        camera distance
 ## The point logic is TrackEditorModel's (snapping to walls, slope limit,
@@ -57,9 +57,8 @@ var piece := -1                   # selected piece
 var problems: Array = []
 ## VR keeps the eye level (only yaw); the desktop camera also pitches.
 var level_eye := false
-## Where the camera turns around when no point is selected (the point
-## selected last or the piece picked in the navigation window; null: the
-## whole track).
+## Where the camera turns around (the point double-clicked last or the piece
+## picked in the navigation window; null: the whole track).
 var _pivot: Variant = null
 
 var _hover := -1
@@ -241,15 +240,17 @@ func point_pos(i: int) -> Vector3:
 	return ribbon.point_at(float(q[0]), float(q[1])) + Vector3.UP * LINE_LIFT
 
 
-## Selects point i: the camera turns around it from now on.
-func select_point(i: int) -> void:
+## Selects point i (blue). move_camera (a double click on it): the camera
+## turns around it from now on; else it stays where it is.
+func select_point(i: int, move_camera := false) -> void:
 	point = i
 	if i >= 0:
 		piece = _piece_at_x(float(model.points()[i][0]))
-		_pivot = point_pos(i)
+		if move_camera:
+			_pivot = point_pos(i)
+			_retarget()
 	_line_dirty = true
 	_static_dirty = true
-	_retarget()
 	selected.emit()
 
 
@@ -277,12 +278,10 @@ func _piece_at_x(x: float) -> int:
 	return path.pieces.size() - 1
 
 
-## What the camera turns around: the selected point, else _pivot (the point
-## selected last, or the middle of the piece picked in the navigation
-## window; a piece marked in the 3D view does not move it).
+## What the camera turns around: _pivot (the point double-clicked last, or
+## the middle of the piece picked in the navigation window - it stays put
+## while that point is dragged); null: the whole track.
 func focus() -> Variant:
-	if point >= 0 and point < model.points().size():
-		return point_pos(point)
 	return _pivot
 
 
@@ -405,8 +404,11 @@ func handle(event: InputEvent) -> bool:
 func _left_click(pos: Vector2, double: bool) -> void:
 	var i := _point_at(pos)
 	if i >= 0:
-		model.snapshot_heights()
+		if not double:
+			model.snapshot_heights()     # (the first click of a double click took one)
 		_start_drag(i, pos)
+		if double:
+			select_point(i, true)      # the camera turns around it now
 		return
 	var hit: Variant = _road_hit(pos)
 	if hit == null:

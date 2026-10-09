@@ -18,15 +18,16 @@ extends Control
 ## with a see-through ground and tunnels; the height along the lap (loops
 ## take no room there) is a spline through free points, drawn on the road;
 ## at first only the start and the end of the lap (always at the same
-## height). Click a point and drag it (along the lap and up / down); double
-## click on the road: a new point; right click: remove it; C kink at the
+## height). Click a point: it is selected (blue) and can be dragged (along
+## the lap and up / down); double click on it: the camera turns around it;
+## double click on the road: a new point; right click: remove it; C kink at the
 ## point; Up/Down (Shift: x4) its height. The spline is kept within
 ## MAX_SLOPE (100 %). Dragged on by force under (or over) a neighbour, a
 ## point snaps there as a vertical wall: wall down + wall up = pit (floor on
 ## the ground: the ground), wall down alone = ski jump. Dragged away to the
 ## side again it is a spline point. A click on the road marks its piece
 ## (B drawbridge) and leaves the camera where it is. The camera turns around
-## the point selected last (right mouse button; wheel = distance). Top left
+## the point double-clicked last (right mouse button; wheel = distance). Top left
 ## the plan (PlanNav): click = the piece there, the camera turns around it;
 ## right mouse = push, wheel = zoom. Esc undo.
 ## Below the ground the road becomes a cut and a tunnel by itself.
@@ -320,7 +321,7 @@ func _update() -> void:
 		_nav.position = Vector2(10, 72)
 		_nav.size = Vector2(maxf(220.0, size.x * 0.28), maxf(160.0, size.y * 0.34))
 		_info.text = _height_info()
-		_status.text = Lang.t("CLICK = SELECT / DRAG POINT  DOUBLE CLICK = NEW POINT  RIGHT CLICK = REMOVE  RIGHT MOUSE = TURN  WHEEL = DISTANCE  C KINK  UP/DOWN HEIGHT  B BRIDGE  ESC UNDO")
+		_status.text = Lang.t("CLICK = SELECT / DRAG POINT  DOUBLE CLICK = CAMERA TO POINT / NEW POINT ON ROAD  RIGHT CLICK = REMOVE  RIGHT MOUSE = TURN  WHEEL = DISTANCE  C KINK  UP/DOWN HEIGHT  B BRIDGE  ESC UNDO")
 		queue_redraw()
 		return
 	_preview = []
