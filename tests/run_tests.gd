@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_league_track_features", "test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -1114,6 +1114,30 @@ func test_wall_mesh_upright() -> void:
 			check(slanted == 0, "%s: drop built upright (%d slanted triangles)" % [what, slanted])
 			check(at_top and at_foot, "%s: the road meets the wall at the top (%s) and the foot (%s)" % [what, at_top, at_foot])
 			node.free()
+
+
+## An official track in the editor: its flags (no crane, gap), its theme
+## and boost values stay, and a league track gets no division of its own
+## (the league table gives it); an own file drops gaps and crane marks.
+func test_official_in_editor() -> void:
+	check(TrackLibrary.TRACKS.size() == TrackLibrary.ORDER.size() + TrackLibrary.CUSTOM.size(), "all official tracks loaded")
+	var m := TrackEditorModel.from_dict(TrackLibrary.load_official("camel_back"))
+	var nc := 0
+	for p in m.pieces:
+		if p.get("no_crane", false):
+			nc += 1
+	check(m.official == "camel_back" and nc == 3, "official: kept its crane marks (%d)" % nc)
+	var def := m.to_def("Camel Back")
+	check(int(def.get("theme", -1)) == 1 and int(def.get("boost", 0)) == 40 and not def.has("division"), "official: theme / boost kept, no division (%s)" % [def])
+	check(m.toggle_flag(4, "gap") and m.pieces[4].get("gap", false), "gap toggled on")
+	check(m.toggle_flag(4, "gap") and not m.pieces[4].has("gap"), "and off again")
+	var gt := TrackEditorModel.from_dict(TrackLibrary.load_official("grand_tour"))
+	var gaps := gt.pieces.filter(func(p): return p.get("gap", false)).size()
+	check(gaps > 0, "grand tour keeps its gaps (%d)" % gaps)
+	var own := TrackLibrary.load_official("camel_back")
+	own.erase("official")
+	var mo := TrackEditorModel.from_dict(own)
+	check(mo.pieces.filter(func(p): return p.has("no_crane")).is_empty(), "own file: crane marks dropped")
 
 
 func _editor_oval() -> TrackEditorModel:

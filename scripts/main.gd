@@ -23,7 +23,10 @@ extends Node
 ##   --name=<name>       online player name for this run
 ##   --server=<host[:port]>  online server for this run (menu; not saved)
 ##   --car-photos        save close-ups of the car model, then quit
-##   --editor[=<name>]   open the track editor, optionally a saved track
+##   --editor[=<name>]   open the track editor, optionally a saved track (or
+##                       an official one by its id)
+##   --admin             (track editor) official tracks are saved back to
+##                       server/official (run from the project only)
 ##   --editor-heights    (with --editor) straight into the 3D height stage
 ##   --editor-vr-screen  (with --editor) the VR screen panel on the desktop
 
@@ -51,7 +54,9 @@ func _ready() -> void:
 	if _args.has("vr-bench"):
 		add_child(VrBench.new())
 	if _args.has("editor"):
-		show_editor(TrackLibrary.CUSTOM_PREFIX + _args["editor"] if _args["editor"] != "1" else "")
+		var ed: String = _args["editor"]
+		# an official track by its id (admin), else an own one by its file name
+		show_editor("" if ed == "1" else (ed if TrackLibrary.is_official(ed) else TrackLibrary.CUSTOM_PREFIX + ed))
 	elif _args.has("car-photos"):
 		_swap(CarPhotos.new())   # debug: close-ups of the car model, then quit
 	elif _args.has("online"):

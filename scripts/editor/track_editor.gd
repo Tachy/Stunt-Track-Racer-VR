@@ -88,12 +88,16 @@ var _status: Label
 var _info: Label
 ## Id of the file the track was loaded from / last saved to ("" = none).
 var _saved_id := ""
+## Admin mode (--admin, run from the project only - an exported game cannot
+## write res://): an official track is saved back to server/official.
+var admin := OS.get_cmdline_user_args().has("--admin") and OS.has_feature("editor")
+var _flash_after_save := ""
 
 
 func _init(file_id := "") -> void:
 	name = "TrackEditor"
 	if file_id != "":
-		var data := TrackLibrary.load_custom(file_id)
+		var data := TrackLibrary.load_official(file_id) if TrackLibrary.is_official(file_id) else TrackLibrary.load_custom(file_id)
 		if not data.is_empty():
 			model = TrackEditorModel.from_dict(data)
 			track_name = str(data.get("name", track_name))
@@ -158,7 +162,7 @@ func _build_bar() -> void:
 	bar.add_theme_constant_override("separation", 8)
 	add_child(bar)
 	var title := Label.new()
-	title.text = Lang.t("TRACK EDITOR")
+	title.text = Lang.t("TRACK EDITOR") + (" (ADMIN)" if admin else "")
 	bar.add_child(title)
 	_load_menu = OptionButton.new()
 	_load_menu.focus_mode = Control.FOCUS_NONE
@@ -192,13 +196,20 @@ func _build_bar() -> void:
 	add_child(_nav)
 
 
+## The official tracks first (admin: to tune them; else to start an own
+## copy), then the own ones; the item's metadata is the track id.
 func _fill_load_menu() -> void:
 	_load_menu.clear()
 	_load_menu.add_item(Lang.t("LOAD ..."))
+	for id in TrackLibrary.ORDER + TrackLibrary.CUSTOM:
+		if TrackLibrary.is_official(id):
+			_load_menu.add_item(Lang.t("OFFICIAL: %s") % TrackLibrary.display_name(id))
+			_load_menu.set_item_metadata(_load_menu.item_count - 1, id)
 	if DirAccess.dir_exists_absolute(TrackLibrary.CUSTOM_DIR):
 		for f in DirAccess.get_files_at(TrackLibrary.CUSTOM_DIR):
 			if f.ends_with(".json"):
 				_load_menu.add_item(f.get_basename())
+				_load_menu.set_item_metadata(_load_menu.item_count - 1, TrackLibrary.CUSTOM_PREFIX + f.get_basename())
 
 
 # --- view ----------------------------------------------------------------------------
@@ -340,6 +351,8 @@ func _update() -> void:
 		_nav.size = Vector2(maxf(220.0, us.x * 0.28), maxf(160.0, us.y * 0.34))
 		_info.text = _height_info()
 		_status.text = Lang.t("CLICK = SELECT / DRAG POINT  DOUBLE CLICK = CAMERA TO POINT / NEW POINT ON ROAD  RIGHT CLICK = REMOVE  RIGHT MOUSE = TURN  WHEEL = DISTANCE  C KINK  UP/DOWN HEIGHT  B BRIDGE  ESC UNDO")
+		if model.official != "":
+			_status.text += "  " + Lang.t("N NO CRANE  G GAP")
 		queue_redraw()
 		return
 	_preview = []
@@ -491,6 +504,13 @@ func _file_id() -> String:
 
 
 func _act_save() -> void:
+	if model.official != "":
+		if admin:
+			_save_official()
+			return
+		# not admin: an own copy (it keeps the theme and boost values)
+		model.official = ""
+		_flash_after_save = Lang.t("SAVED AS AN OWN COPY: %s")
 	DirAccess.make_dir_recursive_absolute(TrackLibrary.CUSTOM_DIR)
 	var data := model.to_dict(track_name)
 	if model.closed:
@@ -503,12 +523,38 @@ func _act_save() -> void:
 	f.close()
 	_saved_id = _file_id()
 	_fill_load_menu()
-	_flash(Lang.t("SAVED: %s") % TrackLibrary.custom_path(_file_id()))
+	_flash((_flash_after_save if _flash_after_save != "" else Lang.t("SAVED: %s")) % TrackLibrary.custom_path(_file_id()))
+	_flash_after_save = ""
+
+
+## Admin: an official track back to server/official/<id>.json (in the
+## project: commit it; it becomes official online with the next release).
+## The game uses it at once (test drive).
+func _save_official() -> void:
+	if not model.closed:
+		_flash(Lang.t("CLOSE THE LAP FIRST"))
+		return
+	var id := model.official
+	var data := model.to_dict(track_name)
+	data["def"] = model.to_def(track_name)
+	var f := FileAccess.open(TrackLibrary.official_path(id), FileAccess.WRITE)
+	if f == null:
+		_flash(Lang.t("COULD NOT SAVE"))
+		return
+	f.store_string(JSON.stringify(data, "  ", false))
+	f.close()
+	TrackLibrary.TRACKS = TrackLibrary._load_official()
+	_saved_id = id
+	_fill_load_menu()
+	_flash(Lang.t("OFFICIAL TRACK SAVED: %s (COMMIT IT)") % TrackLibrary.official_path(id))
 
 
 ## Renames the saved file of the loaded track to the name in the name field
 ## (the file keeps its content, unsaved changes stay in the editor).
 func _act_rename() -> void:
+	if model.official != "":
+		_flash(Lang.t("NOT FOR AN OFFICIAL TRACK"))
+		return
 	var data := TrackLibrary.load_custom(_saved_id) if _saved_id != "" else {}
 	if data.is_empty():
 		_flash(Lang.t("NOT SAVED: %s") % track_name)
@@ -538,6 +584,9 @@ func _act_rename() -> void:
 ## Deletes the saved file of the loaded track (after a question); the layout
 ## stays in the editor and can be saved again.
 func _act_delete() -> void:
+	if model.official != "":
+		_flash(Lang.t("NOT FOR AN OFFICIAL TRACK"))
+		return
 	var id := _saved_id if _saved_id != "" else _file_id()
 	if not FileAccess.file_exists(TrackLibrary.custom_path(id)):
 		_flash(Lang.t("NOT SAVED: %s") % track_name)
@@ -563,8 +612,8 @@ func _act_delete() -> void:
 func _act_load(index: int) -> void:
 	if index <= 0:
 		return
-	var id := TrackLibrary.CUSTOM_PREFIX + _load_menu.get_item_text(index)
-	var data := TrackLibrary.load_custom(id)
+	var id := str(_load_menu.get_item_metadata(index))
+	var data := TrackLibrary.load_official(id) if TrackLibrary.is_official(id) else TrackLibrary.load_custom(id)
 	_load_menu.select(0)
 	if data.is_empty():
 		return
@@ -592,8 +641,10 @@ func _act_test() -> void:
 		_flash(Lang.t("CLOSE THE LAP FIRST"))
 		return
 	_act_save()
-	start_race.emit({"track": _file_id(), "opponent": -1, "league": false, "super": false, "holes": 0,
-		"from_editor": _file_id()})
+	# admin: the official track itself (saved just now); else the own file
+	var id := model.official if model.official != "" and admin else _file_id()
+	start_race.emit({"track": id, "opponent": -1, "league": false, "super": false, "holes": 0,
+		"from_editor": id})
 
 
 # --- height stage ----------------------------------------------------------------------
@@ -682,11 +733,18 @@ func _height_key(k: InputEventKey) -> bool:
 			if not model.toggle_corner(_h3d.point):
 				_flash(Lang.t("NOT POSSIBLE - TOO STEEP"))
 				return true
-		KEY_B:
+		KEY_B, KEY_N, KEY_G:
 			if _h3d.piece < 0:
 				_flash(Lang.t("SELECT A PIECE FIRST"))
 				return true
-			model.toggle_flag(_h3d.piece, "bridge")
+			var flag: String = {KEY_B: "bridge", KEY_N: "no_crane", KEY_G: "gap"}[k.keycode]
+			if flag != "bridge" and model.official == "":
+				# own tracks keep no gaps and crane marks (see TrackEditorModel.from_dict)
+				_flash(Lang.t("ONLY FOR OFFICIAL TRACKS"))
+				return true
+			if not model.toggle_flag(_h3d.piece, flag):
+				_flash(Lang.t("NOT POSSIBLE HERE"))
+				return true
 		_:
 			return false
 	_h3d.changed()
@@ -714,4 +772,8 @@ func _height_info() -> String:
 		t += "   >  #%d %s" % [_h3d.piece, _piece_text(p)]
 		if p.get("bridge", false):
 			t += "  " + Lang.t("DRAWBRIDGE")
+		if p.get("gap", false):
+			t += "  " + Lang.t("GAP")
+		if p.get("no_crane", false):
+			t += "  " + Lang.t("NO CRANE")
 	return t

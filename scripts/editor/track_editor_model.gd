@@ -43,6 +43,11 @@ var _next_group := 0
 var base := DEFAULT_BASE
 var heights: Array = []
 var _height_undo: Array = []
+## An official track (TrackLibrary, server/official): its id ("" for an
+## own track) and the rest of its definition - name, theme, boost values,
+## division - kept as they are (to_def).
+var official := ""
+var meta: Dictionary = {}
 ## Gap cut into a closed lap (cut()): `pieces` is the part from the start to
 ## the gap, `tail` the part after it, starting at the pose tail_pos/tail_dir
 ## (the anchor the gap is closed to). _cut: what joining and undoing the cut
@@ -900,14 +905,20 @@ func toggle_corner(i: int) -> bool:
 	return true
 
 
-## Drawbridge: straights of at least 40 m only.
-func toggle_flag(k: int, flag: String) -> void:
-	if pieces[k].get("t", "S") != "S":
-		return
-	if flag == "bridge" and float(pieces[k]["l"]) < 40.0:
-		return
+## Flags of piece k: "bridge" (drawbridge: straights of at least 40 m),
+## "gap" (no road: a jump) and "no_crane" (never put the car back here; any
+## piece but a loop). False if not possible there.
+func toggle_flag(k: int, flag: String) -> bool:
+	var t: String = pieces[k].get("t", "S")
+	if t == "O":
+		return false
+	if flag == "bridge" and (t != "S" or float(pieces[k]["l"]) < 40.0):
+		return false
 	_snapshot()
 	pieces[k][flag] = not pieces[k].get(flag, false)
+	if not pieces[k][flag]:
+		pieces[k].erase(flag)
+	return true
 
 
 ## Plan coordinates of a TrackPath point (the track is built from the origin
@@ -975,8 +986,13 @@ func to_def(track_name: String) -> Dictionary:
 		q.erase("g")
 		q.erase("auto")
 		ps.append(q)
-	return {"name": track_name, "theme": 0, "base": base, "boost": 60, "boost_super": 45,
-		"division": 1, "pieces": ps, "heights": points().slice(1, -1)}
+	# an official track keeps its definition as it was (theme, boost values;
+	# a league track has no division of its own - the league table gives it);
+	# own tracks: the defaults, a copy of an official one its values
+	var d := {} if official != "" else {"theme": 0, "boost": 60, "boost_super": 45, "division": 1}
+	d.merge(meta, true)
+	d.merge({"name": track_name, "base": base, "pieces": ps, "heights": points().slice(1, -1)}, true)
+	return d
 
 
 func to_dict(track_name: String) -> Dictionary:
@@ -988,6 +1004,10 @@ func to_dict(track_name: String) -> Dictionary:
 		d["tail_pos"] = [tail_pos.x, tail_pos.y]
 		d["tail_dir"] = [tail_dir.x, tail_dir.y]
 		d["tail_heights"] = (_cut.get("heights", []) as Array).duplicate(true)
+	if official != "":
+		d["official"] = official
+	if not meta.is_empty():
+		d["meta"] = meta.duplicate(true)
 	return d
 
 
@@ -1015,9 +1035,12 @@ static func from_dict(d: Dictionary) -> TrackEditorModel:
 		m.heights = (d["heights"] as Array).duplicate(true)
 	else:
 		m._heights_from_pieces()
-	for p in m.pieces:
-		p.erase("gap")       # older files: gap pieces are plain road now
-		p.erase("no_crane")
+	m.official = str(d.get("official", ""))
+	m.meta = (d.get("meta", {}) as Dictionary).duplicate(true)
+	if m.official == "":
+		for p in m.pieces:
+			p.erase("gap")       # older own files: gap pieces are plain road now
+			p.erase("no_crane")
 	return m
 
 
