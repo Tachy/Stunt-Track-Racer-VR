@@ -34,6 +34,7 @@ var _shots_taken := 0
 
 
 func _ready() -> void:
+	print("[Main] Stunt Track Racer VR v%s" % GameVersion.VERSION)
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--"):
 			var kv := a.substr(2).split("=", true, 1)

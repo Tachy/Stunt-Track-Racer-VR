@@ -224,6 +224,7 @@ func _screen_main(sc: PixelScreen) -> void:
 		sc.text_centered(220, Lang.t("VR MODE"), Palette.GREEN, 3.0)
 	else:
 		sc.text_centered(220, Lang.t("DESKTOP MODE"), Palette.YELLOW, 3.0)
+	sc.text_right(PX.x - 16, 14, "V" + GameVersion.VERSION, Palette.LIGHT_BLUE, 2.0)     # top right: the help line is at the bottom
 	items = [
 		{"label": Lang.t("LEAGUE"), "do": func(): open("league")},
 		{"label": Lang.t("PRACTICE"), "do": func(): open("practice")},

@@ -2,3 +2,4 @@
 server/stunt-racer-server
 server/*.exe
 start.cfg
+build/
