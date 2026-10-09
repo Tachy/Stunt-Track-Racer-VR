@@ -543,6 +543,12 @@ func test_crane_chains() -> void:
 		check(Vector2(end.x - pivot.x, end.z - pivot.z).length() < 0.15 * total, "chain %d hangs below the trolley" % c)
 	check(max_stretch < 0.03, "chain links keep their length (max stretch %.1f %%)" % (max_stretch * 100.0))
 	check(swing_late < 0.3, "swinging dies down (end speed %.2f m/s after 9 s)" % swing_late)
+	# then the trolley runs back off the road, over the ground spot
+	for k in int((Crane.RETURN_DELAY + Crane.RETURN_TIME + 0.5) / dt):
+		crane._physics_process(dt)
+	check(near(crane._pos.x, 7.0, 0.01), "crane: trolley back over the ground spot (x %.2f)" % crane._pos.x)
+	var main_end: Vector3 = crane._chains[0]["pts"][crane._chains[0]["pts"].size() - 1]
+	check(not is_nan(main_end.x) and Vector2(main_end.x - crane._pivot.x, main_end.z - crane._pivot.z).length() < Crane.CHAIN_LEN, "crane: the chain came along")
 	crane.free()
 
 

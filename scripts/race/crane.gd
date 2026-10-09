@@ -53,6 +53,9 @@ const TROLLEY_TIME := 7.5
 const TOWER_OUT := 4.0            # tower beyond the ground spot
 const JIB_OVER := 4.0             # jib reaches this far beyond the target
 const COUNTER_JIB := 7.0
+## After the drop the trolley runs back off the road, over the ground spot.
+const RETURN_DELAY := 1.0
+const RETURN_TIME := 6.0
 
 ## Chain links: length, width and wire thickness (m); two links per particle.
 const LINK_LEN := 0.13
@@ -77,6 +80,9 @@ var _lagged := false              # the car has hung back behind the trolley
 var _swung := false               # ... and swung through below it since
 var _side := 1.0                  # side of the ground spot (crane x)
 var _road := Vector2(-INF, INF)   # the road (crane x) where the car may land
+var _home_x := 0.0                # trolley x over the ground spot
+var _plan_back: Array = []        # the trolley's way back after the drop
+var _t_free := 0.0                # time since the drop
 var _pos := Vector2.ZERO          # trolley x (crane frame), chain length
 var _vel := Vector2.ZERO
 # pendulum: angle of the car from hanging straight down (towards +x), rate
@@ -164,6 +170,7 @@ func setup(target: Transform3D, ground: Transform3D) -> void:
 	var hanging := _jib_y - HOOK_HEIGHT       # chain length with the car at y = 0
 	var start := Vector2(g.x, _jib_y - g.y - HOOK_HEIGHT)
 	_side = side
+	_home_x = g.x
 	_plan_x.clear()
 	_plan_c.clear()
 	_total = 0.0
@@ -432,6 +439,10 @@ func covers(pos: Vector3) -> bool:
 ## Car dropped: the chains swing free from the trolley.
 func release() -> void:
 	_mode = "free"
+	_t_free = 0.0
+	_plan_back.clear()
+	if absf(_pos.x - _home_x) > 0.05:
+		_plan_back.append({"t0": RETURN_DELAY, "dur": RETURN_TIME, "a": _pos.x, "b": _home_x, "kind": "trolley"})
 
 
 func _hook_pos() -> Vector3:
@@ -460,6 +471,10 @@ func _physics_process(dt: float) -> void:
 	if not visible:
 		return
 	if _mode == "free":
+		# the trolley runs back off the road, the chains swing along
+		_t_free += dt
+		_pos.x = _eval_axis(_plan_back, _t_free, _pos.x)[0]
+		_place_pivot()
 		_simulate(dt)
 		var main: PackedVector3Array = _chains[0]["pts"]
 		var hook := main[main.size() - 1]
