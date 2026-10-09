@@ -1063,44 +1063,57 @@ func test_wall_on_sample() -> void:
 
 
 ## A wall down whose foot is above the ground, on it, below it (a cut) and
-## one deep in a tunnel: every triangle of the built track that spans the
-## drop stands upright (the tunnel / cut pieces drew it as a slope).
+## one deep in a tunnel, on a whole metre (a sample) and between samples:
+## every triangle of the built track that spans the drop stands upright (the
+## tunnel / cut pieces drew it as a slope), and right at the wall's place
+## the mesh reaches both its points - the road runs up to the wall at the
+## top's height (it ended a sample early) and on from the foot's (it ran on
+## at the next sample's height: a ledge).
 func test_wall_mesh_upright() -> void:
 	for wall in [[13.0, 6.0], [13.0, 0.0], [13.0, -3.0], [-12.0, -25.0]]:
-		var top: float = wall[0]
-		var foot: float = wall[1]
-		var m := TrackEditorModel.new()
-		m.set_start(Vector2(0, 0))
-		m.place_first(Vector2(0, -400))
-		for pc in [TrackEditorModel.curve("R", 90, 55), TrackEditorModel.straight(60), TrackEditorModel.curve("R", 90, 55),
-				TrackEditorModel.straight(400), TrackEditorModel.curve("R", 90, 55)]:
-			m.place(m.group_for(pc))
-		m.place(m.closing_group(), true)
-		var wx := 56.0
-		m.heights = [[20.0, top, false, 0], [wx, top, false, 0], [wx, foot, false, 1], [110.0, foot + 2.0, false, 0]]
-		m._tidy_heights()
-		var p := TrackPath.new(m.to_def("t"))
-		var node := TrackNode.new().build(p)
-		var slanted := 0
-		for c in node.get_children():     # (the drop: from about 13 m down to the foot)
-			if not (c is MeshInstance3D) or (c as MeshInstance3D).mesh == null:
-				continue
-			var mesh := (c as MeshInstance3D).mesh
-			for sf in mesh.get_surface_count():
-				var v: PackedVector3Array = mesh.surface_get_arrays(sf)[Mesh.ARRAY_VERTEX]
-				for t in range(0, v.size(), 3):
-					var lo := minf(v[t].y, minf(v[t + 1].y, v[t + 2].y))
-					var hi := maxf(v[t].y, maxf(v[t + 1].y, v[t + 2].y))
-					var a0 := minf(-v[t].z, minf(-v[t + 1].z, -v[t + 2].z))     # along the start straight
-					var a1 := maxf(-v[t].z, maxf(-v[t + 1].z, -v[t + 2].z))
-					var nrm := (v[t + 1] - v[t]).cross(v[t + 2] - v[t])
-					# spanning the drop and not upright (walls and side walls are)
-					if lo < foot + 2.0 and hi > top - 2.0 and a1 > wx - 5.0 and a0 < wx + 5.0 							and nrm.length() > 1e-6 and absf(nrm.normalized().y) > 0.05:
-						slanted += 1
-		var lip := p._lip_at_x(wx)
-		var kind := "tunnel" if p.tunnel[lip] == 1 else ("cut" if p.cut[(lip + 1) % p.n] == 1 else "open")
-		check(slanted == 0, "wall %.0f -> %.0f m (%s): drop built upright (%d slanted triangles)" % [top, foot, kind, slanted])
-		node.free()
+		for wx in [56.0, 56.5]:
+			var top: float = wall[0]
+			var foot: float = wall[1]
+			var m := TrackEditorModel.new()
+			m.set_start(Vector2(0, 0))
+			m.place_first(Vector2(0, -400))
+			for pc in [TrackEditorModel.curve("R", 90, 55), TrackEditorModel.straight(60), TrackEditorModel.curve("R", 90, 55),
+					TrackEditorModel.straight(400), TrackEditorModel.curve("R", 90, 55)]:
+				m.place(m.group_for(pc))
+			m.place(m.closing_group(), true)
+			m.heights = [[20.0, top, false, 0], [wx, top, false, 0], [wx, foot, false, 1], [110.0, foot + 2.0, false, 0]]
+			m._tidy_heights()
+			var p := TrackPath.new(m.to_def("t"))
+			var node := TrackNode.new().build(p)
+			var slanted := 0
+			var at_top := false
+			var at_foot := false
+			for c in node.get_children():
+				if not (c is MeshInstance3D) or (c as MeshInstance3D).mesh == null:
+					continue
+				var mesh := (c as MeshInstance3D).mesh
+				for sf in mesh.get_surface_count():
+					var v: PackedVector3Array = mesh.surface_get_arrays(sf)[Mesh.ARRAY_VERTEX]
+					for t in range(0, v.size(), 3):
+						var lo := minf(v[t].y, minf(v[t + 1].y, v[t + 2].y))
+						var hi := maxf(v[t].y, maxf(v[t + 1].y, v[t + 2].y))
+						var a0 := minf(-v[t].z, minf(-v[t + 1].z, -v[t + 2].z))     # along the start straight
+						var a1 := maxf(-v[t].z, maxf(-v[t + 1].z, -v[t + 2].z))
+						var nrm := (v[t + 1] - v[t]).cross(v[t + 2] - v[t])
+						# spanning the drop and not upright (walls and side walls are)
+						var spans: bool = lo < foot + 2.0 and hi > top - 2.0 and a1 > wx - 5.0 and a0 < wx + 5.0
+						if spans and nrm.length() > 1e-6 and absf(nrm.normalized().y) > 0.05:
+							slanted += 1
+						for q in [v[t], v[t + 1], v[t + 2]]:
+							if absf(-q.z - wx) < 0.02 and absf(q.x) < TrackPath.HALF_WIDTH:
+								at_top = at_top or absf(q.y - top) < 0.05
+								at_foot = at_foot or absf(q.y - foot) < 0.05
+			var lip := p._lip_at_x(wx)
+			var kind := "tunnel" if p.tunnel[lip] == 1 else ("cut" if p.cut[(lip + 1) % p.n] == 1 else "open")
+			var what := "wall at %.1f, %.0f -> %.0f m (%s)" % [wx, top, foot, kind]
+			check(slanted == 0, "%s: drop built upright (%d slanted triangles)" % [what, slanted])
+			check(at_top and at_foot, "%s: the road meets the wall at the top (%s) and the foot (%s)" % [what, at_top, at_foot])
+			node.free()
 
 
 func _editor_oval() -> TrackEditorModel:

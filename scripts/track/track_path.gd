@@ -42,6 +42,12 @@ var profile_length := 0.0
 var spline: Array = []
 ## 1 = segment i -> i+1 is a vertical wall (pit, ski jump): built as a step.
 var step := PackedByteArray()
+## Spline walls: where in segment i the wall stands (0..1; -1: not known -
+## older tracks, see step_info) and the road's height just before and just
+## after it (the wall's two points).
+var step_t := PackedFloat64Array()
+var step_before := PackedFloat64Array()
+var step_after := PackedFloat64Array()
 ## Ski jumps [lip_index, landing_index] (also in gaps() for the AI).
 var ramps: Array = []
 var _floor_ranges: Array = []    # [first, end) sample ranges of pit floors
@@ -269,15 +275,36 @@ func _sample() -> void:
 	_apply_banking()
 	step.resize(n)
 	step.fill(0)
+	step_t.resize(n)
+	step_t.fill(-1.0)
+	step_before.resize(n)
+	step_after.resize(n)
 	for k in range(1, spline.size() - 2):
 		if HeightSpline.is_wall(spline, k):
-			step[_lip_at_x(float(spline[k][0]))] = 1
+			var x := float(spline[k][0])
+			var lip := _lip_at_x(x)
+			var xj := px[lip + 1] if lip + 1 < n else profile_length
+			step[lip] = 1
+			step_t[lip] = clampf((x - px[lip]) / maxf(xj - px[lip], 1e-6), 0.0, 1.0)
+			step_before[lip] = float(spline[k][1])
+			step_after[lip] = float(spline[k + 1][1])
 	steep.resize(n)
 	for i in n:
 		var j := (i + 1) % n
 		var d := Vector2(center[j].x - center[i].x, center[j].z - center[i].z).length()
 		var is_steep := absf(center[j].y - center[i].y) > 0.33 * maxf(d, 0.01)
 		steep[i] = 1 if is_steep and loop_mask[i] == 0 and loop_mask[j] == 0 and step[i] == 0 else 0
+
+
+## The wall in step segment i: [t (where in the segment, 0..1), height of
+## the road just before it, just after it]. Without a spline wall there
+## (older tracks: steep steps found in the heights) the wall stands at the
+## higher end and the lower road runs on under it at its own height.
+func step_info(i: int) -> Array:
+	var j := (i + 1) % n
+	if step_t[i] >= 0.0:
+		return [step_t[i], step_before[i], step_after[i]]
+	return [0.0 if center[j].y < center[i].y else 1.0, center[i].y, center[j].y]
 
 
 ## Last sample before profile x (at a wall: its top, the step starts there).

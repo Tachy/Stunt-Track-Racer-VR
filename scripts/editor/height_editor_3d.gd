@@ -675,6 +675,8 @@ func _draw_static() -> void:
 	if piece >= 0 and piece < path.pieces.size():
 		var pc: Dictionary = path.pieces[piece]
 		for i in range(int(pc["i0"]), int(pc["i1"])):
+			if path.step[i] == 1:
+				continue     # across a wall (pit, jump): the strips break off there
 			var j := mini(i + 1, path.n - 1)
 			var lift_i := path.up[i] * 0.12
 			var lift_j := path.up[j] * 0.12
