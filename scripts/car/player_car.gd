@@ -17,7 +17,14 @@ const WHEEL_BOX_LIFT := 0.15
 ## force (1 = all of it; slightly less keeps some braking while sliding).
 const TC_LATERAL_RESERVE := 0.9
 const MAX_SANE_SPEED := 120.0   # m/s
+## Spin limit and rotational damping (1/s) of the body. With the pitch assist
+## on they also steady the car (a crooked take-off settles in the air); with
+## it off the car flies as physics has it: the damping is about what the air
+## does to a spinning car, the limit only catches solver blow-ups.
 const MAX_SPIN := 12.0          # rad/s
+const MAX_SPIN_FREE := 40.0
+const ANGULAR_DAMP := 0.5
+const ANGULAR_DAMP_FREE := 0.02
 
 static var debug := OS.get_cmdline_user_args().has("--debug")
 
@@ -43,7 +50,11 @@ var off_road := false
 ## falls with the swing it had, a sideways drop must not tip the nose).
 var crane_drop := false
 ## Flight pitch assist on (Settings.pitch_assist; online: the offer's rule).
-var pitch_assist := true
+## Off: no flight alignment, hardly any rotational damping, no spin limit.
+var pitch_assist := true:
+	set(on):
+		pitch_assist = on
+		angular_damp = ANGULAR_DAMP if on else ANGULAR_DAMP_FREE
 var _wheel_boxes: Array[CollisionShape3D] = []
 var engine_load := 0.0
 
@@ -84,7 +95,7 @@ func setup(t: CarTuning, holes: int) -> void:
 	linear_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
 	linear_damp = 0.0
 	angular_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
-	angular_damp = 0.5
+	angular_damp = ANGULAR_DAMP if pitch_assist else ANGULAR_DAMP_FREE
 	var pm := PhysicsMaterial.new()
 	pm.friction = 0.5
 	pm.bounce = 0.05
@@ -175,8 +186,9 @@ func _physics_process(dt: float) -> void:
 	# guard against solver blow-ups (deep penetration into near-vertical faces)
 	if linear_velocity.length() > MAX_SANE_SPEED:
 		linear_velocity = linear_velocity.limit_length(MAX_SANE_SPEED * 0.5)
-	if angular_velocity.length() > MAX_SPIN:
-		angular_velocity = angular_velocity.limit_length(MAX_SPIN)
+	var max_spin := MAX_SPIN if pitch_assist else MAX_SPIN_FREE
+	if angular_velocity.length() > max_spin:
+		angular_velocity = angular_velocity.limit_length(max_spin)
 	speed = linear_velocity.dot(fwd)
 
 	_check_impact()
