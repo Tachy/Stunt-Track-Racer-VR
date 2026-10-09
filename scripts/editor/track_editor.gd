@@ -66,7 +66,7 @@ var _crossings := PackedVector2Array()
 ## Marked pieces (first, last; x < 0 = none) and the piece Shift extends from.
 var _marked := Vector2i(-1, -1)
 var _mark_anchor := -1
-var _right_press := Vector2.ZERO
+var _right_moved := 0.0         # mouse travel with the right button down (px)
 
 # height stage
 var _mode := "plan"              # plan, height
@@ -224,6 +224,7 @@ func _gui_input(event: InputEvent) -> void:
 		var mm := event as InputEventMouseMotion
 		if _panning:
 			view_center -= mm.relative / zoom
+			_right_moved += mm.relative.length()
 		_mouse_world = to_world(mm.position)
 		_update()
 	elif event is InputEventMouseButton and event.pressed:
@@ -234,7 +235,7 @@ func _gui_input(event: InputEvent) -> void:
 				_click(to_world(mb.position), mb.shift_pressed)
 			MOUSE_BUTTON_RIGHT:
 				_panning = true
-				_right_press = mb.position
+				_right_moved = 0.0
 			MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN:
 				var before := to_world(mb.position)
 				zoom = clampf(zoom * (1.15 if mb.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 1.15), 0.08, 12.0)
@@ -242,7 +243,7 @@ func _gui_input(event: InputEvent) -> void:
 				_update()
 	elif event is InputEventMouseButton and not event.pressed and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_RIGHT:
 		_panning = false
-		if (event as InputEventMouseButton).position.distance_to(_right_press) < CLICK_SLOP:
+		if _right_moved < CLICK_SLOP:     # by the mouse's travel (in VR the pointer stays put)
 			_delete_marked()
 	if event is InputEventMouse:
 		accept_event()   # not on to the desktop camera (right mouse = look around)

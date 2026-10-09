@@ -40,6 +40,7 @@ const ARROW_WIDTH := 5.5
 const POINT_PX := 11.0                  # point size on the screen (pixels)
 const PICK_PX := 12.0                   # a click this near a point takes it ...
 const OCCLUDE_MARGIN := 0.2             # ... unless another road hides it (by more than this, m;
+const SKY_DEPTH := 2000.0               # VR pointer over nothing: this far (m)
 const OWN_ROAD := 20.0                  # a road this near along the lap is its own)
 const CLICK_SLOP := 4.0                 # px a right click may move (else: turning)
 const XRAY_ALPHA := 0.35                # line and points through walls and ground
@@ -62,15 +63,18 @@ var problems: Array = []
 var _pivot: Variant = null
 
 var _hover := -1
-## VR: where the pointer sits in 3D - on the dragged point, the point or
-## the road under it (it is drawn there, at the depth of what it points at,
-## so both eyes agree); null: nothing there (it stays on the screen sphere).
+## VR: how far along the mouse ray the pointer is drawn (its direction is
+## the pointer's own, fixed to the viewer): the dragged point, the point or
+## the road under it, the ground, else the sky far away - at the depth of
+## what it points at, so both eyes agree. Worked out anew whenever the mouse
+## or the camera moves.
 var track_cursor := false
-var cursor_world: Variant = null
+var cursor_depth := SKY_DEPTH
 var _mouse := Vector2(-1, -1)
+var _cursor_from := Transform3D()   # camera the depth was worked out for
 var _drag := -1
 var _drag_off := Vector2.ZERO     # point minus mouse on the surface (x, h)
-var _right_press := Vector2.ZERO
+var _right_moved := 0.0           # mouse travel with the right button down (px)
 var _right_down := false
 var _turning := false
 
@@ -340,11 +344,7 @@ func _place_camera() -> void:
 func _process(dt: float) -> void:
 	_rebuild_t += dt
 	_poll_job()
-	var travelling := not _c.is_equal_approx(_target_c) or not is_equal_approx(_d, _target_d)
-	if travelling and track_cursor and _drag < 0 and _mouse.x >= 0.0:
-		_hover = _point_at(_mouse)     # the track moves under the pointer
-		_update_cursor()
-	if travelling:
+	if not _c.is_equal_approx(_target_c) or not is_equal_approx(_d, _target_d):
 		var k := 1.0 - exp(-dt * CAM_SPEED)
 		_c = _c.lerp(_target_c, k)
 		_d = lerpf(_d, _target_d, k)
@@ -352,6 +352,8 @@ func _process(dt: float) -> void:
 			_c = _target_c
 			_d = _target_d
 	_place_camera()
+	if track_cursor and not XrManager.base_transform().is_equal_approx(_cursor_from):
+		_update_cursor()      # the track moved under the pointer
 	if _line_dirty:
 		_line_dirty = false
 		_draw_line()
@@ -368,11 +370,11 @@ func handle(event: InputEvent) -> bool:
 		if _drag >= 0:
 			_drag_to(mm.position)
 		elif _right_down:
-			if _turning or mm.position.distance_to(_right_press) >= CLICK_SLOP:
+			# by the mouse's own travel: in VR the pointer stays put meanwhile
+			_right_moved += mm.relative.length()
+			if _turning or _right_moved >= CLICK_SLOP:
 				_turning = true
 				turn(mm.relative)
-		else:
-			_hover = _point_at(mm.position)
 		_update_cursor()
 		return true
 	if not (event is InputEventMouseButton):
@@ -391,7 +393,7 @@ func handle(event: InputEvent) -> bool:
 			if mb.pressed:
 				_right_down = true
 				_turning = false
-				_right_press = mb.position
+				_right_moved = 0.0
 			else:
 				if not _turning:
 					var i := _point_at(mb.position)
@@ -448,17 +450,31 @@ func _start_drag(i: int, pos: Vector2) -> void:
 		_drag_off = Vector2(float(q[0]), float(q[1])) - h
 
 
-## VR: the pointer's place in 3D (see cursor_world).
+## The point under the mouse (hover) and, in VR, the pointer's depth (see
+## cursor_depth) - after the mouse or the camera moved.
 func _update_cursor() -> void:
-	if not track_cursor or _mouse.x < 0.0:
-		cursor_world = null
-	elif _drag >= 0:
-		cursor_world = point_pos(_drag)
+	_cursor_from = XrManager.base_transform()
+	if _mouse.x < 0.0:
+		return
+	if _drag < 0 and not _turning:
+		_hover = _point_at(_mouse)
+	if not track_cursor:
+		return
+	var r := view.ray(_mouse)
+	var from: Vector3 = r[0]
+	var dir: Vector3 = r[1]
+	if _drag >= 0:
+		cursor_depth = from.distance_to(point_pos(_drag))
 	elif _hover >= 0:
-		cursor_world = point_pos(_hover)
+		cursor_depth = from.distance_to(point_pos(_hover))
 	else:
-		var hit: Variant = _road_hit(_mouse)
-		cursor_world = (hit[0] as Vector3) + Vector3.UP * 0.1 if hit != null else null
+		var hit: Variant = _road_hit_ray(from, dir)
+		if hit != null:
+			cursor_depth = from.distance_to(hit[0])
+		elif absf(dir.y) > 1e-4 and -from.y / dir.y > 0.0:
+			cursor_depth = minf(-from.y / dir.y, SKY_DEPTH)     # the ground
+		else:
+			cursor_depth = SKY_DEPTH
 
 
 func _drag_to(pos: Vector2) -> void:

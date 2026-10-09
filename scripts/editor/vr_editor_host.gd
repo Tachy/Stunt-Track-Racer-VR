@@ -12,9 +12,12 @@ extends Node3D
 ## it), and the head moves and turns freely inside it (6DOF).
 ## The pointer is a 3D arrow, not part of the screen: on the sphere it would
 ## sit at another depth than the track behind it and the eyes would not
-## agree what it points at. So it is drawn where it points: on a dragged
-## point, on the point or the road under it - and on the sphere over a
-## control or over nothing (HeightEditor3D.cursor_world, TrackEditor.ui_at).
+## agree what it points at. Its direction is always the pointer's own on the
+## sphere (it stays put for the viewer while the camera moves); along it it
+## is drawn as far as what it points at (HeightEditor3D.cursor_depth: the
+## dragged point, a point, the road, the ground, the sky) - on the sphere
+## only over a control, which is nearer (TrackEditor.ui_at). The right
+## mouse button turns the camera and leaves the pointer where it is.
 
 const DEG_PER_PX := 0.05
 const DOME_DEG := Vector2(160.0, 110.0)     # yaw, pitch range of the screen
@@ -123,13 +126,10 @@ func _process(_dt: float) -> void:
 ## always the same size to them (DEG_PER_PX per pixel of its shape).
 func _place_pointer() -> void:
 	var h := editor.height_editor()
-	var at: Vector3
-	if h != null and h.dragging() and h.cursor_world != null:
-		at = h.cursor_world
-	elif h != null and h.cursor_world != null and not editor.ui_at(cursor):
-		at = h.cursor_world
-	else:
-		at = editor.view.sphere_point(cursor)
+	var at := editor.view.sphere_point(cursor)
+	if h != null and (h.dragging() or not editor.ui_at(cursor)):
+		var r := editor.view.ray(cursor)
+		at = (r[0] as Vector3) + (r[1] as Vector3) * h.cursor_depth
 	var cam := XrManager.active_camera()
 	var k := deg_to_rad(DEG_PER_PX) * cam.global_position.distance_to(at)
 	_pointer.global_transform = Transform3D(cam.global_transform.basis.orthonormalized(), at).scaled_local(Vector3.ONE * k)
@@ -146,8 +146,10 @@ func _input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
-		# the pointer moves by angle: one mouse pixel = one screen pixel
-		cursor = (cursor + mm.relative).clamp(Vector2.ZERO, _px - Vector2.ONE)
+		# the pointer moves by angle: one mouse pixel = one screen pixel; with
+		# the right button down the mouse turns the camera, the pointer stays
+		if not (mm.button_mask & MOUSE_BUTTON_MASK_RIGHT):
+			cursor = (cursor + mm.relative).clamp(Vector2.ZERO, _px - Vector2.ONE)
 		var ev := InputEventMouseMotion.new()
 		ev.position = cursor
 		ev.global_position = cursor
