@@ -611,6 +611,10 @@ func _lap_completed() -> void:
 
 
 func _crane_reposition() -> void:
+	if state != "falling" or car.is_wrecked():
+		# wrecked during the fade (or the race is over): no crane, show it
+		XrManager.fade_to(0.0, 0.35)
+		return
 	var rs := path.recovery_s(ptrack.off_s())
 	var fell := ptrack.lateral()
 	ptrack.move_to(rs)
