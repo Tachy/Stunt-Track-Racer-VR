@@ -24,9 +24,9 @@ extends Control
 ## MAX_SLOPE (100 %). Dragged on by force under (or over) a neighbour, a
 ## point snaps there as a vertical wall: wall down + wall up = pit (floor on
 ## the ground: the ground), wall down alone = ski jump. Dragged away to the
-## side again it is a spline point. A click on the road selects its piece
-## (B drawbridge); the camera turns around the selected point or piece
-## (right mouse button; wheel = distance). Top left the plan (PlanNav):
+## side again it is a spline point. A click on the road marks its piece
+## (B drawbridge). The camera turns around the point selected last (right
+## mouse button; wheel = distance); marking a piece does not move it. Top left the plan (PlanNav):
 ## click = piece, right mouse = push, wheel = zoom. Esc undo.
 ## Below the ground the road becomes a cut and a tunnel by itself.
 

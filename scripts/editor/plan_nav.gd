@@ -3,7 +3,7 @@ extends Control
 ## Navigation window of the 3D height editor (top left): the plan coloured by
 ## height, the selected piece red, the problems, the start and the camera
 ## (where it stands and where it looks).
-##   left click   select the piece there (the camera turns around it)
+##   left click   mark the piece there (the camera stays put)
 ##   right mouse  push the plan, wheel: zoom
 
 signal piece_clicked(k: int)
