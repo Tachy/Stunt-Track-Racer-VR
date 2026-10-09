@@ -782,26 +782,6 @@ func surface_height(s: float, t: float, lat := 0.0) -> float:
 	return -INF
 
 
-func is_crane_allowed(piece_index: int) -> bool:
-	var p: Dictionary = pieces[piece_index]
-	if p["type"] != "S" or p["gap"] or p["bridge"] or p["no_crane"]:
-		return false
-	for i in range(p["i0"], p["i1"]):
-		if deck[i] == 1 or tunnel[i] == 1 or cut[i] == 1:
-			return false
-	if not spline.is_empty():
-		for i in range(p["i0"], p["i1"]):
-			if step[i] == 1 or pit_mask[i] == 1:
-				return false
-		for i in range(p["i0"], p["i1"] - 1):
-			if absf(center[i + 1].y - center[i].y) > 0.3 * STEP:
-				return false
-		return true
-	if p["profile"] == "kick" or p["profile"] == "land":
-		return false
-	return absf(float(p["h1"]) - float(p["h0"])) / float(p["length"]) < 0.3
-
-
 ## Where the crane puts a car back that left the road at s: right there, but
 ## at least JUMP_RUNUP before a jump ahead (or one it was on), before a tunnel,
 ## and never on a loop, a gap, a drawbridge, a deck, under another road or on

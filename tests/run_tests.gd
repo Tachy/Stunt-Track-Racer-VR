@@ -141,12 +141,17 @@ func test_lap_tracker() -> void:
 
 
 ## The crane sets the car down where it left the road, back to at least
-## JUMP_RUNUP before a jump and before a tunnel, only on plain road.
+## JUMP_RUNUP before a jump and before a tunnel; never on a loop, a gap, a
+## drawbridge, a deck, a "no crane" piece or under another road. Curves and
+## open cuts are fine. (Checked here against the track data, not with the
+## crane's own rule.)
 func test_recovery() -> void:
-	for id in TrackLibrary.ORDER:
+	var curves := 0
+	var cuts := 0
+	for id in TrackLibrary.TRACKS:
 		var p := TrackPath.new(TrackLibrary.get_def(id))
 		var jumps := p.gaps()
-		var ok := true
+		var bad := ""
 		var runup := true
 		var exact := true
 		var behind := true
@@ -154,24 +159,78 @@ func test_recovery() -> void:
 		while s < p.total_length:
 			var rs := p.recovery_s(s)
 			var k := p.index_at_s(rs)
-			if not p._crane_spot(k):
-				ok = false
-			var clear := true
-			for jp in jumps:
-				var ahead := fposmod(p.s_arr[jp[0]] - rs, p.total_length)
-				if ahead < TrackPath.JUMP_RUNUP - 0.5 or p._fwd_dist(jp[0], k) <= p._fwd_dist(jp[0], jp[1]):
-					clear = false
-			runup = runup and clear
-			# a good spot is kept exactly, otherwise the car goes back
-			if p._recovery_back(s, jumps) == s:
+			var why := _no_crane_reason(p, k)
+			if why != "" and bad == "":
+				bad = "%s at s=%.0f (from %.0f)" % [why, rs, s]
+			runup = runup and _jump_clear(p, jumps, rs, 0.5)
+			if _no_crane_reason(p, p.index_at_s(s)) == "" and _jump_clear(p, jumps, s, 0.0):
 				exact = exact and is_equal_approx(rs, p.wrap_s(s))
+				var pc: Dictionary = p.pieces[p.piece_of[k]]
+				if pc["type"] != "S":
+					curves += 1
+				if p.cut[k] == 1:
+					cuts += 1
 			elif p.delta_s(rs, s) <= 0.0:
 				behind = false
 			s += 7.0
-		check(ok, "%s: crane sets down on plain road only" % id)
+		check(bad == "", "%s: crane sets down on plain road only %s" % [id, bad])
 		check(runup, "%s: crane sets down %d m before a jump at least" % [id, TrackPath.JUMP_RUNUP])
 		check(exact, "%s: crane sets down where the car left the road" % id)
 		check(behind, "%s: crane goes back, not on" % id)
+	check(curves > 0, "crane sets down in curves (%d spots)" % curves)
+	check(cuts > 0, "crane sets down in open cuts (%d spots)" % cuts)
+	# a "no crane" piece: the car goes back to before it
+	var def: Dictionary = TrackLibrary.get_def("grand_tour").duplicate(true)
+	var p0 := TrackPath.new(def)
+	var pick := -1
+	for pi_ in p0.pieces.size():
+		var mid := float(p0.pieces[pi_]["s0"]) + float(p0.pieces[pi_]["length"]) * 0.5
+		if float(p0.pieces[pi_]["length"]) > 20.0 and is_equal_approx(p0.recovery_s(mid), mid):
+			pick = pi_
+			break
+	if pick < 0:
+		check(false, "no_crane: found a piece to mark")
+		return
+	def["pieces"][pick]["no_crane"] = true
+	var p1 := TrackPath.new(def)
+	var mid := float(p1.pieces[pick]["s0"]) + float(p1.pieces[pick]["length"]) * 0.5
+	var rs := p1.recovery_s(mid)
+	check(p1.piece_at_s(rs) != pick and p1.delta_s(rs, float(p1.pieces[pick]["s0"])) > 0.0, "no_crane: set down before the marked piece (%.0f, piece from %.0f)" % [rs, p1.pieces[pick]["s0"]])
+
+
+## Why the crane must not set a car down at sample i ("" = it may).
+func _no_crane_reason(p: TrackPath, i: int) -> String:
+	var pc: Dictionary = p.pieces[p.piece_of[i]]
+	if p.road[i] != 1 or pc["gap"]:
+		return "gap"
+	if p.tunnel[i] == 1:
+		return "tunnel"
+	if p.loop_mask[i] == 1:
+		return "loop"
+	if p.deck[i] == 1:
+		return "deck"
+	if pc["bridge"] or p.bridge_zone[i] == 1:
+		return "drawbridge"
+	if pc["no_crane"]:
+		return "no crane piece"
+	if (p.pit_mask.size() == p.n and p.pit_mask[i] == 1) or (p.step.size() == p.n and p.step[i] == 1):
+		return "pit"
+	for j in p.n:
+		if p.center[j].y > p.center[i].y + 2.0 and absf(p.delta_s(p.s_arr[i], p.s_arr[j])) > 30.0:
+			var d := Vector2(p.center[j].x - p.center[i].x, p.center[j].z - p.center[i].z).length()
+			if d < p.half_width[i] + p.half_width[j] + 2.0:
+				return "under a road"
+	return ""
+
+
+## No jump within JUMP_RUNUP (less tolerance, m) ahead of s, and s not on one.
+func _jump_clear(p: TrackPath, jumps: Array, s: float, tolerance: float) -> bool:
+	var k := p.index_at_s(s)
+	for jp in jumps:
+		var ahead := fposmod(p.s_arr[jp[0]] - s, p.total_length)
+		if ahead < TrackPath.JUMP_RUNUP - tolerance or p._fwd_dist(jp[0], k) <= p._fwd_dist(jp[0], jp[1]):
+			return false
+	return true
 
 
 func test_bridge() -> void:
@@ -480,6 +539,18 @@ func test_crane_chains() -> void:
 	check(near(chain_then, Crane.CHAIN_LEN + Crane.TROLLEY_LEAD, 0.01), "crane: the trolley sets off %.1f m before the chain is all in" % (chain_then - Crane.CHAIN_LEN))
 	check(t_drop > 0.0 and t_drop < t - 0.5, "crane: droppable once the car swings over the road (%.1f s, done %.1f s)" % [t_drop, t])
 	check(crane.arrived() and near(t, crane.duration(), 0.02), "crane: over the road after %.1f s" % t)
+	var narrow := Crane.new()
+	root.add_child(narrow)
+	narrow.start(target, ground, 900.0, Vector2(-1.0, 1.0))   # no room for the car anywhere
+	var t_narrow := -1.0
+	var tn := 0.0
+	while tn < 30.0 and t_narrow < 0.0:
+		narrow.step(dt)
+		tn += dt
+		if narrow.droppable():
+			t_narrow = tn
+	check(near(t_narrow, narrow.duration(), 0.02), "crane: an early drop only over the road (%.1f s, done %.1f s)" % [t_narrow, narrow.duration()])
+	narrow.free()
 	var off := crane.car_xform().origin - target.origin
 	check(off.length() < 2.0, "crane: the car hangs near its drop pose (%.2f m)" % off.length())
 	check(max_phi > deg_to_rad(2.0) and max_phi < deg_to_rad(25.0), "crane: the car swings (max %.1f deg)" % rad_to_deg(max_phi))
