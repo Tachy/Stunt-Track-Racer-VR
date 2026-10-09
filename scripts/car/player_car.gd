@@ -42,6 +42,8 @@ var off_road := false
 ## Dropped by the crane: no flight alignment until a wheel touches down (it
 ## falls with the swing it had, a sideways drop must not tip the nose).
 var crane_drop := false
+## Flight pitch assist on (Settings.pitch_assist; online: the offer's rule).
+var pitch_assist := true
 var _wheel_boxes: Array[CollisionShape3D] = []
 var engine_load := 0.0
 
@@ -334,7 +336,7 @@ func _physics_process(dt: float) -> void:
 	slip_speed = slip_sum / 4.0
 	if grounded == 0:
 		airtime += dt
-		if not off_road and not crane_drop:
+		if pitch_assist and not off_road and not crane_drop:
 			_align_to_flight(b, dt)
 	else:
 		airtime = 0.0

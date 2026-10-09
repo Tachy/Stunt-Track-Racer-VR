@@ -293,6 +293,7 @@ func _screen_settings(sc: PixelScreen) -> void:
 		{"label": Lang.t("MAX. STEERING ANGLE: %d DEG") % int(Settings.max_wheel_angle_deg), "side": _side_lock},
 		{"label": Lang.t("SEAT HEIGHT: %+.2f M") % Settings.seat_height, "side": _side_seat},
 		{"label": Lang.t("SPEEDO: ") + ("KMH" if Settings.speed_kmh else "MPH"), "side": _side_units},
+		{"label": Lang.t("PITCH ASSIST: ") + (Lang.t("ON") if Settings.pitch_assist else Lang.t("OFF")), "side": _side_pitch_assist},
 		{"label": Lang.t("SHADOWS: ") + (Lang.t("ON") if Settings.shadows else Lang.t("OFF")), "side": _side_shadows},
 		{"label": Lang.t("VOLUME: %d") % Settings.volume, "side": _side_volume},
 		{"label": Lang.t("MUSIC: ") + (Lang.t("ON") if Settings.music else Lang.t("OFF")), "side": _side_music},
@@ -351,6 +352,8 @@ func _screen_online(sc: PixelScreen) -> void:
 		var label := "%s  %s" % [str(o["name"]).left(12), _offer_track_name(o["track"])]
 		if o["super"]:
 			label += "  SUPER"
+		if not o.get("pitch_assist", true):
+			label += "  " + Lang.t("NO PITCH ASSIST")
 		var row := {"label": label, "offer": o, "color": o["color"], "do": _act_take.bind(o)}
 		if not known:
 			row["text_color"] = Palette.ROAD_DARK.darkened(0.4)
@@ -686,7 +689,7 @@ func _act_offer() -> void:
 		return
 	_online_msg = ""
 	_searching = true
-	Net.offer(_online_ids()[_online_track], GameState.league != null and GameState.league.super_league)
+	Net.offer(_online_ids()[_online_track], GameState.league != null and GameState.league.super_league, Settings.pitch_assist)
 	_refresh()
 
 
@@ -914,6 +917,10 @@ func _side_shadows(_d: int) -> void:
 
 func _side_units(_d: int) -> void:
 	Settings.speed_kmh = not Settings.speed_kmh
+
+
+func _side_pitch_assist(_d: int) -> void:
+	Settings.pitch_assist = not Settings.pitch_assist
 
 
 func _side_music(_d: int) -> void:

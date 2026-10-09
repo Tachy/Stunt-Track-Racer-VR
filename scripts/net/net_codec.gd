@@ -5,7 +5,11 @@ extends RefCounted
 ## No autoload references, so the headless tests can use it.
 
 const MAGIC := 0xB1
-const VERSION := 2
+const VERSION := 3
+## Race rules byte (set by whoever offers the race): super league, flight
+## pitch assist switched off.
+const RULE_SUPER := 1
+const RULE_NO_PITCH_ASSIST := 2
 const HEADER_SIZE := 10
 const STATE_SIZE := 36
 const MAX_STR := 32
@@ -280,23 +284,34 @@ static func encode_event(id: int, kind: int, data := PackedByteArray()) -> Packe
 	return b.data_array
 
 
-static func ev_join(mode: int, code: String, track: String, super_league: bool) -> PackedByteArray:
+static func ev_join(mode: int, code: String, track: String, super_league: bool, pitch_assist := true) -> PackedByteArray:
 	var b := StreamPeerBuffer.new()
 	b.put_u8(mode)
 	put_code(b, code)
 	put_str(b, track)
-	b.put_u8(1 if super_league else 0)
+	b.put_u8(rules(super_league, pitch_assist))
 	return b.data_array
+
+
+static func rules(super_league: bool, pitch_assist: bool) -> int:
+	return (RULE_SUPER if super_league else 0) | (0 if pitch_assist else RULE_NO_PITCH_ASSIST)
+
+
+## Adds super / pitch_assist to a dictionary decoded with a rules byte.
+static func _put_rules(d: Dictionary, r: int) -> Dictionary:
+	d["super"] = r & RULE_SUPER != 0
+	d["pitch_assist"] = r & RULE_NO_PITCH_ASSIST == 0
+	return d
 
 
 static func ev_watch(on: bool) -> PackedByteArray:
 	return PackedByteArray([1 if on else 0])
 
 
-static func ev_offer(track: String, super_league: bool) -> PackedByteArray:
+static func ev_offer(track: String, super_league: bool, pitch_assist := true) -> PackedByteArray:
 	var b := StreamPeerBuffer.new()
 	put_str(b, track)
-	b.put_u8(1 if super_league else 0)
+	b.put_u8(rules(super_league, pitch_assist))
 	return b.data_array
 
 
@@ -355,7 +370,7 @@ static func decode_event(b: StreamPeerBuffer) -> Dictionary:
 		EV_MATCH:
 			e["slot"] = b.get_u8()
 			e["track"] = get_str(b)
-			e["super"] = b.get_u8() != 0
+			_put_rules(e, b.get_u8())
 			e["opp_name"] = get_str(b)
 			e["opp_color"] = get_color(b)
 		EV_START:
@@ -370,14 +385,14 @@ static func decode_event(b: StreamPeerBuffer) -> Dictionary:
 		EV_ERROR:
 			e["code"] = b.get_u8()
 		EV_LOBBY:
-			# open races: [{id, name, color, track, super}], oldest first
+			# open races: [{id, name, color, track, super, pitch_assist}], oldest first
 			e["online"] = b.get_u16()
 			var offers := []
 			for i in b.get_u8():
 				if b.get_available_bytes() < 2:
 					break
-				offers.append({"id": b.get_u16(), "name": get_str(b), "color": get_color(b),
-					"track": get_str(b), "super": b.get_u8() != 0})
+				var o := {"id": b.get_u16(), "name": get_str(b), "color": get_color(b), "track": get_str(b)}
+				offers.append(_put_rules(o, b.get_u8()))
 			e["offers"] = offers
 		EV_TRACK:
 			e["part"] = b.get_u8()

@@ -22,7 +22,7 @@ time, laps, finish order, timeouts). It runs no physics.
 
 | type | name | dir | payload |
 |---|---|---|---|
-| 1 | HELLO | C→S | u8 version (2), u8 r, u8 g, u8 b, str name |
+| 1 | HELLO | C→S | u8 version (3), u8 r, u8 g, u8 b, str name |
 | 2 | WELCOME | S→C | u32 token, u32 server_ms |
 | 3 | PING | C→S | u32 client_ms |
 | 4 | PONG | S→C | u32 client_ms, u32 server_ms |
@@ -42,9 +42,9 @@ every 100 ms.
 
 | event | name | dir | data |
 |---|---|---|---|
-| 1 | JOIN | C→S | u8 mode (0 quick, 1 create, 2 join), 4 bytes room code, str track, u8 super |
+| 1 | JOIN | C→S | u8 mode (0 quick, 1 create, 2 join), 4 bytes room code, str track, u8 rules |
 | 2 | ROOM | S→C | 4 bytes room code (waiting for an opponent) |
-| 3 | MATCH | S→C | u8 slot (0/1), str track, u8 super, str opponent name, u8 r, g, b |
+| 3 | MATCH | S→C | u8 slot (0/1), str track, u8 rules, str opponent name, u8 r, g, b |
 | 4 | READY | C→S | empty: track built, cars on the crane |
 | 5 | START | S→C | u32 drop time in server ms |
 | 6 | LAP | C→S | u8 laps done, u32 race ms |
@@ -55,10 +55,12 @@ every 100 ms.
 | 11 | RESULT | S→C | u8 winner slot (255 = none), u8 reason |
 | 12 | ERROR | S→C | u8 code (1 room not found, 2 room full, 3 version, 4 offer gone) |
 | 13 | WATCH | C→S | u8 on: 1 = send me the LOBBY list, 0 = stop |
-| 14 | LOBBY | S→C | u16 players online, u8 n (≤ 20), n × {u16 offer id, str name, u8 r, g, b, str track, u8 super} |
-| 15 | OFFER | C→S | str track, u8 super: an open race in the list (replaces an own one) |
+| 14 | LOBBY | S→C | u16 players online, u8 n (≤ 20), n × {u16 offer id, str name, u8 r, g, b, str track, u8 rules} |
+| 15 | OFFER | C→S | str track, u8 rules: an open race in the list (replaces an own one) |
 | 16 | TAKE | C→S | u16 offer id: race that open race |
 | 17 | TRACK | both | u8 part, u8 parts (≤ 16), u16 n (≤ 1000), n bytes: part of a shared track |
+
+`rules` (set by whoever offers or creates the race, passed on as it comes): bit 0 super league, bit 1 flight pitch assist off.
 
 RESULT reasons: 0 finished first, 1 opponent wrecked, 2 opponent left /
 timed out, 3 both out.

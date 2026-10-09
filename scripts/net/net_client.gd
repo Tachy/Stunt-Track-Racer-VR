@@ -132,13 +132,13 @@ func _reset_race() -> void:
 
 # --- requests ------------------------------------------------------------------------
 
-func join(mode: int, code: String, track: String, super_league: bool) -> void:
+func join(mode: int, code: String, track: String, super_league: bool, pitch_assist := true) -> void:
 	slot = -1
 	match_info = {}
 	_reset_race()
 	if mode != NetCodec.JOIN_CODE:
 		_send_track(track)
-	_event(NetCodec.EV_JOIN, NetCodec.ev_join(mode, code, track, super_league))
+	_event(NetCodec.EV_JOIN, NetCodec.ev_join(mode, code, track, super_league, pitch_assist))
 
 
 ## Receive the LOBBY list (kept across reconnects until switched off).
@@ -152,12 +152,13 @@ func watch(on: bool) -> void:
 
 ## Puts an open race on the track into the LOBBY list (replaces one of our own).
 ## A track from the editor goes along: the one who takes the race gets it.
-func offer(track: String, super_league: bool) -> void:
+## Its rules (super league, pitch assist) are ours: they hold for both.
+func offer(track: String, super_league: bool, pitch_assist := true) -> void:
 	slot = -1
 	match_info = {}
 	_reset_race()
 	_send_track(track)
-	_event(NetCodec.EV_OFFER, NetCodec.ev_offer(track, super_league))
+	_event(NetCodec.EV_OFFER, NetCodec.ev_offer(track, super_league, pitch_assist))
 
 
 ## Accepts the open race offer_id of another player: MATCH follows (or ERROR).

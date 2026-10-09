@@ -658,10 +658,10 @@ func test_net_golden() -> void:
 	check(h.get("type", 0) == NetCodec.EVENT and h["seq"] == 9 and h["ack"] == 4 and h["token"] == 42, "match header")
 	var e := NetCodec.decode_event(h["body"])
 	check(e.get("kind", 0) == NetCodec.EV_MATCH and e["id"] == 3 and e["slot"] == 1, "match event")
-	check(e.get("track", "") == "camel_back" and e.get("opp_name", "") == "Max" and e.get("super", true) == false, "match fields")
+	check(e.get("track", "") == "camel_back" and e.get("opp_name", "") == "Max" and e.get("super", true) == false and e.get("pitch_assist", false) == true, "match fields")
 	check((e["opp_color"] as Color).is_equal_approx(Color8(34, 102, 221)), "match colour")
 	pkt = NetCodec.packet(NetCodec.EVENT, 12, 5, 42, NetCodec.encode_event(2, NetCodec.EV_OFFER,
-		NetCodec.ev_offer("big_dipper", true)))
+		NetCodec.ev_offer("big_dipper", true, false)))
 	check(pkt.hex_encode() == _golden("offer"), "offer packet matches Go: %s" % pkt.hex_encode())
 	pkt = NetCodec.packet(NetCodec.EVENT, 13, 5, 42, NetCodec.encode_event(3, NetCodec.EV_TAKE, NetCodec.ev_take(513)))
 	check(pkt.hex_encode() == _golden("take"), "take packet matches Go: %s" % pkt.hex_encode())

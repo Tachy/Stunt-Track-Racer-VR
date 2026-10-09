@@ -235,10 +235,10 @@ func TestLobbyOfferTake(t *testing.T) {
 	if l := b.last(EvLobby); l == nil || l.Online != 2 || len(l.Offers) != 0 {
 		t.Fatalf("first lobby: %+v", l)
 	}
-	h.event(a, Event{Kind: EvOffer, Track: "camel_back", Super: true})
+	h.event(a, Event{Kind: EvOffer, Track: "camel_back", Rules: RuleSuper | RuleNoPitchAssist})
 	lobbyTick(h)
 	l := b.last(EvLobby)
-	if l == nil || len(l.Offers) != 1 || l.Offers[0].Name != "Ann" || l.Offers[0].Track != "camel_back" || !l.Offers[0].Super {
+	if l == nil || len(l.Offers) != 1 || l.Offers[0].Name != "Ann" || l.Offers[0].Track != "camel_back" || l.Offers[0].Rules != RuleSuper|RuleNoPitchAssist {
 		t.Fatalf("offer not listed: %+v", l)
 	}
 	if a.last(EvLobby) != nil {
@@ -255,7 +255,7 @@ func TestLobbyOfferTake(t *testing.T) {
 	}
 	h.event(b, Event{Kind: EvTake, OfferID: l.Offers[0].ID})
 	ma, mb := a.last(EvMatch), b.last(EvMatch)
-	if ma == nil || mb == nil || ma.Slot != 0 || mb.Slot != 1 || mb.Track != "camel_back" || !mb.Super || mb.OppName != "Ann" {
+	if ma == nil || mb == nil || ma.Slot != 0 || mb.Slot != 1 || mb.Track != "camel_back" || mb.Rules != RuleSuper|RuleNoPitchAssist || mb.OppName != "Ann" {
 		t.Fatalf("match: %+v / %+v", ma, mb)
 	}
 	lobbyTick(h)

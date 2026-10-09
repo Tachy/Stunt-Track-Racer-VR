@@ -12,7 +12,7 @@ import (
 
 const (
 	Magic      = 0xB1
-	Version    = 2
+	Version    = 3
 	MaxOffers  = 20 // entries in one LOBBY
 	HeaderSize = 10
 	StateSize  = 36
@@ -21,6 +21,13 @@ const (
 	// at most MaxTrackParts of them.
 	MaxTrackPart  = 1000
 	MaxTrackParts = 16
+)
+
+// Race rules (one byte, set by whoever offers the race, passed on as it
+// comes): the super league, the flight pitch assist switched off.
+const (
+	RuleSuper         = 1
+	RuleNoPitchAssist = 2
 )
 
 // packet types
@@ -361,7 +368,7 @@ type Offer struct {
 	Name  string
 	Color [3]byte
 	Track string
-	Super bool
+	Rules byte
 }
 
 // Event is one reliable message: id, kind and its fields (only those of the kind).
@@ -372,7 +379,7 @@ type Event struct {
 	Mode  byte
 	Code  string
 	Track string
-	Super bool
+	Rules byte // RuleSuper | RuleNoPitchAssist: set by whoever offers the race
 	// MATCH
 	Slot     byte
 	OppName  string
@@ -415,13 +422,13 @@ func EncodeEvent(e Event) []byte {
 		w.U8(e.Mode)
 		w.Code(e.Code)
 		w.Str(e.Track)
-		w.U8(b2u(e.Super))
+		w.U8(e.Rules)
 	case EvRoom:
 		w.Code(e.Code)
 	case EvMatch:
 		w.U8(e.Slot)
 		w.Str(e.Track)
-		w.U8(b2u(e.Super))
+		w.U8(e.Rules)
 		w.Str(e.OppName)
 		w.Color(e.OppColor)
 	case EvStart:
@@ -452,11 +459,11 @@ func EncodeEvent(e Event) []byte {
 			w.Str(o.Name)
 			w.Color(o.Color)
 			w.Str(o.Track)
-			w.U8(b2u(o.Super))
+			w.U8(o.Rules)
 		}
 	case EvOffer:
 		w.Str(e.Track)
-		w.U8(b2u(e.Super))
+		w.U8(e.Rules)
 	case EvTake:
 		w.U16(e.OfferID)
 	case EvTrack:
@@ -476,13 +483,13 @@ func DecodeEvent(p []byte) (Event, error) {
 		e.Mode = r.U8()
 		e.Code = r.Code()
 		e.Track = r.Str()
-		e.Super = r.U8() != 0
+		e.Rules = r.U8()
 	case EvRoom:
 		e.Code = r.Code()
 	case EvMatch:
 		e.Slot = r.U8()
 		e.Track = r.Str()
-		e.Super = r.U8() != 0
+		e.Rules = r.U8()
 		e.OppName = r.Str()
 		e.OppColor = r.Color()
 	case EvStart:
@@ -508,11 +515,11 @@ func DecodeEvent(p []byte) (Event, error) {
 		e.Online = r.U16()
 		n := int(r.U8())
 		for i := 0; i < n && r.Err == nil; i++ {
-			e.Offers = append(e.Offers, Offer{ID: r.U16(), Name: r.Str(), Color: r.Color(), Track: r.Str(), Super: r.U8() != 0})
+			e.Offers = append(e.Offers, Offer{ID: r.U16(), Name: r.Str(), Color: r.Color(), Track: r.Str(), Rules: r.U8()})
 		}
 	case EvOffer:
 		e.Track = r.Str()
-		e.Super = r.U8() != 0
+		e.Rules = r.U8()
 	case EvTake:
 		e.OfferID = r.U16()
 	case EvTrack:

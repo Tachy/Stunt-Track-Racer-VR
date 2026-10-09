@@ -134,6 +134,7 @@ func _ready() -> void:
 	car.setup(tuning, int(req.get("holes", 0)))
 	add_child(car)
 	car.boost_units = def["boost_super"] if super_league else def["boost"]
+	car.pitch_assist = req.get("pitch_assist", Settings.pitch_assist)
 	car_model = CarModel.new().build(Palette.PLAYER_BODY, true)
 	_lit_by_tunnel_lamps(car_model)
 	car.add_child(car_model)
@@ -180,6 +181,7 @@ func _ready() -> void:
 		opp_car.setup(opp_tuning, 0)
 		add_child(opp_car)
 		opp_car.boost_units = car.boost_units
+		opp_car.pitch_assist = car.pitch_assist   # same physics for both
 		opp_model = CarModel.new().build(Color(opp_driver.get("color", "#2266dd")), false)
 		_lit_by_tunnel_lamps(opp_model)
 		opp_car.add_child(opp_model)
@@ -222,7 +224,7 @@ func _ready() -> void:
 		Net.disconnected.connect(_on_net_lost)
 		Net.send_ready()
 		message = Lang.t("WAITING FOR OPPONENT")
-	print("[Race] %s vs %s (super=%s%s)" % [def["name"], opp_driver.get("name", "-"), super_league, ", online" if online else ""])
+	print("[Race] %s vs %s (super=%s, pitch assist=%s%s)" % [def["name"], opp_driver.get("name", "-"), super_league, car.pitch_assist, ", online" if online else ""])
 
 
 func _exit_tree() -> void:

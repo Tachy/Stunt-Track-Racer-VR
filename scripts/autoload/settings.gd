@@ -11,6 +11,9 @@ var wheel_range_deg := 900.0
 ## (wheel_range_deg / 2) gives exactly this angle - linear 1:1 mapping.
 var max_wheel_angle_deg := 32.0
 var speed_kmh := false
+## Flight pitch assist (the nose follows the flight path in the air): part of
+## the difficulty; online the one who offers the race decides.
+var pitch_assist := true
 var volume := 8
 var music := true
 var shadows := true
@@ -42,6 +45,7 @@ func load_settings() -> void:
 	wheel_range_deg = cfg.get_value("wheel", "range_deg", wheel_range_deg)
 	max_wheel_angle_deg = cfg.get_value("wheel", "max_wheel_angle_deg", max_wheel_angle_deg)
 	speed_kmh = cfg.get_value("game", "speed_kmh", speed_kmh)
+	pitch_assist = cfg.get_value("game", "pitch_assist", pitch_assist)
 	volume = cfg.get_value("game", "volume", volume)
 	music = cfg.get_value("game", "music", music)
 	shadows = cfg.get_value("view", "shadows", shadows)
@@ -61,6 +65,7 @@ func save_settings() -> void:
 	cfg.set_value("wheel", "range_deg", wheel_range_deg)
 	cfg.set_value("wheel", "max_wheel_angle_deg", max_wheel_angle_deg)
 	cfg.set_value("game", "speed_kmh", speed_kmh)
+	cfg.set_value("game", "pitch_assist", pitch_assist)
 	cfg.set_value("game", "volume", volume)
 	cfg.set_value("game", "music", music)
 	cfg.set_value("view", "shadows", shadows)

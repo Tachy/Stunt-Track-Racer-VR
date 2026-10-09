@@ -20,6 +20,7 @@ extends Node
 ##   --online=<host[:port]> quick match on that server (with --track=<id>);
 ##                       with --offer: offer the track in the list, with
 ##                       --take: race the first open race in the list
+##   --no-pitch-assist   race (or offer online) without the flight pitch assist
 ##   --name=<name>       online player name for this run
 ##   --server=<host[:port]>  online server for this run (menu; not saved)
 ##   --car-photos        save close-ups of the car model, then quit
@@ -63,7 +64,8 @@ func _ready() -> void:
 		_start_online()
 	elif _args.has("track"):
 		var req := {"track": _args["track"], "opponent": int(_args.get("opponent", "-1")),
-			"league": false, "super": _args.has("super"), "holes": 0}
+			"league": false, "super": _args.has("super"), "holes": 0,
+			"pitch_assist": not _args.has("no-pitch-assist")}
 		_start_race(req)
 	else:
 		show_menu(_args.get("menu", "main"))
@@ -105,9 +107,9 @@ func _start_online() -> void:
 			if Net.slot < 0 and not Net.offers.is_empty():
 				Net.take(Net.offers[0]["id"]))
 	elif _args.has("offer"):
-		Net.welcomed.connect(func(): Net.offer(track, _args.has("super")), CONNECT_ONE_SHOT)
+		Net.welcomed.connect(func(): Net.offer(track, _args.has("super"), not _args.has("no-pitch-assist")), CONNECT_ONE_SHOT)
 	else:
-		Net.welcomed.connect(func(): Net.join(NetCodec.JOIN_QUICK, "", track, _args.has("super")), CONNECT_ONE_SHOT)
+		Net.welcomed.connect(func(): Net.join(NetCodec.JOIN_QUICK, "", track, _args.has("super"), not _args.has("no-pitch-assist")), CONNECT_ONE_SHOT)
 	if not Net.connect_to(_args["online"], nm, Settings.player_color):
 		push_error("[Main] cannot connect to %s" % _args["online"])
 		get_tree().quit(1)

@@ -77,7 +77,7 @@ type Room struct {
 	Quick      bool
 	OfferID    uint16 // != 0: listed in the LOBBY while waiting
 	Track      string
-	Super      bool
+	Rules      byte
 	TrackData  [][]byte // shared track of the first player (TRACK parts)
 	Players    [2]*Session
 	Started    bool // MATCH sent
@@ -379,7 +379,7 @@ func (sv *Server) join(s *Session, e Event, now time.Time) {
 	}
 	if r == nil {
 		// create (also: first quick-match player waits in a fresh room)
-		r = &Room{Code: sv.newCode(), Quick: e.Mode == JoinQuick, Track: e.Track, Super: e.Super, TrackData: s.takeUpload()}
+		r = &Room{Code: sv.newCode(), Quick: e.Mode == JoinQuick, Track: e.Track, Rules: e.Rules, TrackData: s.takeUpload()}
 		r.Players[0] = s
 		sv.rooms[r.Code] = r
 		if r.Quick {
@@ -407,7 +407,7 @@ func (sv *Server) match(s *Session, r *Room, now time.Time) {
 	}
 	for i, p := range r.Players {
 		o := r.Players[1-i]
-		sv.queue(p, Event{Kind: EvMatch, Slot: byte(i), Track: r.Track, Super: r.Super, OppName: o.Name, OppColor: o.Color}, now)
+		sv.queue(p, Event{Kind: EvMatch, Slot: byte(i), Track: r.Track, Rules: r.Rules, OppName: o.Name, OppColor: o.Color}, now)
 	}
 	sv.logf("room %s: %q vs %q on %s", r.Code, r.Players[0].Name, r.Players[1].Name, r.Track)
 }
@@ -418,7 +418,7 @@ func (sv *Server) offer(s *Session, e Event, now time.Time) {
 	if sv.nextOffer == 0 {
 		sv.nextOffer = 1
 	}
-	r := &Room{Code: sv.newCode(), Track: e.Track, Super: e.Super, OfferID: sv.nextOffer, TrackData: s.takeUpload()}
+	r := &Room{Code: sv.newCode(), Track: e.Track, Rules: e.Rules, OfferID: sv.nextOffer, TrackData: s.takeUpload()}
 	r.Players[0] = s
 	sv.rooms[r.Code] = r
 	sv.attach(s, r, 0)
@@ -479,7 +479,7 @@ func (sv *Server) openOffers(except *Session) []Offer {
 	for _, r := range sv.rooms {
 		if r.OfferID != 0 && !r.Started && r.Players[0] != nil && r.Players[0].room == r && r.Players[0] != except {
 			p := r.Players[0]
-			list = append(list, Offer{ID: r.OfferID, Name: p.Name, Color: p.Color, Track: r.Track, Super: r.Super})
+			list = append(list, Offer{ID: r.OfferID, Name: p.Name, Color: p.Color, Track: r.Track, Rules: r.Rules})
 		}
 	}
 	sort.Slice(list, func(i, j int) bool { return SeqNewer(list[j].ID, list[i].ID) })

@@ -30,7 +30,7 @@ func league_request() -> Dictionary:
 		save_game()
 	var r := league.next_race()
 	return {"track": r["track"], "opponent": r["opponent"], "league": true,
-		"super": league.super_league, "holes": league.holes}
+		"super": league.super_league, "holes": league.holes, "pitch_assist": Settings.pitch_assist}
 
 
 func practice_request(track: String, with_opponent: bool) -> Dictionary:
@@ -40,12 +40,13 @@ func practice_request(track: String, with_opponent: bool) -> Dictionary:
 		# a rival from the track's division
 		opp = [9, 10, 6, 7, 3, 4, 0, 1][(4 - div) * 2 + randi() % 2]
 	return {"track": track, "opponent": opp, "league": false,
-		"super": league != null and league.super_league, "holes": 0}
+		"super": league != null and league.super_league, "holes": 0, "pitch_assist": Settings.pitch_assist}
 
 
 ## A race against the other online player (Net.matched info).
 func online_request(info: Dictionary) -> Dictionary:
 	return {"track": info["track"], "opponent": -1, "league": false, "super": info["super"], "holes": 0,
+		"pitch_assist": info.get("pitch_assist", true),
 		"online": {"slot": info["slot"], "opp_name": info["opp_name"], "opp_color": info["opp_color"]}}
 
 
