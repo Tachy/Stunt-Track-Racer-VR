@@ -606,16 +606,21 @@ func _spline_pits() -> void:
 		var lip := _lip_at_x(walls[w][0])
 		if w + 1 < walls.size() and not walls[w + 1][1] and walls[w + 1][0] - walls[w][0] <= PIT_MAX:
 			var landing := _index_at_x(walls[w + 1][0])
-			pits.append([lip, landing])
 			_floor_ranges.append([(lip + 1) % n, landing])
-			var k := lip
-			while k != landing:
-				pit_mask[k] = 1
-				k = (k + 1) % n
+			# pits this close are one long jump (as the league pits always were)
+			if not pits.is_empty() and _fwd_dist(pits[-1][1], lip) < 20:
+				pits[-1][1] = landing
+			else:
+				pits.append([lip, landing])
 			w += 2
 		else:
 			ramps.append([lip, _index_at_x(walls[w][0] + 15.0)])
 			w += 1
+	for pt in pits:
+		var k: int = pt[0]
+		while k != pt[1]:
+			pit_mask[k] = 1
+			k = (k + 1) % n
 
 
 ## Pit floors at ground level (between two lower wall points snapped to 0):
