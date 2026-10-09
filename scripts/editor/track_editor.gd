@@ -8,6 +8,10 @@ extends Control
 ##   wheel        zoom, right mouse button: pan
 ## Near the start the closing pieces are previewed in green; a click closes
 ## the lap. Closed tracks can be saved, test-driven and raced in practice.
+## In a closed lap a click on the road marks a piece (with its run-out),
+## Shift+click a stretch of them; a right click (without dragging) deletes
+## the marked ones. The gap is drawn as usual and closed onto its anchor
+## (yellow mark) like a lap onto its start; Esc right after the cut undoes it.
 ##
 ## Heights (Tab / button, closed lap only): the profile strip shows the
 ## height along the lap (loops take no room there) as a spline through free
@@ -37,6 +41,9 @@ const STEEP := Color(1.0, 0.6, 0.1, 0.9)
 ## Head start of curves with the radius of the latest one (screen pixels).
 const RADIUS_STICK_PX := 9.0
 const SELECT := Color(1.0, 0.9, 0.2)
+const MARKED := Color(0.95, 0.35, 0.25)          # pieces marked for deleting
+const ANCHOR := Color(1.0, 0.85, 0.2)            # where a gap is closed to
+const CLICK_SLOP := 4.0                          # px a right click may move
 const PREVIEW_RATE := 4.0               # 3D preview updates per second while dragging
 const MODE_BUTTON := Color("#2f6db5")   # heights / plan
 const MENU_BUTTON := Color("#a83a32")   # leave the editor
@@ -50,6 +57,10 @@ var _panning := false
 var _preview: Array = []
 var _preview_closes := false
 var _crossings := PackedVector2Array()
+## Marked pieces (first, last; x < 0 = none) and the piece Shift extends from.
+var _marked := Vector2i(-1, -1)
+var _mark_anchor := -1
+var _right_press := Vector2.ZERO
 
 # height stage
 var _mode := "plan"              # plan, height
@@ -212,9 +223,10 @@ func _gui_input(event: InputEvent) -> void:
 		match mb.button_index:
 			MOUSE_BUTTON_LEFT:
 				grab_focus()
-				_click(to_world(mb.position))
+				_click(to_world(mb.position), mb.shift_pressed)
 			MOUSE_BUTTON_RIGHT:
 				_panning = true
+				_right_press = mb.position
 			MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN:
 				var before := to_world(mb.position)
 				zoom = clampf(zoom * (1.15 if mb.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 1.15), 0.08, 12.0)
@@ -222,6 +234,8 @@ func _gui_input(event: InputEvent) -> void:
 				_update()
 	elif event is InputEventMouseButton and not event.pressed and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_RIGHT:
 		_panning = false
+		if (event as InputEventMouseButton).position.distance_to(_right_press) < CLICK_SLOP:
+			_delete_marked()
 	if event is InputEventMouse:
 		accept_event()   # not on to the desktop camera (right mouse = look around)
 
@@ -258,8 +272,10 @@ func _input(event: InputEvent) -> void:
 		_update()
 
 
-func _click(w: Vector2) -> void:
-	if not model.has_start:
+func _click(w: Vector2, shift := false) -> void:
+	if model.closed:
+		_mark(w, shift)
+	elif not model.has_start:
 		model.set_start(w.snapped(Vector2.ONE * TrackEditorModel.GRID))
 	elif model.start_dir == Vector2.ZERO:
 		model.place_first(w)
@@ -268,6 +284,36 @@ func _click(w: Vector2) -> void:
 		if model.closed:
 			_flash(Lang.t("LAP CLOSED - SAVE OR TEST DRIVE"))
 	_update()
+
+
+## Closed lap: a click on the road marks its piece (with the run-out placed
+## along with it), Shift+click stretches the marking up to it; a click
+## beside the road clears it.
+func _mark(w: Vector2, shift: bool) -> void:
+	var k := model.piece_at(w)
+	if k < 0:
+		_marked = Vector2i(-1, -1)
+		_mark_anchor = -1
+		return
+	var r := model.group_range(k)
+	if shift and _mark_anchor >= 0 and _mark_anchor < model.pieces.size():
+		var a := model.group_range(_mark_anchor)
+		_marked = Vector2i(mini(a.x, r.x), maxi(a.y, r.y))
+	else:
+		_marked = r
+		_mark_anchor = k
+
+
+## Right click: the marked pieces go, a gap is left to draw anew.
+func _delete_marked() -> void:
+	if _mode != "plan" or _marked.x < 0 or not model.closed:
+		return
+	var ok := model.cut(_marked.x, _marked.y)
+	_marked = Vector2i(-1, -1)
+	_mark_anchor = -1
+	_update()
+	if not ok:
+		_flash(Lang.t("NOT POSSIBLE - THE WHOLE LAP"))
 
 
 # --- state -> picture -----------------------------------------------------------------
@@ -287,7 +333,10 @@ func _update() -> void:
 		return
 	_preview = []
 	_preview_closes = false
-	if model.near_start(_mouse_world):
+	if not model.closed or _marked.y >= model.pieces.size():
+		_marked = Vector2i(-1, -1)
+		_mark_anchor = -1
+	if model.near_target(_mouse_world):
 		_preview = model.closing_group()
 		_preview_closes = not _preview.is_empty()
 	if _preview.is_empty():
@@ -302,14 +351,17 @@ func _update() -> void:
 	elif model.start_dir == Vector2.ZERO:
 		_status.text = Lang.t("CLICK THE END OF THE START STRAIGHT (ACROSS OR UP/DOWN)")
 	elif model.closed:
-		_status.text = Lang.t("LAP CLOSED - SAVE OR TEST DRIVE (ESC REOPENS)")
+		_status.text = Lang.t("LAP CLOSED - SAVE OR TEST DRIVE (ESC REOPENS)") + "   " \
+			+ Lang.t("CLICK = MARK (SHIFT: MORE)  RIGHT CLICK = DELETE MARKED")
+	elif model.has_gap():
+		_status.text = Lang.t("DRAW THE GAP TO THE YELLOW MARK  ESC = REMOVE LAST / UNDO THE DELETING")
 	else:
 		_status.text = Lang.t("CLICK = PLACE  ESC = REMOVE LAST  O / SHIFT+O = LOOP  WHEEL = ZOOM  RIGHT MOUSE = MOVE")
 	queue_redraw()
 
 
 func _info_text() -> String:
-	var t := Lang.t("LENGTH %d M  PIECES %d") % [roundi(model.total_length()), model.pieces.size()]
+	var t := Lang.t("LENGTH %d M  PIECES %d") % [roundi(model.total_length()), model.pieces.size() + model.tail.size()]
 	if _crossings.size() > 0:
 		t += "  " + Lang.t("CROSSINGS %d") % _crossings.size()
 	var desc := []
@@ -344,11 +396,27 @@ func _draw() -> void:
 	var k := 0
 	for p in model.pieces:
 		var col := ROAD_AUTO if p.get("auto", false) else (ROAD_A if k % 2 == 0 else ROAD_B)
+		if k >= _marked.x and k <= _marked.y:
+			col = MARKED
 		_draw_piece(pos, dir, p, col)
 		var e := TrackEditorModel.advance(pos, dir, p)
 		pos = e[0]
 		dir = e[1]
 		k += 1
+	# the tail of a gap, from its anchor on
+	if model.has_gap():
+		var tpos := model.tail_pos
+		var tdir := model.tail_dir
+		for p in model.tail:
+			_draw_piece(tpos, tdir, p, ROAD_AUTO if p.get("auto", false) else (ROAD_A if k % 2 == 0 else ROAD_B))
+			var e3 := TrackEditorModel.advance(tpos, tdir, p)
+			tpos = e3[0]
+			tdir = e3[1]
+			k += 1
+		var a := to_screen(model.tail_pos)
+		var n := model.tail_dir.rotated(PI * 0.5) * maxf(8.0, TrackPath.HALF_WIDTH * zoom)
+		draw_line(a - n, a + n, ANCHOR, 4.0)
+		draw_arc(a, maxf(10.0, TrackPath.ROAD_WIDTH * zoom), 0.0, TAU, 24, ANCHOR, 2.0)
 	# preview
 	if not _preview.is_empty():
 		var gpos := pos

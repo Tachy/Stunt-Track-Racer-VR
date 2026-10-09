@@ -43,6 +43,15 @@ var _next_group := 0
 var base := DEFAULT_BASE
 var heights: Array = []
 var _height_undo: Array = []
+## Gap cut into a closed lap (cut()): `pieces` is the part from the start to
+## the gap, `tail` the part after it, starting at the pose tail_pos/tail_dir
+## (the anchor the gap is closed to). _cut: what joining and undoing the cut
+## need ("heights": the profile points after the gap, x from the anchor;
+## "pieces"/"old_heights"/"size": the lap before the cut, for Esc).
+var tail: Array = []
+var tail_pos := Vector2.ZERO
+var tail_dir := Vector2.ZERO
+var _cut: Dictionary = {}
 
 
 # --- geometry (mirrors TrackPath._layout) ------------------------------------------
@@ -149,13 +158,17 @@ func end_pose() -> Array:
 	return [pos, dir]
 
 
+## The piece the next one follows (with the head of a gap empty: the end of
+## the lap, i.e. of the tail).
 func last_piece() -> Dictionary:
-	return pieces[-1] if not pieces.is_empty() else {}
+	if not pieces.is_empty():
+		return pieces[-1]
+	return tail[-1] if not tail.is_empty() else {}
 
 
 func total_length() -> float:
 	var l := 0.0
-	for p in pieces:
+	for p in pieces + tail:
 		l += piece_length(p)
 	return l
 
@@ -251,6 +264,8 @@ func place(group: Array, closes := false) -> void:
 	_next_group += 1
 	_redo.clear()
 	if closes:
+		if not _cut.is_empty():
+			_join()
 		closed = true
 
 
@@ -271,6 +286,17 @@ func loop_group(side: int) -> Array:
 ## Removes the last placement group (Esc). Back to "no direction" / "no
 ## start" when nothing is left.
 func undo() -> void:
+	if _cut.has("pieces") and pieces.size() <= int(_cut["size"]):
+		# nothing drawn into the gap (any more): the lap as before the cut
+		pieces = _cut["pieces"]
+		heights = _cut["old_heights"]
+		tail.clear()
+		_cut = {}
+		_redo.clear()
+		closed = true
+		return
+	if pieces.is_empty() and not _cut.is_empty():
+		return
 	if pieces.is_empty():
 		if start_dir != Vector2.ZERO:
 			start_dir = Vector2.ZERO
@@ -283,7 +309,7 @@ func undo() -> void:
 		removed.push_front(pieces.pop_back())
 	_redo.append(removed)
 	closed = false
-	if pieces.is_empty():
+	if pieces.is_empty() and _cut.is_empty():
 		start_dir = Vector2.ZERO
 
 
@@ -297,25 +323,122 @@ func redo() -> void:
 		pieces.append(p)
 
 
+# --- cutting a gap into the lap ------------------------------------------------------
+
+func has_gap() -> bool:
+	return not tail.is_empty()
+
+
+## Piece under the plan point w (-1 if none).
+func piece_at(w: Vector2) -> int:
+	var pos := start
+	var dir := start_dir
+	var best := -1
+	var best_d := TrackPath.ROAD_WIDTH
+	for k in pieces.size():
+		for q in sample(pos, dir, pieces[k], 2.0):
+			var d := q.distance_to(w)
+			if d < best_d:
+				best_d = d
+				best = k
+		var e := advance(pos, dir, pieces[k])
+		pos = e[0]
+		dir = e[1]
+	return best
+
+
+## First and last piece of the placement group of piece k (a curve with its
+## run-out: what one click placed).
+func group_range(k: int) -> Vector2i:
+	var g = pieces[k].get("g", null)
+	var r := Vector2i(k, k)
+	if g == null:
+		return r
+	while r.x > 0 and pieces[r.x - 1].get("g", null) == g:
+		r.x -= 1
+	while r.y < pieces.size() - 1 and pieces[r.y + 1].get("g", null) == g:
+		r.y += 1
+	return r
+
+
+## Removes pieces first..last of the closed lap: the rest after them stays
+## where it is (the tail), the gap is drawn anew from the end of the head
+## and closed onto the tail like a lap onto its start. Profile points in the
+## gap go, those after it move along with the tail. Not the whole lap.
+func cut(first: int, last: int) -> bool:
+	if not closed or not _cut.is_empty() or first < 0 or last >= pieces.size() or first > last \
+			or (first == 0 and last == pieces.size() - 1):
+		return false
+	var x0 := piece_x(first)
+	var x1 := piece_x(last + 1)
+	var pos := start
+	var dir := start_dir
+	for k in last + 1:
+		var e := advance(pos, dir, pieces[k])
+		pos = e[0]
+		dir = e[1]
+	var head_h := []
+	var tail_h := []
+	for q in heights:
+		var x := float(q[0])
+		if x <= x0 + 0.01:
+			head_h.append(q)
+		elif x >= x1 - 0.01:
+			var r: Array = q.duplicate()
+			r[0] = x - x1
+			tail_h.append(r)
+	_cut = {"pieces": pieces.duplicate(true), "old_heights": heights.duplicate(true), "size": first,
+		"heights": tail_h}
+	tail = pieces.slice(last + 1)
+	tail_pos = pos
+	tail_dir = dir
+	pieces = pieces.slice(0, first)
+	heights = head_h
+	closed = false
+	_redo.clear()
+	return true
+
+
+## The gap is closed: the tail joins the head again (and its profile points
+## follow it to its new place along the lap).
+func _join() -> void:
+	var x := profile_length()
+	for q in _cut.get("heights", []):
+		var r: Array = (q as Array).duplicate()
+		r[0] = float(r[0]) + x
+		heights.append(r)
+	pieces.append_array(tail)
+	tail.clear()
+	_cut = {}
+	_tidy_heights()
+
+
 # --- closing the lap -----------------------------------------------------------------
 
-## Pieces that lead exactly back onto the start (position and direction):
-## one or two catalogue curves with straights before, between and after;
-## two of those straights are solved for (any length), the shortest
-## solution wins. [] if there is none.
+## Where closing leads: the anchor of the gap, else the start ([pos, dir]).
+func close_target() -> Array:
+	return [tail_pos, tail_dir] if has_gap() else [start, start_dir]
+
+
+## Pieces that lead exactly back onto the start (position and direction),
+## or onto the anchor of a gap: one or two catalogue curves with straights
+## before, between and after; two of those straights are solved for (any
+## length), the shortest solution wins. [] if there is none.
 func closing_group() -> Array:
-	if closed or pieces.size() < 2:
+	if closed or (pieces.size() < 2 and _cut.is_empty()):
 		return []
 	var e := end_pose()
 	var p0: Vector2 = e[0]
 	var d0: Vector2 = e[1]
-	var need := d0.angle_to(start_dir)
+	var tg := close_target()
+	var target: Vector2 = tg[0]
+	var need := d0.angle_to(tg[1])
 	var best := []
 	var best_len := INF
-	# already in line with the start: one straight
+	# already in line with the target: one straight
 	if absf(need) < 1e-3:
-		var along := (start - p0).dot(d0)
-		if along > 1.0 and absf(d0.cross(start - p0)) < 0.05:
+		var along := (target - p0).dot(d0)
+		if along > 1.0 and absf(d0.cross(target - p0)) < 0.05:
 			return [straight(along)]
 	var curves := []
 	for t in ["L", "R"]:
@@ -360,7 +483,8 @@ func _try_close(cs: Array, p0: Vector2, d0: Vector2, best: Array, best_len: floa
 	mins.append(transition_length(last_piece(), cs[0]))
 	for k in range(1, cs.size()):
 		mins.append(transition_length(cs[k - 1], cs[k]))
-	mins.append(0.0)
+	# onto a gap's anchor: the run-out into the first piece of the tail
+	mins.append(transition_length(cs[-1], tail[0]) if has_gap() else 0.0)
 	# direction of every slot and the end point with all slots at their minimum
 	var dirs := []
 	var pos := p0
@@ -372,7 +496,7 @@ func _try_close(cs: Array, p0: Vector2, d0: Vector2, best: Array, best_len: floa
 			var adv := advance(pos, dir, cs[k])
 			pos = adv[0]
 			dir = adv[1]
-	var gap := start - pos
+	var gap: Vector2 = close_target()[0] - pos
 	for i in slots:
 		for j in range(i + 1, slots):
 			var u: Vector2 = dirs[i]
@@ -383,7 +507,9 @@ func _try_close(cs: Array, p0: Vector2, d0: Vector2, best: Array, best_len: floa
 			# x*u + y*v = gap
 			var x := gap.cross(v) / det
 			var y := u.cross(gap) / det
-			if x < -1e-6 or y < -1e-6:
+			# (a slot exactly at its minimum comes out a hair negative in
+			# 32 bit: typical when a gap is closed with the pieces cut out)
+			if x < -0.01 or y < -0.01:
 				continue
 			var lens := mins.duplicate()
 			lens[i] = float(lens[i]) + maxf(x, 0.0)
@@ -401,9 +527,11 @@ func _try_close(cs: Array, p0: Vector2, d0: Vector2, best: Array, best_len: floa
 				best.append_array(g)
 
 
-## Whether the mouse is near enough to the start to offer closing.
-func near_start(mouse: Vector2) -> bool:
-	return has_start and not pieces.is_empty() and mouse.distance_to(start) < CLOSE_RADIUS
+## Whether the mouse is near enough to the start (or a gap's anchor) to
+## offer closing.
+func near_target(mouse: Vector2) -> bool:
+	return has_start and (not pieces.is_empty() or not _cut.is_empty()) \
+		and mouse.distance_to(close_target()[0]) < CLOSE_RADIUS
 
 
 # --- checks ----------------------------------------------------------------------------
@@ -416,7 +544,13 @@ func crossings() -> PackedVector2Array:
 	var pos := start
 	var dir := start_dir
 	var s := 0.0
-	for p in pieces:
+	for kp in pieces.size() + tail.size():
+		if kp == pieces.size():
+			# the tail of a gap: from its anchor on (the gap counts as 40 m)
+			pos = tail_pos
+			dir = tail_dir
+			s += 40.0
+		var p: Dictionary = pieces[kp] if kp < pieces.size() else tail[kp - pieces.size()]
 		var smp := sample(pos, dir, p, 3.0)
 		var l := piece_length(p)
 		for k in smp.size():
@@ -432,7 +566,7 @@ func crossings() -> PackedVector2Array:
 	for i in pts.size():
 		for j in range(i + 1, pts.size()):
 			var ds := absf(ss[j] - ss[i])
-			if ds < 40.0 or (closed and total - ds < 40.0) or in_loop[i] == 1 or in_loop[j] == 1:
+			if ds < 40.0 or ((closed or has_gap()) and total - ds < 40.0) or in_loop[i] == 1 or in_loop[j] == 1:
 				continue
 			if pts[i].distance_to(pts[j]) < TrackPath.ROAD_WIDTH:
 				var m := (pts[i] + pts[j]) * 0.5
@@ -840,9 +974,15 @@ func to_def(track_name: String) -> Dictionary:
 
 
 func to_dict(track_name: String) -> Dictionary:
-	return {"version": 1, "name": track_name, "start": [start.x, start.y], "start_dir": [start_dir.x, start_dir.y],
+	var d := {"version": 1, "name": track_name, "start": [start.x, start.y], "start_dir": [start_dir.x, start_dir.y],
 		"has_start": has_start, "closed": closed, "base": base, "heights": heights.duplicate(true),
 		"pieces": pieces.duplicate(true)}
+	if has_gap():
+		d["tail"] = tail.duplicate(true)
+		d["tail_pos"] = [tail_pos.x, tail_pos.y]
+		d["tail_dir"] = [tail_dir.x, tail_dir.y]
+		d["tail_heights"] = (_cut.get("heights", []) as Array).duplicate(true)
+	return d
 
 
 static func from_dict(d: Dictionary) -> TrackEditorModel:
@@ -855,7 +995,15 @@ static func from_dict(d: Dictionary) -> TrackEditorModel:
 	m.closed = d.get("closed", false)
 	m.base = float(d.get("base", DEFAULT_BASE))
 	m.pieces = (d.get("pieces", []) as Array).duplicate(true)
-	for p in m.pieces:
+	m.tail = (d.get("tail", []) as Array).duplicate(true)
+	if m.has_gap():
+		var tp: Array = d.get("tail_pos", [0, 0])
+		var td: Array = d.get("tail_dir", [0, -1])
+		m.tail_pos = Vector2(tp[0], tp[1])
+		m.tail_dir = Vector2(td[0], td[1])
+		m._cut = {"heights": (d.get("tail_heights", []) as Array).duplicate(true)}
+		m.closed = false
+	for p in m.pieces + m.tail:
 		m._next_group = maxi(m._next_group, int(p.get("g", 0)) + 1)
 	if d.has("heights"):
 		m.heights = (d["heights"] as Array).duplicate(true)

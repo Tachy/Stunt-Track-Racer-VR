@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_league_track_features", "test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -920,6 +920,57 @@ func test_editor_crossings() -> void:
 			TrackEditorModel.straight(220)]:
 		m.place(m.group_for(p))
 	check(m.crossings().size() >= 1, "crossing found (%d)" % m.crossings().size())
+
+
+## Marked pieces deleted in the middle of a closed lap; the gap drawn anew
+## and closed onto its anchor.
+func test_editor_cut() -> void:
+	var m := _editor_oval()
+	var n := m.pieces.size()
+	check(m.piece_at(Vector2(2, -100)) == 0 and m.piece_at(Vector2(200, 200)) == -1, "piece under the mouse")
+	check(not m.cut(0, n - 1), "not the whole lap")
+	m.add_point(m.piece_x(2) * 0.5, 10.0)                # before the gap
+	m.add_point(m.piece_x(5) + 20.0, 14.0)               # after it
+	var after_x := float(m.heights[1][0]) - m.piece_x(4)
+	var e: Array = [m.start, m.start_dir]
+	for k in 3:
+		e = TrackEditorModel.advance(e[0], e[1], m.pieces[k])
+	check(m.cut(3, 3), "cut out the second curve")
+	check(not m.closed and m.has_gap() and m.pieces.size() == 3 and m.tail.size() == n - 4, "head and tail")
+	check(m.end_pose()[0].distance_to(e[0]) < 0.01, "the head ends at the gap")
+	check(m.heights.size() == 1, "profile points: the head's stay")
+	# Esc right after the cut: the lap as before
+	m.undo()
+	check(m.closed and not m.has_gap() and m.pieces.size() == n and m.heights.size() == 2, "Esc undoes the cut")
+	# a longer cut (straight and curve), closed onto the anchor by other pieces
+	m.cut(2, 3)
+	m.place(m.group_for(TrackEditorModel.straight(20)))
+	check(m.near_target(m.tail_pos) and not m.near_target(m.start), "closing is offered at the anchor")
+	var g := m.closing_group()
+	check(not g.is_empty(), "closing pieces onto the anchor")
+	m.place(g, true)
+	check(m.closed and not m.has_gap() and _closes(m), "the gap closes exactly")
+	var tail_start := m.pieces.size() - (n - 4)
+	check(m.heights.size() == 2 and near(float(m.heights[1][0]), m.piece_x(tail_start) + after_x),
+		"profile points after the gap move along (%s)" % [m.heights])
+	# with the start straight: the head is empty, the start stays
+	m = _editor_oval()
+	check(m.cut(0, 1) and m.pieces.is_empty() and m.start_dir != Vector2.ZERO, "cut at the start")
+	m.place(m.closing_group(), true)
+	check(m.closed and _closes(m), "closed from the start onto the anchor")
+	# up to the end: closed onto the start as usual
+	m = _editor_oval()
+	n = m.pieces.size()
+	check(m.cut(n - 2, n - 1) and not m.has_gap(), "cut at the end")
+	m.place(m.closing_group(), true)
+	check(m.closed and _closes(m), "closed onto the start")
+	# saved with a gap
+	m = _editor_oval()
+	m.cut(2, 3)
+	var m2 := TrackEditorModel.from_dict(JSON.parse_string(JSON.stringify(m.to_dict("x"))))
+	check(m2.has_gap() and not m2.closed and m2.tail.size() == m.tail.size(), "save/load with a gap")
+	m2.place(m2.closing_group(), true)
+	check(m2.closed and _closes(m2), "a loaded gap closes")
 
 
 func _editor_oval() -> TrackEditorModel:
