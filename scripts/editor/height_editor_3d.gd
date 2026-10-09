@@ -38,7 +38,8 @@ const ARROW_SPACING := 40.0             # driving direction: an arrow every ... 
 const ARROW_LENGTH := 8.0
 const ARROW_WIDTH := 5.5
 const POINT_PX := 11.0                  # point size on the screen (pixels)
-const PICK_PX := 12.0                   # a click this near a point takes it
+const PICK_PX := 12.0                   # a click this near a point takes it ...
+const OCCLUDE_MARGIN := 0.2             # ... unless a road hides it (by more than this, m)
 const CLICK_SLOP := 4.0                 # px a right click may move (else: turning)
 const XRAY_ALPHA := 0.35                # line and points through walls and ground
 const FOCUS_DIST := 140.0               # camera distance onto a selection
@@ -111,7 +112,7 @@ func setup(m: TrackEditorModel, v: EditorView, track_name: String) -> void:
 	# the first build at once (the height surface needs the path)
 	var out := _build(model.to_def(track_name), model, true)
 	_take(out)
-	ribbon = HeightRibbon.new(path)
+	ribbon = HeightRibbon.new(path)      # the plan: it stays for the whole stage
 	_retarget()
 
 
@@ -414,7 +415,7 @@ func _left_click(pos: Vector2, double: bool) -> void:
 	if hit == null:
 		return
 	if double:
-		var x := ribbon.x_near(hit[0])
+		var x := _x_of_hit(hit[0], hit[1])
 		var j := model.add_point(x, HeightSpline.height(model.points(), x))
 		if j >= 0:
 			# only added: a click on it selects it (and moves the camera)
@@ -453,27 +454,54 @@ func _drag_to(pos: Vector2) -> void:
 	dragged.emit()
 
 
-## Point under the screen position (-1 if none).
+## Point under the screen position (-1 if none). A point behind the road the
+## mouse is on does not count: at a crossing a click on the upper road must
+## not take a point of the road below (it shows through, but is not there).
 func _point_at(pos: Vector2) -> int:
 	var pts := model.points()
-	var best := -1
-	var best_d := PICK_PX
+	var near := []          # [screen distance, index] within PICK_PX
 	for i in pts.size():
 		var s: Variant = view.to_screen(point_pos(i))
 		if s == null:
 			continue
 		var d := (s as Vector2).distance_to(pos)
-		if d < best_d:
-			best_d = d
-			best = i
-	return best
+		if d < PICK_PX:
+			near.append([d, i])
+	if near.is_empty():
+		return -1
+	near.sort_custom(func(a, b): return a[0] < b[0])
+	var eye_pos: Vector3 = view.ray(pos)[0]
+	for c in near:
+		# visible: the ray from the eye to it meets no road before it (its
+		# own road lies just below it, behind it seen from the eye)
+		var p := point_pos(c[1])
+		var hit: Variant = _road_hit_ray(eye_pos, (p - eye_pos).normalized())
+		if hit == null or eye_pos.distance_to(hit[0]) > eye_pos.distance_to(p) - OCCLUDE_MARGIN:
+			return c[1]
+	return -1
+
+
+## Profile x of a point p on the road between sample i and the next one
+## (from _road_hit): on that very road - at a crossing not the other one,
+## however near its centre line is.
+func _x_of_hit(p: Vector3, i: int) -> float:
+	var j := (i + 1) % path.n
+	var a := path.center[i]
+	var ab := path.center[j] - a
+	var u := clampf((p - a).dot(ab) / ab.length_squared(), 0.0, 1.0) if ab.length_squared() > 1e-8 else 0.0
+	var xj := path.px[j] if j > 0 else path.profile_length     # the lap ends at the start
+	return lerpf(path.px[i], xj, u)
 
 
 ## The road under the screen position: [world point, sample index] or null.
 func _road_hit(pos: Vector2) -> Variant:
 	var r := view.ray(pos)
-	var from: Vector3 = r[0]
-	var dir: Vector3 = r[1]
+	return _road_hit_ray(r[0], r[1])
+
+
+## The first road a ray from `from` along dir meets: [world point, sample
+## index] or null.
+func _road_hit_ray(from: Vector3, dir: Vector3) -> Variant:
 	var best: Variant = null
 	var best_d := INF
 	for i in path.n:

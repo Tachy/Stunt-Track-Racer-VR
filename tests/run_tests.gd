@@ -1002,8 +1002,6 @@ func test_height_ribbon() -> void:
 	# nothing within the window: the vertical plane at the hint
 	var off: Variant = rb.hit(Vector3(-60, 20, -100), Vector3(1, 0, 0), 150.0, 10.0)
 	check(off != null and near(off.x, 100.0, 0.05) and near(off.y, 20.0, 0.05), "outside the window: the plane at the hint (%s)" % [off])
-	# a click on the road, 3 m beside the centre line
-	check(near(rb.x_near(path.center[i] + path.right[i] * 3.0), path.px[i], 0.5), "x of a click on the road")
 	check(near(rb.lap_distance(5.0, rb.length - 5.0), 10.0), "distance across the start")
 	# wall snap: WALL_SNAP near, 10 pixels' worth far away
 	check(near(HeightRibbon.wall_snap(10.0, 60.0, 1000.0), TrackEditorModel.WALL_SNAP), "wall snap near")

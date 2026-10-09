@@ -13,8 +13,7 @@ const HIT_WINDOW := 80.0
 
 var length := 0.0                       # profile length (x of the lap's end)
 var _xs := PackedFloat32Array()         # profile x of the centre line points ...
-var _ps := PackedVector2Array()         # ... their plan position (x, z) ...
-var _hs := PackedFloat32Array()         # ... and road height
+var _ps := PackedVector2Array()         # ... and their plan position (x, z)
 
 
 func _init(path: TrackPath) -> void:
@@ -24,11 +23,9 @@ func _init(path: TrackPath) -> void:
 			continue
 		_xs.append(path.px[i])
 		_ps.append(Vector2(path.center[i].x, path.center[i].z))
-		_hs.append(path.center[i].y)
 	# the lap closes: the end of the profile is the start again
 	_xs.append(length)
 	_ps.append(_ps[0])
-	_hs.append(_hs[0])
 
 
 ## Index k of the segment k..k+1 that x lies in.
@@ -121,23 +118,6 @@ func hit(from: Vector3, dir: Vector3, x_hint: float, window := HIT_WINDOW) -> Va
 	var q := from + dir * t2
 	var along := (q - p).dot(Vector3(tg.x, 0.0, tg.y))
 	return Vector2(clampf(x_hint + along, 0.0, length), q.y)
-
-
-## Profile x of a point on the road (a click on it): the nearest point of
-## the centre line (3D, so a crossing road above or below does not count).
-func x_near(p: Vector3) -> float:
-	var best := 0.0
-	var best_d := INF
-	for k in _xs.size() - 1:
-		var a := Vector3(_ps[k].x, _hs[k], _ps[k].y)
-		var b := Vector3(_ps[k + 1].x, _hs[k + 1], _ps[k + 1].y)
-		var ab := b - a
-		var u := clampf((p - a).dot(ab) / ab.length_squared(), 0.0, 1.0) if ab.length_squared() > 1e-8 else 0.0
-		var dist := p.distance_squared_to(a + ab * u)
-		if dist < best_d:
-			best_d = dist
-			best = lerpf(_xs[k], _xs[k + 1], u)
-	return best
 
 
 ## Metres that `pixels` cover at distance dist from a camera with vertical
