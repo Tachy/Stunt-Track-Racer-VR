@@ -273,7 +273,8 @@ func _crane_lift(c: PlayerCar, cr: Crane, s: float, lat: float, fallback_side: f
 	var f := _crane_frames(s, lat, side)
 	c.teleport(f[1])
 	c.hold(true)
-	cr.start(f[0], f[1], c.mass)
+	var hw := path.half_width[path.index_at_s(s)]
+	cr.start(f[0], f[1], c.mass, Vector2(-hw - lat, hw - lat))
 
 
 ## One step of the crane carrying c (no-op once dropped).

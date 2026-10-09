@@ -38,12 +38,13 @@ const AIR_DENSITY := 1.2          # kg/m3
 const LINK_FRICTION := 0.005      # m: friction torque in the links = this x chain tension
 
 ## Sequence: on the ground, pull the chain in, carry over the road (trolley,
-## without jerk; it sets off before the chain is all in), let the chain out
+## without jerk; it sets off TROLLEY_LEAD before the chain is all in), let the chain out
 ## (only where the road lies lower than the ground spot).
 const GROUND_GAP := 3.0           # car origin this far beside the road edge
 const WAIT_TIME := 0.6            # on the ground before the lift (chains tighten)
 const LIFT_TIME := 2.0
-const TROLLEY_START := 0.75       # share of the lift done when the trolley sets off
+const TROLLEY_LEAD := 2.0         # chain (m) still to pull in when the trolley sets off
+const CAR_HALF_WIDTH := 1.1       # dropped early only with the car all over the road
 ## Trolley run over the road (minimum jerk). The swing it leaves depends on
 ## this time against the pendulum's period (~4.8 s): 4 s leaves 35-70 deg,
 ## 7.5 s 4-11 deg (up to ~1 m sideways), 9.5 s (two periods) almost none.
@@ -71,8 +72,10 @@ var _t := 0.0                     # time since the sequence started
 var _plan_x: Array = []
 var _plan_c: Array = []
 var _total := 0.0
-var _over := false                # the car has swung over its drop pose once
+var _lagged := false              # the car has hung back behind the trolley
+var _swung := false               # ... and swung through below it since
 var _side := 1.0                  # side of the ground spot (crane x)
+var _road := Vector2(-INF, INF)   # the road (crane x) where the car may land
 var _pos := Vector2.ZERO          # trolley x (crane frame), chain length
 var _vel := Vector2.ZERO
 # pendulum: angle of the car from hanging straight down (towards +x), rate
@@ -163,13 +166,17 @@ func setup(target: Transform3D, ground: Transform3D) -> void:
 	_plan_x.clear()
 	_plan_c.clear()
 	_total = 0.0
-	var lift := start.y - CHAIN_LEN > 0.05
+	var pull := start.y - CHAIN_LEN
 	_plan(_plan_c, start.y, CHAIN_LEN, WAIT_TIME, LIFT_TIME, "cos")
-	var t_x := WAIT_TIME + (LIFT_TIME * TROLLEY_START if lift else 0.0)
+	# (the lift is a cosine move: TROLLEY_LEAD left at u = acos(2 lead / pull - 1) / pi)
+	var t_x := WAIT_TIME
+	if pull > TROLLEY_LEAD:
+		t_x += LIFT_TIME * acos(2.0 * TROLLEY_LEAD / pull - 1.0) / PI
 	_plan(_plan_x, g.x, 0.0, t_x, TROLLEY_TIME, "trolley")
 	_plan(_plan_c, CHAIN_LEN, hanging, t_x + TROLLEY_TIME, LIFT_TIME, "cos")
 	_total = maxf(_total, WAIT_TIME)
-	_over = false
+	_lagged = false
+	_swung = false
 	_x_range = Vector2(minf(g.x, 0.0), maxf(g.x, 0.0))
 	_build_structure(g, side)
 	_pos = start
@@ -236,9 +243,11 @@ static func _lattice(kit: MeshKit, base: Vector3, h: float, w: float, col: Color
 
 
 ## Car at ground (world pose beside the road), to be set down at target: the
-## lift starts. mass: the car's (kg).
-func start(target: Transform3D, ground: Transform3D, mass: float) -> void:
+## lift starts. mass: the car's (kg). road: the road's extent across (crane x,
+## from the target) - an early drop needs the car over it.
+func start(target: Transform3D, ground: Transform3D, mass: float, road := Vector2(-INF, INF)) -> void:
 	setup(target, ground)
+	_road = road
 	_mode = "lift"
 	_t = 0.0
 	_phi = 0.0
@@ -268,10 +277,16 @@ func arrived() -> bool:
 	return _mode == "lift" and _t >= _total
 
 
-## The car may be dropped: it has swung over its drop pose once (trolley
-## maybe still running, the car still moving sideways), or the crane is done.
+## The car may be dropped: it has swung through below the trolley once
+## (trolley maybe still running, the car still moving sideways) and hangs
+## over the road, or the crane is done.
 func droppable() -> bool:
-	return _mode == "lift" and (_over or _t >= _total)
+	if _mode != "lift":
+		return false
+	if _t >= _total:
+		return true
+	var cx := (_target.affine_inverse() * _car_xf.origin).x
+	return _swung and cx > _road.x + CAR_HALF_WIDTH and cx < _road.y - CAR_HALF_WIDTH
 
 
 func lifting() -> bool:
@@ -320,10 +335,12 @@ func step(dt: float) -> void:
 		_omega = 0.0 if absf(_omega) <= dw else _omega - signf(_omega) * dw
 		_phi += _omega * dt
 	_update_car()
-	if not _over and _t > WAIT_TIME:
-		# swung over the drop pose (across the road from where it came)
-		var cx := (_target.affine_inverse() * _car_xf.origin).x
-		_over = cx * _side <= 0.0
+	# the trolley pulls away: the car hangs back (towards where it came
+	# from), then swings through below the trolley (the rest position)
+	if _phi * _side > deg_to_rad(0.5):
+		_lagged = true
+	elif _lagged and _phi * _side <= 0.0:
+		_swung = true
 
 
 ## Trolley x and chain length (and their rates, kept in _pos/_vel) at time t;
