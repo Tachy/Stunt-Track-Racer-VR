@@ -49,15 +49,17 @@ var closure_error := 0.0
 var heading_error := 0.0
 
 var n := 0
-var s_arr := PackedFloat32Array()
+var s_arr := PackedFloat64Array()     # distance along the lap per sample (sample_s, 64 bit)
 var center := PackedVector3Array()
 var right := PackedVector3Array()
 var right_flat := PackedVector3Array()
 var up := PackedVector3Array()
 var forward := PackedVector3Array()
 var piece_of := PackedInt32Array()
-## Profile coordinate per sample (see profile_length).
-var px := PackedFloat32Array()
+## Profile coordinate per sample (see profile_length): 64 bit, exactly the x
+## the sample's height was taken at (sample_x) - compared with the spline's
+## walls it must fall on the same side the height did.
+var px := PackedFloat64Array()
 var road := PackedByteArray()
 var bridge_zone := PackedByteArray()
 ## Half road width per sample (original tracks: 4 m, own tracks: 5 m).
@@ -188,11 +190,28 @@ static func profile_value(profile: String, u: float) -> float:
 			return u * u * (3.0 - 2.0 * u)
 
 
-func piece_height(p: Dictionary, u: float) -> float:
+## Profile x of sample k of the m samples of piece p - the one place it is
+## worked out: length * k / m, not length * (k / m) (k / m is rarely exact in
+## binary: 400 * (57 / 400) = 56.99999999999999, a hair before a wall at 57,
+## while the sample's px became 57). Loops keep their start x.
+static func sample_x(p: Dictionary, k: int, m: int) -> float:
+	if p["type"] == "O":
+		return float(p["x0"])
+	return float(p["x0"]) + float(p["length"]) * k / m
+
+
+## Distance along the lap of sample k of the m samples of piece p (as
+## sample_x: length * k / m, exact at whole metres).
+static func sample_s(p: Dictionary, k: int, m: int) -> float:
+	return float(p["s0"]) + float(p["length"]) * k / m
+
+
+## Height of piece p at fraction u, profile x (spline tracks; sample_x).
+func piece_height(p: Dictionary, u: float, x: float) -> float:
 	if p["type"] == "O":
 		return float(p["h0"]) + _loop_point(p, u).y
 	if not spline.is_empty():
-		return HeightSpline.height(spline, float(p["x0"]) + float(p["length"]) * u)
+		return HeightSpline.height(spline, x)
 	var h0: float = p["h0"]
 	var h1: float = p["h1"]
 	return h0 + (h1 - h0) * profile_value(p["profile"], u) + float(p["bump"]) * sin(PI * u)
@@ -226,19 +245,20 @@ func _sample() -> void:
 		p["i0"] = s_arr.size()
 		for k in m:
 			var u := float(k) / m
-			var s: float = float(p["s0"]) + length * u
+			var s := sample_s(p, k, m)
 			var pd := _piece_pos(p, u)
 			# distribute any tiny closure error along the lap
 			var pos2: Vector2 = pd[0] - closure_vec * (s / total_length)
 			var dir2: Vector2 = pd[1]
-			var h := piece_height(p, u)
+			var x := sample_x(p, k, m)
+			var h := piece_height(p, u, x)
 			var rf := Vector3(dir2.rotated(PI * 0.5).x, 0.0, dir2.rotated(PI * 0.5).y)
 			s_arr.append(s)
 			center.append(Vector3(pos2.x, h, pos2.y))
 			right_flat.append(rf)
 			right.append(rf)
 			piece_of.append(pi_)
-			px.append(float(p["x0"]) + (0.0 if p["type"] == "O" else length * u))
+			px.append(x)
 			var in_bridge: bool = p["bridge"] and u >= BRIDGE_U0 and u < BRIDGE_U1
 			road.append(0 if (p["gap"] or in_bridge) else 1)
 			bridge_zone.append(1 if in_bridge else 0)
@@ -251,13 +271,18 @@ func _sample() -> void:
 	step.fill(0)
 	for k in range(1, spline.size() - 2):
 		if HeightSpline.is_wall(spline, k):
-			step[(_index_at_x(spline[k][0]) - 1 + n) % n] = 1
+			step[_lip_at_x(float(spline[k][0]))] = 1
 	steep.resize(n)
 	for i in n:
 		var j := (i + 1) % n
 		var d := Vector2(center[j].x - center[i].x, center[j].z - center[i].z).length()
 		var is_steep := absf(center[j].y - center[i].y) > 0.33 * maxf(d, 0.01)
 		steep[i] = 1 if is_steep and loop_mask[i] == 0 and loop_mask[j] == 0 and step[i] == 0 else 0
+
+
+## Last sample before profile x (at a wall: its top, the step starts there).
+func _lip_at_x(x: float) -> int:
+	return (_index_at_x(x) - 1 + n) % n
 
 
 ## First sample at or after profile x.
@@ -551,7 +576,7 @@ func _spline_pits() -> void:
 		if not walls[w][1]:
 			w += 1
 			continue
-		var lip := (_index_at_x(walls[w][0]) - 1 + n) % n
+		var lip := _lip_at_x(walls[w][0])
 		if w + 1 < walls.size() and not walls[w + 1][1] and walls[w + 1][0] - walls[w][0] <= PIT_MAX:
 			var landing := _index_at_x(walls[w + 1][0])
 			pits.append([lip, landing])

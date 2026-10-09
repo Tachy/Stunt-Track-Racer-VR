@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_league_track_features", "test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_height_ribbon", "test_editor_view_dome", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -1028,6 +1028,38 @@ func test_editor_view_dome() -> void:
 	check(v.to_screen(cam.position - dome.transform.basis.z * -50.0) == null, "behind: no screen point")
 	dome.free()
 	cam.free()
+
+
+## A wall right on a sample (whole metres on a 400 m start straight: there
+## 400 * (57 / 400) is 56.99999999999999, not 57 - TrackPath.sample_x) and
+## one between samples: the step is built on the segment the height jumps
+## on, not as a steep slope next to it.
+func test_wall_on_sample() -> void:
+	for wx in [57.0, 57.5, 120.0, 230.0]:
+		for down in [true, false]:
+			var m := TrackEditorModel.new()
+			m.set_start(Vector2(0, 0))
+			m.place_first(Vector2(0, -400))
+			for pc in [TrackEditorModel.curve("R", 90, 55), TrackEditorModel.straight(60), TrackEditorModel.curve("R", 90, 55),
+					TrackEditorModel.straight(400), TrackEditorModel.curve("R", 90, 55)]:
+				m.place(m.group_for(pc))
+			m.place(m.closing_group(), true)
+			var hi := 12.5
+			var lo := 6.0
+			m.heights = [[wx - 30.0, hi if down else lo, false, 0], [wx, hi if down else lo, false, 0],
+				[wx, lo if down else hi, false, 1], [wx + 40.0, lo if down else hi, false, 0]]
+			m._tidy_heights()
+			var p := TrackPath.new(m.to_def("t"))
+			var steps := []
+			for i in p.n:
+				if p.step[i] == 1:
+					steps.append(i)
+			var ok := steps.size() == 1
+			if ok:
+				var i: int = steps[0]
+				ok = absf(p.center[(i + 1) % p.n].y - p.center[i].y) > 5.0
+			check(ok, "wall at x %.1f (%s): one step on the jump (%s)" % [wx, "down" if down else "up", steps])
+			check(m.problems(p).filter(func(o): return o["kind"] == "steep").is_empty(), "wall at x %.1f (%s): not reported steep" % [wx, "down" if down else "up"])
 
 
 func _editor_oval() -> TrackEditorModel:

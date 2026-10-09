@@ -12,7 +12,7 @@ extends RefCounted
 const HIT_WINDOW := 80.0
 
 var length := 0.0                       # profile length (x of the lap's end)
-var _xs := PackedFloat32Array()         # profile x of the centre line points ...
+var _xs := PackedFloat64Array()         # profile x of the centre line points (as TrackPath.px) ...
 var _ps := PackedVector2Array()         # ... and their plan position (x, z)
 
 
