@@ -598,8 +598,9 @@ func _set_mode(m: String) -> void:
 		XrManager.free_look = false
 		_h3d = HeightEditor3D.new()
 		_h3d.level_eye = XrManager.xr_active
-		(world_parent if world_parent != null else get_parent()).add_child(_h3d)
 		_h3d.setup(model, view, track_name)
+		# deferred: the parent may still be setting up its children (VR host)
+		(world_parent if world_parent != null else get_parent()).add_child.call_deferred(_h3d)
 		_h3d.dragged.connect(func(): _info.text = _height_info())
 		_h3d.edited.connect(_update)
 		_h3d.selected.connect(_update)

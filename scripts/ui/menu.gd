@@ -228,7 +228,7 @@ func _screen_main(sc: PixelScreen) -> void:
 		{"label": Lang.t("LEAGUE"), "do": func(): open("league")},
 		{"label": Lang.t("PRACTICE"), "do": func(): open("practice")},
 		{"label": Lang.t("MULTIPLAYER"), "do": func(): open("online")},
-		{"label": Lang.t("TRACK EDITOR"), "do": func(): open_editor.emit(), "desktop": true},
+		{"label": Lang.t("TRACK EDITOR"), "do": func(): open_editor.emit()},
 		{"label": Lang.t("CALIBRATE WHEEL"), "do": func(): open("calibrate")},
 		{"label": Lang.t("SETTINGS"), "do": func(): open("settings")},
 		{"label": Lang.t("QUIT"), "do": func(): get_tree().quit()},

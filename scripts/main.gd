@@ -23,7 +23,9 @@ extends Node
 ##   --name=<name>       online player name for this run
 ##   --server=<host[:port]>  online server for this run (menu; not saved)
 ##   --car-photos        save close-ups of the car model, then quit
-##   --editor[=<name>]   open the track editor (desktop), optionally a saved track
+##   --editor[=<name>]   open the track editor, optionally a saved track
+##   --editor-heights    (with --editor) straight into the 3D height stage
+##   --editor-vr-screen  (with --editor) the VR screen panel on the desktop
 
 var current: Node
 var _args := {}
@@ -130,12 +132,17 @@ func show_menu(screen: String) -> void:
 	_swap(m)
 
 
-## Track editor (desktop only); file_id = a saved custom track to open.
+## Track editor; file_id = a saved custom track to open. In VR (or with
+## --editor-vr-screen, for tests on the desktop) on a panel in front of the
+## seat, with the mouse as a pointer on it.
 func show_editor(file_id := "") -> void:
 	var e := TrackEditor.new(file_id)
 	e.start_race.connect(_start_race)
 	e.leave.connect(func(): show_menu("main"))
-	_swap(e)
+	if XrManager.xr_active or _args.has("editor-vr-screen"):
+		_swap(VrEditorHost.new(e))
+	else:
+		_swap(e)
 
 
 func _start_race(req: Dictionary) -> void:
