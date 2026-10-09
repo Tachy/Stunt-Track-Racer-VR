@@ -8,7 +8,8 @@ extends Node3D
 ##   left click   a point: select and drag it (along the lap and up / down,
 ##                on the vertical surface over the plan - HeightRibbon);
 ##                the road: mark its piece (the camera stays put)
-##   double click the road: a new point there, dragged right away
+##   double click the road: a new point there (not selected: a click on it
+##                selects it)
 ##   right click  a point: delete it; dragged: turn the camera
 ##   wheel        camera distance
 ## The point logic is TrackEditorModel's (snapping to walls, slope limit,
@@ -23,7 +24,7 @@ signal edited
 signal selected
 
 const WALL_LINE := Color("#ffd400")     # vertical walls and their lower points
-const POINT_ON := Color("#4fd8ff")      # selected / hovered point
+const POINT_ON := Color("#4fd8ff")      # selected point
 const PIECE_ON := Color("#e0302a")      # selected piece (also in the plan)
 const PROBLEM_CROSSING := Color(1.0, 0.25, 0.2)
 const PROBLEM_STEEP := Color(1.0, 0.6, 0.1)
@@ -414,7 +415,11 @@ func _left_click(pos: Vector2, double: bool) -> void:
 		var x := ribbon.x_near(hit[0])
 		var j := model.add_point(x, HeightSpline.height(model.points(), x))
 		if j >= 0:
-			_start_drag(j, pos)
+			# only added: a click on it selects it (and moves the camera)
+			if point >= j:
+				point += 1       # the selected point keeps its place
+			_line_dirty = true
+			rebuild(true)
 			edited.emit()
 		return
 	select_piece(path.piece_of[hit[1]])
@@ -628,8 +633,10 @@ func _draw_points() -> void:
 		if (HeightSpline.is_wall(pts, i - 1) and float(pts[i][1]) < float(pts[i - 1][1])) \
 				or (HeightSpline.is_wall(pts, i) and float(pts[i][1]) < float(pts[i + 1][1])):
 			col = WALL_LINE      # the lower point of a wall
-		if i == point or i == _hover or i == _drag:
-			col = POINT_ON
+		if i == point or i == _drag:
+			col = POINT_ON       # blue: selected only
+		if i == _hover:
+			s *= 1.4             # under the mouse: a bit bigger
 		if pts[i][2]:
 			_diamond(kit, p, s * 0.75, col)
 		else:
