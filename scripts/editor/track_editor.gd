@@ -615,7 +615,6 @@ func _set_mode(m: String) -> void:
 			view = EditorView.new(XrManager.desktop_camera)
 		XrManager.free_look = false
 		_h3d = HeightEditor3D.new()
-		_h3d.level_eye = XrManager.xr_active or view.dome != null     # VR (or its test on the desktop)
 		_h3d.setup(model, view, track_name)
 		# deferred: the parent may still be setting up its children (VR host)
 		(world_parent if world_parent != null else get_parent()).add_child.call_deferred(_h3d)

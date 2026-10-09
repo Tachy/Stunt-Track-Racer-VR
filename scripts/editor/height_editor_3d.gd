@@ -57,8 +57,6 @@ var point := -1                   # selected point (index in model.points())
 var piece := -1                   # selected piece
 ## Problems of the built track: [{pos: plan point, kind, at: path point}].
 var problems: Array = []
-## VR keeps the eye level (only yaw); the desktop camera also pitches.
-var level_eye := false
 ## Where the camera turns around (the point double-clicked last or the piece
 ## picked in the navigation window; null: the whole track).
 var _pivot: Variant = null
@@ -325,14 +323,11 @@ func zoom(factor: float) -> void:
 
 
 func _place_camera() -> void:
+	# the eye looks at the pivot, turning up / down with it too (VR: the head
+	# looks around from there, 6DOF on top)
 	var e := eye()
 	var look := _c - e
-	var b: Basis
-	if level_eye:
-		var flat := Vector3(look.x, 0.0, look.z)
-		b = Basis.looking_at(flat if flat.length_squared() > 1e-4 else Vector3.FORWARD, Vector3.UP)
-	else:
-		b = Basis.looking_at(look if look.length_squared() > 1e-6 else Vector3.FORWARD, Vector3.UP)
+	var b := Basis.looking_at(look if look.length_squared() > 1e-6 else Vector3.FORWARD, Vector3.UP)
 	XrManager.set_base(Transform3D(b, e))
 
 

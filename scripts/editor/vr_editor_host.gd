@@ -7,8 +7,9 @@ extends Node3D
 ## The controls and the plan sit in the middle part (UI_PX); in the height
 ## stage the rest of the sphere is clear and a click there goes through to
 ## the 3D track - the mouse ray runs from the eye through the pointer
-## (EditorView). The sphere moves with the head's position and turns with
-## the seat (XrManager's base pose), after the camera has been placed.
+## (EditorView). The sphere is fixed to the XR rig at the seat's eye point:
+## it moves with the camera (in the height stage it circles the pivot with
+## it), and the head moves and turns freely inside it (6DOF).
 
 const DEG_PER_PX := 0.05
 const DOME_DEG := Vector2(160.0, 110.0)     # yaw, pitch range of the screen
@@ -34,7 +35,6 @@ var _last_press_pos := Vector2(-100, -100)
 
 func _init(e: TrackEditor) -> void:
 	name = "VrEditorHost"
-	process_priority = 100        # after the height editor has set the camera
 	editor = e
 	_px = (DOME_DEG / DEG_PER_PX).round()
 	cursor = _px * 0.5
@@ -51,8 +51,7 @@ func _init(e: TrackEditor) -> void:
 	_pointer = _Pointer.new()
 	viewport.add_child(_pointer)
 	dome = Node3D.new()
-	dome.name = "Dome"
-	add_child(dome)
+	dome.name = "EditorDome"     # goes on the XR rig (see _ready)
 	screen = MeshInstance3D.new()
 	screen.name = "Screen"
 	screen.mesh = _band_mesh()
@@ -67,7 +66,7 @@ func _init(e: TrackEditor) -> void:
 	screen.material_override = mat
 	screen.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	dome.add_child(screen)
-	editor.view = EditorView.new(XrManager.active_camera(), dome, DEG_PER_PX, _px)
+	editor.view = EditorView.new(XrManager.active_camera(), dome, DOME_RADIUS, DEG_PER_PX, _px)
 
 
 ## The band of the sphere the screen shows: u along the yaw, v down the
@@ -96,11 +95,14 @@ static func _band_mesh() -> ArrayMesh:
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	XrManager.set_base(Transform3D(Basis.IDENTITY, Vector3(0, 10, 0)))
+	# on the rig: it moves exactly with the camera, no frame late
+	XrManager.origin.add_child(dome)
 	_place()
 
 
 func _exit_tree() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	dome.queue_free()
 
 
 func _process(_dt: float) -> void:
@@ -108,14 +110,10 @@ func _process(_dt: float) -> void:
 	_pointer.position = cursor
 
 
-## The sphere around the eye (its position: the head moves in 6DOF), turned
-## with the seat only - level, so it does not tilt or swing with the head.
+## The sphere's centre is the seat's eye point (the base pose): on the rig
+## that is the recentre offset (VR; the desktop camera sits at the origin).
 func _place() -> void:
-	var b := XrManager.base_transform().basis
-	var fwd := -b.z
-	fwd.y = 0.0
-	var basis := Basis.looking_at(fwd.normalized() if fwd.length_squared() > 1e-6 else Vector3.FORWARD, Vector3.UP)
-	dome.global_transform = Transform3D(basis, XrManager.active_camera().global_position)
+	dome.transform = Settings.recenter_offset if XrManager.xr_active else Transform3D.IDENTITY
 
 
 func _input(event: InputEvent) -> void:

@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_league_track_features", "test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_height_ribbon", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_height_ribbon", "test_editor_view_dome", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -1006,6 +1006,28 @@ func test_height_ribbon() -> void:
 	# wall snap: WALL_SNAP near, 10 pixels' worth far away
 	check(near(HeightRibbon.wall_snap(10.0, 60.0, 1000.0), TrackEditorModel.WALL_SNAP), "wall snap near")
 	check(near(HeightRibbon.wall_snap(1000.0, 60.0, 1000.0), 10.0 * 2.0 * 1000.0 * tan(deg_to_rad(30.0)) / 1000.0), "wall snap far")
+
+
+## VR screen sphere: the head moved inside it (6DOF) - the mouse ray runs
+## from the eye through the pointer's spot on the sphere, and a world point
+## on that ray comes back to the same screen point.
+func test_editor_view_dome() -> void:
+	var dome := Node3D.new()
+	var cam := Camera3D.new()
+	dome.transform = Transform3D(Basis(Vector3.UP, 0.7) * Basis(Vector3.RIGHT, -0.4), Vector3(5, 20, -3))
+	cam.position = dome.position + Vector3(0.3, -0.1, 0.2)     # leaning aside
+	var v := EditorView.new(cam, dome, 2.0, 0.05, Vector2(3200, 2200))
+	for pos in [Vector2(1600, 1100), Vector2(900, 1500), Vector2(2800, 300)]:
+		var r := v.ray(pos)
+		var from: Vector3 = r[0]
+		var dir: Vector3 = r[1]
+		var through := (v.sphere_point(pos) - from).cross(dir).length()
+		var back: Variant = v.to_screen(from + dir * 150.0)
+		check(through < 1e-4 and back != null and (back as Vector2).distance_to(pos) < 0.05,
+			"dome ray at %s: through the pointer (%.5f), back to %s" % [pos, through, back])
+	check(v.to_screen(cam.position - dome.transform.basis.z * -50.0) == null, "behind: no screen point")
+	dome.free()
+	cam.free()
 
 
 func _editor_oval() -> TrackEditorModel:
