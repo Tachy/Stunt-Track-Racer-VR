@@ -96,12 +96,10 @@ func _build_static() -> void:
 	var tkit := MeshKit.new()
 	var road_faces := PackedVector3Array()
 	var wall_faces := PackedVector3Array()
+	# a vertical wall (pit, jump; path.step) is built upright by every kind
+	# of segment: open road, deck, cut and tunnel
 	for i in path.n:
-		# a vertical wall (pit, jump) is a step even where its foot reaches the
-		# ground or below (a cut): the tunnel pieces know no steps and would
-		# draw the drop as a slope
-		var is_step := path.road[i] == 1 and path.step[i] == 1 and path.deck[i] == 0
-		if not is_step and (_is_tunnel_segment(i) or _is_cut_segment(i)):
+		if _is_tunnel_segment(i) or _is_cut_segment(i):
 			_emit_tunnel_segment(tkit, road_faces, wall_faces, i)
 		else:
 			_emit_segment(kit, road_faces, wall_faces, i)
@@ -143,7 +141,7 @@ func _emit_segment(kit: MeshKit, road_faces: PackedVector3Array, wall_faces: Pac
 	var rj := path.center[j] + path.right[j] * path.tunnel_half_width(j)
 	if path.ground_floor[i] == 1 and path.ground_floor[j] == 1:
 		return     # pit floor on the ground: the ground is the road
-	if path.road[i] == 1 and path.step[i] == 1 and path.deck[i] == 0:
+	if path.road[i] == 1 and path.step[i] == 1:
 		_emit_step(kit, road_faces, wall_faces, [li, li_, ri_, ri], [lj, lj_, rj_, rj], i)
 		return
 	if path.road[i] == 1:
@@ -209,8 +207,12 @@ func _emit_step(kit: MeshKit, road_faces: PackedVector3Array, wall_faces: Packed
 		kit.quad(low_a[0], low_b[0], low_b[1], low_a[1], Palette.WALL_EDGE)
 		kit.quad(low_a[2], low_b[2], low_b[3], low_a[3], Palette.WALL_EDGE)
 		_road_faces(road_faces, low_a[0], low_b[0], low_b[3], low_a[3])
-		_wall(kit, wall_faces, low_a[0], low_b[0])
-		_wall(kit, wall_faces, low_a[3], low_b[3])
+		if path.deck[i] == 1:
+			# over another part of the track: a slab, no walls down to the ground
+			_slab(kit, wall_faces, low_a[0], low_b[0], low_a[3], low_b[3], path.up[i], path.up[(i + 1) % path.n])
+		else:
+			_wall(kit, wall_faces, low_a[0], low_b[0])
+			_wall(kit, wall_faces, low_a[3], low_b[3])
 	if path.ground_floor[floor_i] == 1:
 		# a gap down to the ground: the wall reaches the ground all across
 		low = high.map(func(v): return Vector3(v.x, 0.0, v.z))
@@ -242,6 +244,26 @@ func _emit_tunnel_segment(kit: MeshKit, road_faces: PackedVector3Array, wall_fac
 	var ri := path.center[i] + path.right[i] * path.half_width[i]
 	var lj := path.center[j] - path.right[j] * path.half_width[j]
 	var rj := path.center[j] + path.right[j] * path.half_width[j]
+	# a wall (pit, jump) in a cut or tunnel: the segment at the lower road's
+	# height (the road runs on under the higher end, as in _emit_step), the
+	# wall stands at the higher end across the tube
+	var wall_top := []          # the higher end's road corners (left, right)
+	var drop := Vector3.ZERO
+	if path.road[i] == 1 and path.step[i] == 1:
+		var dh := path.center[j].y - path.center[i].y
+		drop = Vector3(0.0, -absf(dh), 0.0)
+		if dh < 0.0:
+			wall_top = [ci[0], ci[1]]
+			ci = ci.map(func(v): return v + drop)
+			li += drop
+			ri += drop
+		else:
+			wall_top = [cj[0], cj[1]]
+			cj = cj.map(func(v): return v + drop)
+			lj += drop
+			rj += drop
+		kit.quad(wall_top[0], wall_top[1], wall_top[1] + drop, wall_top[0] + drop, Palette.JUMP_WALL)
+		wall_faces.append_array([wall_top[0], wall_top[1], wall_top[1] + drop, wall_top[0], wall_top[1] + drop, wall_top[0] + drop])
 	var col := _road_color(i).darkened(dim)
 	_road_quads(kit, li, lj, rj, ri, col)
 	kit.quad(ci[0], cj[0], lj, li, Palette.WALL_EDGE)   # pure white, also inside

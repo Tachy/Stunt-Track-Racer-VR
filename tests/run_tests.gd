@@ -1062,11 +1062,13 @@ func test_wall_on_sample() -> void:
 			check(m.problems(p).filter(func(o): return o["kind"] == "steep").is_empty(), "wall at x %.1f (%s): not reported steep" % [wx, "down" if down else "up"])
 
 
-## A wall down whose foot is above the ground, on it or below it (a cut):
-## every triangle of the built track that spans the drop stands upright
-## (the tunnel / cut pieces drew it as a slope).
+## A wall down whose foot is above the ground, on it, below it (a cut) and
+## one deep in a tunnel: every triangle of the built track that spans the
+## drop stands upright (the tunnel / cut pieces drew it as a slope).
 func test_wall_mesh_upright() -> void:
-	for foot in [6.0, 0.0, -3.0]:
+	for wall in [[13.0, 6.0], [13.0, 0.0], [13.0, -3.0], [-12.0, -25.0]]:
+		var top: float = wall[0]
+		var foot: float = wall[1]
 		var m := TrackEditorModel.new()
 		m.set_start(Vector2(0, 0))
 		m.place_first(Vector2(0, -400))
@@ -1075,7 +1077,7 @@ func test_wall_mesh_upright() -> void:
 			m.place(m.group_for(pc))
 		m.place(m.closing_group(), true)
 		var wx := 56.0
-		m.heights = [[30.0, 13.0, false, 0], [wx, 13.0, false, 0], [wx, foot, false, 1], [110.0, foot + 2.0, false, 0]]
+		m.heights = [[20.0, top, false, 0], [wx, top, false, 0], [wx, foot, false, 1], [110.0, foot + 2.0, false, 0]]
 		m._tidy_heights()
 		var p := TrackPath.new(m.to_def("t"))
 		var node := TrackNode.new().build(p)
@@ -1093,9 +1095,11 @@ func test_wall_mesh_upright() -> void:
 					var a1 := maxf(-v[t].z, maxf(-v[t + 1].z, -v[t + 2].z))
 					var nrm := (v[t + 1] - v[t]).cross(v[t + 2] - v[t])
 					# spanning the drop and not upright (walls and side walls are)
-					if lo < foot + 2.0 and hi > 11.0 and a1 > wx - 5.0 and a0 < wx + 5.0 							and nrm.length() > 1e-6 and absf(nrm.normalized().y) > 0.05:
+					if lo < foot + 2.0 and hi > top - 2.0 and a1 > wx - 5.0 and a0 < wx + 5.0 							and nrm.length() > 1e-6 and absf(nrm.normalized().y) > 0.05:
 						slanted += 1
-		check(slanted == 0, "wall down to %.0f m: drop built upright (%d slanted triangles)" % [foot, slanted])
+		var lip := p._lip_at_x(wx)
+		var kind := "tunnel" if p.tunnel[lip] == 1 else ("cut" if p.cut[(lip + 1) % p.n] == 1 else "open")
+		check(slanted == 0, "wall %.0f -> %.0f m (%s): drop built upright (%d slanted triangles)" % [top, foot, kind, slanted])
 		node.free()
 
 
