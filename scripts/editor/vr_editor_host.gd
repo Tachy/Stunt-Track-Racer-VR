@@ -1,25 +1,32 @@
 class_name VrEditorHost
 extends Node3D
-## The track editor in VR: its screen is a panel floating in front of the
-## seat (it follows XrManager's base pose, so in the height stage it travels
-## with the camera). Where the editor draws nothing the panel is clear: the
-## 3D height editor shows through it. The mouse is captured and moves a
-## pointer on the panel; its events (and the keys) go on to the editor's
-## viewport, and EditorView turns pointer positions into rays from the head.
+## The track editor in VR: its screen lies on a sphere around the eye
+## (DOME_RADIUS), a band of DOME_DEG degrees across the view - each pixel a
+## fixed angle (DEG_PER_PX). The mouse is captured and moves a pointer freely
+## over that band; its events (and the keys) go on to the editor's viewport.
+## The controls and the plan sit in the middle part (UI_PX); in the height
+## stage the rest of the sphere is clear and a click there goes through to
+## the 3D track - the mouse ray runs from the eye through the pointer
+## (EditorView). The sphere moves with the head's position and turns with
+## the seat (XrManager's base pose), after the camera has been placed.
 
-const PANEL_PX := Vector2i(1280, 720)       # 2.5 mm per pixel: readable in the headset
-const PANEL_SIZE := Vector2(3.2, 1.8)     # metres
-const PANEL_DIST := 2.2                   # in front of the eyes (m)
-const PANEL_DROP := 0.15                  # below eye height (m)
-const DOUBLE_CLICK_TIME := 0.4            # s
+const DEG_PER_PX := 0.05
+const DOME_DEG := Vector2(160.0, 110.0)     # yaw, pitch range of the screen
+const DOME_RADIUS := 2.0                     # metres from the eye
+const UI_PX := Vector2(1500, 860)            # controls and plan, in the middle
+const DOME_STEPS := Vector2i(48, 32)         # mesh resolution of the sphere band
+const DOUBLE_CLICK_TIME := 0.4               # s
 const DOUBLE_CLICK_PX := 8.0
 ## Keys that stay with the game (recenter, screenshot, frame rate).
 const PASS_KEYS := [KEY_F9, KEY_F10, KEY_F12]
 
 var editor: TrackEditor
 var viewport: SubViewport
-var panel: MeshInstance3D
-var cursor := Vector2(PANEL_PX) * 0.5
+## The sphere's frame (origin: the eye) and the band shown on it.
+var dome: Node3D
+var screen: MeshInstance3D
+var cursor := Vector2.ZERO
+var _px := Vector2.ZERO
 var _pointer: Control
 var _last_press_time := -10.0
 var _last_press_pos := Vector2(-100, -100)
@@ -27,26 +34,63 @@ var _last_press_pos := Vector2(-100, -100)
 
 func _init(e: TrackEditor) -> void:
 	name = "VrEditorHost"
+	process_priority = 100        # after the height editor has set the camera
 	editor = e
+	_px = (DOME_DEG / DEG_PER_PX).round()
+	cursor = _px * 0.5
 	viewport = SubViewport.new()
-	viewport.size = PANEL_PX
+	viewport.size = Vector2i(_px)
 	viewport.transparent_bg = true
 	viewport.disable_3d = true
 	viewport.gui_embed_subwindows = true
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	add_child(viewport)
 	editor.world_parent = self
+	editor.ui_rect = Rect2((_px - UI_PX) * 0.5, UI_PX)
 	viewport.add_child(editor)
 	_pointer = _Pointer.new()
 	viewport.add_child(_pointer)
-	panel = Panel3D.make_quad(PANEL_SIZE, viewport.get_texture())
-	var mat := panel.material_override as StandardMaterial3D
+	dome = Node3D.new()
+	dome.name = "Dome"
+	add_child(dome)
+	screen = MeshInstance3D.new()
+	screen.name = "Screen"
+	screen.mesh = _band_mesh()
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_texture = viewport.get_texture()
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.no_depth_test = true
 	mat.render_priority = 20
-	panel.name = "Screen"
-	add_child(panel)
-	editor.view = EditorView.new(XrManager.active_camera(), panel, PANEL_SIZE, Vector2(PANEL_PX))
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
+	screen.material_override = mat
+	screen.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	dome.add_child(screen)
+	editor.view = EditorView.new(XrManager.active_camera(), dome, DEG_PER_PX, _px)
+
+
+## The band of the sphere the screen shows: u along the yaw, v down the
+## pitch, both linear in the angle (as EditorView maps pixels).
+static func _band_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var corner := func(i: int, k: int) -> void:
+		var u := float(i) / DOME_STEPS.x
+		var v := float(k) / DOME_STEPS.y
+		var yaw := deg_to_rad((u - 0.5) * DOME_DEG.x)
+		var pitch := deg_to_rad((0.5 - v) * DOME_DEG.y)
+		st.set_uv(Vector2(u, v))
+		st.add_vertex(Vector3(sin(yaw) * cos(pitch), sin(pitch), -cos(yaw) * cos(pitch)) * DOME_RADIUS)
+	for i in DOME_STEPS.x:
+		for k in DOME_STEPS.y:
+			corner.call(i, k)
+			corner.call(i + 1, k)
+			corner.call(i + 1, k + 1)
+			corner.call(i, k)
+			corner.call(i + 1, k + 1)
+			corner.call(i, k + 1)
+	return st.commit()
 
 
 func _ready() -> void:
@@ -64,10 +108,14 @@ func _process(_dt: float) -> void:
 	_pointer.position = cursor
 
 
-## The panel in front of the seat (the base pose, not the head: it stays
-## put while the head looks around).
+## The sphere around the eye (its position: the head moves in 6DOF), turned
+## with the seat only - level, so it does not tilt or swing with the head.
 func _place() -> void:
-	panel.global_transform = XrManager.base_transform() * Transform3D(Basis.IDENTITY, Vector3(0, -PANEL_DROP, -PANEL_DIST))
+	var b := XrManager.base_transform().basis
+	var fwd := -b.z
+	fwd.y = 0.0
+	var basis := Basis.looking_at(fwd.normalized() if fwd.length_squared() > 1e-6 else Vector3.FORWARD, Vector3.UP)
+	dome.global_transform = Transform3D(basis, XrManager.active_camera().global_position)
 
 
 func _input(event: InputEvent) -> void:
@@ -75,7 +123,8 @@ func _input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
-		cursor = (cursor + mm.relative).clamp(Vector2.ZERO, Vector2(PANEL_PX) - Vector2.ONE)
+		# the pointer moves by angle: one mouse pixel = one screen pixel
+		cursor = (cursor + mm.relative).clamp(Vector2.ZERO, _px - Vector2.ONE)
 		var ev := InputEventMouseMotion.new()
 		ev.position = cursor
 		ev.global_position = cursor
@@ -110,7 +159,7 @@ func _input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 
-## The mouse pointer on the panel (an arrow with a dark rim).
+## The mouse pointer on the sphere (an arrow with a dark rim).
 class _Pointer extends Control:
 	func _init() -> void:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE

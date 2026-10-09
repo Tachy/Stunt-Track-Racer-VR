@@ -15,7 +15,7 @@ Stand 2026-10-09. Ersetzt den Profilstreifen (`HeightProfile`) und die kleine 3D
 Abweichungen vom Plan:
 - **Kein Physikkörper im Editor-Bau:** Strecke und Boden werden im Worker-Thread gebaut. Klicks auf die Fahrbahn trifft ein eigener Strahl-Dreieck-Test gegen die Fahrbahnstreifen statt eines Raycasts, und die Zugbrücke liegt im Editor flach als reines Mesh.
 - **VR-Augenhöhe waagrecht:** In VR dreht die Kamera nur um die Hochachse (`level_eye`). Die Neigung nach unten macht der Kopf selbst, ein schräg gestellter Horizont wäre unangenehm.
-- **Panel statt Kopf-HUD:** Die ganze Editor-Oberfläche ist ein Panel (1280 × 720 px auf 3,2 × 1,8 m, 2,2 m vor dem Sitz). Es folgt der Basis-Pose, nicht dem Kopf. In der Höhenstufe ist es außerhalb der Bedienelemente durchsichtig.
+- **Bildschirmkugel statt Kopf-HUD:** Zeiger und Oberfläche liegen auf einer Kugel mit 2 m Radius um das Auge, 160° × 110° breit, 0,05° pro Pixel. Die Maus bewegt den Zeiger frei über diesen Bereich, der Strahl geht vom Auge durch den Zeiger. Die Kugel sitzt an der Kopfposition und dreht nur mit dem Sitz (der Basis-Pose) mit. Bedienelemente und Grundriss liegen im mittleren Bereich (1500 × 860 px), in der Höhenstufe ist der Rest durchsichtig. Eine erste Fassung mit flachem Panel vor dem Sitz (sprang, war zu groß, Zeiger gefangen) wurde so ersetzt.
 - **Tests ohne Headset:** `--editor-vr-screen` zeigt das VR-Panel am Desktop.
 - **Steigungsprüfung schneller** (`HeightSpline.segment_hermite`), bei gleichen Abtastpunkten und gleichen Ergebnissen.
 - **Offen bleibt die Frage nach dem Profilstreifen** (siehe unten). Er ist entfernt.

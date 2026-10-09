@@ -77,6 +77,10 @@ var _mode_btn: Button
 ## how the screen maps to it (VR: the panel; else the desktop camera).
 var world_parent: Node
 var view: EditorView
+## VR: the part of the screen sphere in front for the controls and the plan
+## (empty: the whole window).
+var ui_rect := Rect2()
+var _bar: HBoxContainer
 
 var _name_edit: LineEdit
 var _load_menu: OptionButton
@@ -113,9 +117,17 @@ func _ready() -> void:
 	XrManager.set_fade(0.0)
 
 
+## Where the controls (and the plan) go: ui_rect, else the whole window.
+func _ui() -> Rect2:
+	return ui_rect if ui_rect.has_area() else Rect2(Vector2.ZERO, get_viewport_rect().size)
+
+
+## The plan stage fills _ui(); the height stage the whole window (in VR the
+## whole sphere: a click beside the controls goes to the 3D track).
 func _fit_window() -> void:
-	position = Vector2.ZERO
-	size = get_viewport_rect().size
+	var r := Rect2(Vector2.ZERO, get_viewport_rect().size) if _mode == "height" else _ui()
+	position = r.position
+	size = r.size
 	if _status:
 		_update()
 
@@ -141,7 +153,7 @@ func _bar_button(label: String, action: Callable, tint := Color.TRANSPARENT) -> 
 
 func _build_bar() -> void:
 	var bar := HBoxContainer.new()
-	bar.position = Vector2(10, 8)
+	_bar = bar
 	bar.add_theme_constant_override("separation", 8)
 	add_child(bar)
 	var title := Label.new()
@@ -166,7 +178,6 @@ func _build_bar() -> void:
 	bar.add_child(_bar_button("TEST DRIVE", _act_test))
 	bar.add_child(_bar_button("MENU", func(): leave.emit(), MENU_BUTTON))
 	_info = Label.new()
-	_info.position = Vector2(12, 44)
 	add_child(_info)
 	_status = Label.new()
 	add_child(_status)
@@ -316,10 +327,15 @@ func _delete_marked() -> void:
 
 func _update() -> void:
 	_mode_btn.text = Lang.t("PLAN") if _mode == "height" else Lang.t("HEIGHTS")
-	_status.position = Vector2(12, size.y - 34)
+	# the controls in _ui() (this node may be larger: the height stage)
+	var o := _ui().position - position
+	var us := _ui().size
+	_bar.position = o + Vector2(10, 8)
+	_info.position = o + Vector2(12, 44)
+	_status.position = o + Vector2(12, us.y - 34)
 	if _mode == "height":
-		_nav.position = Vector2(10, 72)
-		_nav.size = Vector2(maxf(220.0, size.x * 0.28), maxf(160.0, size.y * 0.34))
+		_nav.position = o + Vector2(10, 72)
+		_nav.size = Vector2(maxf(220.0, us.x * 0.28), maxf(160.0, us.y * 0.34))
 		_info.text = _height_info()
 		_status.text = Lang.t("CLICK = SELECT / DRAG POINT  DOUBLE CLICK = CAMERA TO POINT / NEW POINT ON ROAD  RIGHT CLICK = REMOVE  RIGHT MOUSE = TURN  WHEEL = DISTANCE  C KINK  UP/DOWN HEIGHT  B BRIDGE  ESC UNDO")
 		queue_redraw()
@@ -338,7 +354,6 @@ func _update() -> void:
 		_preview = model.candidate(_mouse_world, RADIUS_STICK_PX / zoom)
 	_crossings = model.crossings()
 	_info.text = _info_text()
-	_status.position = Vector2(12, size.y - 34)
 	if not model.has_start:
 		_status.text = Lang.t("CLICK THE START POINT")
 	elif model.start_dir == Vector2.ZERO:
@@ -599,7 +614,7 @@ func _set_mode(m: String) -> void:
 			view = EditorView.new(XrManager.desktop_camera)
 		XrManager.free_look = false
 		_h3d = HeightEditor3D.new()
-		_h3d.level_eye = XrManager.xr_active
+		_h3d.level_eye = XrManager.xr_active or view.dome != null     # VR (or its test on the desktop)
 		_h3d.setup(model, view, track_name)
 		# deferred: the parent may still be setting up its children (VR host)
 		(world_parent if world_parent != null else get_parent()).add_child.call_deferred(_h3d)
@@ -608,10 +623,12 @@ func _set_mode(m: String) -> void:
 		_h3d.selected.connect(_update)
 		_nav.model = model
 		_nav.editor3d = _h3d
-		_update()
+		_fit_window()      # the whole window / sphere now
 		_nav.fit()
 	else:
 		_close_3d()
+		if is_inside_tree():
+			_fit_window()
 
 
 func _close_3d() -> void:
