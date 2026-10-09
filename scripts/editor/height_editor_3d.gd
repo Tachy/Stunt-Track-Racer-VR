@@ -39,7 +39,8 @@ const ARROW_LENGTH := 8.0
 const ARROW_WIDTH := 5.5
 const POINT_PX := 11.0                  # point size on the screen (pixels)
 const PICK_PX := 12.0                   # a click this near a point takes it ...
-const OCCLUDE_MARGIN := 0.2             # ... unless a road hides it (by more than this, m)
+const OCCLUDE_MARGIN := 0.2             # ... unless another road hides it (by more than this, m;
+const OWN_ROAD := 20.0                  # a road this near along the lap is its own)
 const CLICK_SLOP := 4.0                 # px a right click may move (else: turning)
 const XRAY_ALPHA := 0.35                # line and points through walls and ground
 const FOCUS_DIST := 140.0               # camera distance onto a selection
@@ -472,11 +473,14 @@ func _point_at(pos: Vector2) -> int:
 	near.sort_custom(func(a, b): return a[0] < b[0])
 	var eye_pos: Vector3 = view.ray(pos)[0]
 	for c in near:
-		# visible: the ray from the eye to it meets no road before it (its
-		# own road lies just below it, behind it seen from the eye)
+		# hidden only by another part of the lap (a crossing): the ray from
+		# the eye to it meets a road before it that is far from it along the
+		# lap. Its own road around it (the upper end of its pit or jump) does
+		# not count - the point shows through there and is meant to be taken
 		var p := point_pos(c[1])
 		var hit: Variant = _road_hit_ray(eye_pos, (p - eye_pos).normalized())
-		if hit == null or eye_pos.distance_to(hit[0]) > eye_pos.distance_to(p) - OCCLUDE_MARGIN:
+		if hit == null or eye_pos.distance_to(hit[0]) > eye_pos.distance_to(p) - OCCLUDE_MARGIN \
+				or ribbon.lap_distance(_x_of_hit(hit[0], hit[1]), float(pts[c[1]][0])) < OWN_ROAD:
 			return c[1]
 	return -1
 
@@ -505,7 +509,9 @@ func _road_hit_ray(from: Vector3, dir: Vector3) -> Variant:
 	var best: Variant = null
 	var best_d := INF
 	for i in path.n:
-		if path.road[i] == 0:
+		# no road: gaps, and the vertical walls of pits and jumps (the
+		# segment across a wall would stand in the wall and hide its foot point)
+		if path.road[i] == 0 or path.step[i] == 1:
 			continue
 		var j := (i + 1) % path.n
 		var li := path.center[i] - path.right[i] * path.half_width[i]
