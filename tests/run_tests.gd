@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_league_track_features", "test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_height_ribbon", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -971,6 +971,43 @@ func test_editor_cut() -> void:
 	check(m2.has_gap() and not m2.closed and m2.tail.size() == m.tail.size(), "save/load with a gap")
 	m2.place(m2.closing_group(), true)
 	check(m2.closed and _closes(m2), "a loaded gap closes")
+
+
+## The height surface of the 3D height editor: profile x <-> plan, mouse
+## rays onto it, clicks on the road.
+func test_height_ribbon() -> void:
+	var m := _editor_oval()
+	var path := TrackPath.new(m.to_def("t"))
+	var rb := HeightRibbon.new(path)
+	check(near(rb.length, m.profile_length()), "ribbon length = profile length")
+	var i := path.n / 3
+	check(rb.plan_at(path.px[i]).distance_to(Vector2(path.center[i].x, path.center[i].z)) < 0.05, "plan_at follows the centre line")
+	check(rb.plan_at(0.0).distance_to(rb.plan_at(rb.length)) < 0.05, "the lap closes")
+	check(rb.plan_at(100.0).distance_to(Vector2(0, -100)) < 0.05, "start straight heads -z")
+	check(rb.tangent_at(100.0).distance_to(Vector2(0, -1)) < 0.01, "tangent along the lap")
+	# a ray across both long sides of the oval: the hint picks the side
+	var from := Vector3(-60, 20, -100)
+	var dir := Vector3(1, -0.05, 0).normalized()
+	var near_side: Vector2 = rb.hit(from, dir, 110.0)
+	check(near(near_side.x, 100.0, 0.05) and near(near_side.y, 17.0, 0.05), "ray hits the near side (%s)" % near_side)
+	var far_x := 250.0 + 55.0 * PI * 0.5 + 60.0 + 55.0 * PI * 0.5 + 150.0
+	var far_side: Vector2 = rb.hit(from, dir, far_x - 20.0)
+	check(near(far_side.x, far_x, 0.1) and near(far_side.y, 20.0 - 230.0 * 0.05, 0.1), "hint on the far side: the far side (%s)" % far_side)
+	# on a curve: the point the ray aims at comes back
+	var x_c := 250.0 + 40.0
+	var target := rb.point_at(x_c, 12.0)
+	var eye := target + Vector3(30, 25, -40)
+	var on_curve: Vector2 = rb.hit(eye, (target - eye).normalized(), x_c + 5.0)
+	check(near(on_curve.x, x_c, 0.05) and near(on_curve.y, 12.0, 0.05), "ray onto a curve (%s)" % on_curve)
+	# nothing within the window: the vertical plane at the hint
+	var off: Variant = rb.hit(Vector3(-60, 20, -100), Vector3(1, 0, 0), 150.0, 10.0)
+	check(off != null and near(off.x, 100.0, 0.05) and near(off.y, 20.0, 0.05), "outside the window: the plane at the hint (%s)" % [off])
+	# a click on the road, 3 m beside the centre line
+	check(near(rb.x_near(path.center[i] + path.right[i] * 3.0), path.px[i], 0.5), "x of a click on the road")
+	check(near(rb.lap_distance(5.0, rb.length - 5.0), 10.0), "distance across the start")
+	# wall snap: WALL_SNAP near, 10 pixels' worth far away
+	check(near(HeightRibbon.wall_snap(10.0, 60.0, 1000.0), TrackEditorModel.WALL_SNAP), "wall snap near")
+	check(near(HeightRibbon.wall_snap(1000.0, 60.0, 1000.0), 10.0 * 2.0 * 1000.0 * tan(deg_to_rad(30.0)) / 1000.0), "wall snap far")
 
 
 func _editor_oval() -> TrackEditorModel:
