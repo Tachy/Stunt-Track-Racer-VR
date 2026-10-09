@@ -461,10 +461,17 @@ func test_crane_chains() -> void:
 	var dt := 1.0 / 120.0
 	var t := 0.0
 	var max_phi := 0.0
+	var t_drop := -1.0
+	var overlap := false
 	while not crane.arrived() and t < 30.0:
 		crane.step(dt)
 		t += dt
 		max_phi = maxf(max_phi, absf(crane._phi))
+		if t_drop < 0.0 and crane.droppable():
+			t_drop = t
+		overlap = overlap or (crane._pos.x < 6.99 and crane._pos.y > Crane.CHAIN_LEN + 0.01)
+	check(overlap, "crane: the trolley sets off before the chain is all in")
+	check(t_drop > 0.0 and t_drop < t - 0.5, "crane: droppable once the car swings over the road (%.1f s, done %.1f s)" % [t_drop, t])
 	check(crane.arrived() and near(t, crane.duration(), 0.02), "crane: over the road after %.1f s" % t)
 	var off := crane.car_xform().origin - target.origin
 	check(off.length() < 2.0, "crane: the car hangs near its drop pose (%.2f m)" % off.length())

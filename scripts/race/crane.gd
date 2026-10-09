@@ -38,11 +38,12 @@ const AIR_DENSITY := 1.2          # kg/m3
 const LINK_FRICTION := 0.005      # m: friction torque in the links = this x chain tension
 
 ## Sequence: on the ground, pull the chain in, carry over the road (trolley,
-## without jerk), let the chain out (only where the road lies lower than the
-## ground spot).
+## without jerk; it sets off before the chain is all in), let the chain out
+## (only where the road lies lower than the ground spot).
 const GROUND_GAP := 3.0           # car origin this far beside the road edge
 const WAIT_TIME := 0.6            # on the ground before the lift (chains tighten)
 const LIFT_TIME := 2.0
+const TROLLEY_START := 0.75       # share of the lift done when the trolley sets off
 ## Trolley run over the road (minimum jerk). The swing it leaves depends on
 ## this time against the pendulum's period (~4.8 s): 4 s leaves 35-70 deg,
 ## 7.5 s 4-11 deg (up to ~1 m sideways), 9.5 s (two periods) almost none.
@@ -66,8 +67,12 @@ var _car_xf := Transform3D()      # car pose now (world)
 var _pivot := Vector3.ZERO        # trolley pivot now (world)
 var _jib_y := PIVOT               # trolley pivot height (crane frame), fixed
 var _t := 0.0                     # time since the sequence started
-var _segments: Array = []         # [{t0, dur, a (Vector2), b, kind}] in (trolley x, chain length)
+## Motion plan per axis (trolley x, chain length): [{t0, dur, a, b, kind}].
+var _plan_x: Array = []
+var _plan_c: Array = []
 var _total := 0.0
+var _over := false                # the car has swung over its drop pose once
+var _side := 1.0                  # side of the ground spot (crane x)
 var _pos := Vector2.ZERO          # trolley x (crane frame), chain length
 var _vel := Vector2.ZERO
 # pendulum: angle of the car from hanging straight down (towards +x), rate
@@ -154,13 +159,17 @@ func setup(target: Transform3D, ground: Transform3D) -> void:
 	_jib_y = maxf(g.y, 0.0) + PIVOT
 	var hanging := _jib_y - HOOK_HEIGHT       # chain length with the car at y = 0
 	var start := Vector2(g.x, _jib_y - g.y - HOOK_HEIGHT)
-	var up := Vector2(g.x, CHAIN_LEN)
-	_segments.clear()
+	_side = side
+	_plan_x.clear()
+	_plan_c.clear()
 	_total = 0.0
-	_add_segment(start, start, WAIT_TIME, "hold")
-	_add_segment(start, up, LIFT_TIME, "cos")
-	_add_segment(up, Vector2(0.0, CHAIN_LEN), TROLLEY_TIME, "trolley")
-	_add_segment(Vector2(0.0, CHAIN_LEN), Vector2(0.0, hanging), LIFT_TIME, "cos")
+	var lift := start.y - CHAIN_LEN > 0.05
+	_plan(_plan_c, start.y, CHAIN_LEN, WAIT_TIME, LIFT_TIME, "cos")
+	var t_x := WAIT_TIME + (LIFT_TIME * TROLLEY_START if lift else 0.0)
+	_plan(_plan_x, g.x, 0.0, t_x, TROLLEY_TIME, "trolley")
+	_plan(_plan_c, CHAIN_LEN, hanging, t_x + TROLLEY_TIME, LIFT_TIME, "cos")
+	_total = maxf(_total, WAIT_TIME)
+	_over = false
 	_x_range = Vector2(minf(g.x, 0.0), maxf(g.x, 0.0))
 	_build_structure(g, side)
 	_pos = start
@@ -168,11 +177,12 @@ func setup(target: Transform3D, ground: Transform3D) -> void:
 	visible = true
 
 
-func _add_segment(a: Vector2, b: Vector2, dur: float, kind: String) -> void:
-	if kind != "hold" and a.distance_to(b) < 0.05:
+## A move of one axis from a to b, starting at t0 (none if there is no way to go).
+func _plan(axis: Array, a: float, b: float, t0: float, dur: float, kind: String) -> void:
+	if absf(b - a) < 0.05:
 		return
-	_segments.append({"t0": _total, "dur": dur, "a": a, "b": b, "kind": kind})
-	_total += dur
+	axis.append({"t0": t0, "dur": dur, "a": a, "b": b, "kind": kind})
+	_total = maxf(_total, t0 + dur)
 
 
 ## Mast from the ground up to the jib, jib across the road with the counter
@@ -253,9 +263,15 @@ func duration() -> float:
 	return _total
 
 
-## The car hangs over the road (still swinging): it may be dropped.
+## The crane is done: the car hangs over the road (still swinging).
 func arrived() -> bool:
 	return _mode == "lift" and _t >= _total
+
+
+## The car may be dropped: it has swung over its drop pose once (trolley
+## maybe still running, the car still moving sideways), or the crane is done.
+func droppable() -> bool:
+	return _mode == "lift" and (_over or _t >= _total)
 
 
 func lifting() -> bool:
@@ -304,43 +320,49 @@ func step(dt: float) -> void:
 		_omega = 0.0 if absf(_omega) <= dw else _omega - signf(_omega) * dw
 		_phi += _omega * dt
 	_update_car()
+	if not _over and _t > WAIT_TIME:
+		# swung over the drop pose (across the road from where it came)
+		var cx := (_target.affine_inverse() * _car_xf.origin).x
+		_over = cx * _side <= 0.0
 
 
 ## Trolley x and chain length (and their rates, kept in _pos/_vel) at time t;
 ## returns their accelerations.
 func _eval(t: float) -> Vector2:
-	if _segments.is_empty():
-		return Vector2.ZERO
-	var seg: Dictionary = _segments[-1]
-	for s in _segments:
-		if t < float(s["t0"]) + float(s["dur"]):
-			seg = s
-			break
-	var a: Vector2 = seg["a"]
-	var b: Vector2 = seg["b"]
+	var x := _eval_axis(_plan_x, t, _pos.x)
+	var c := _eval_axis(_plan_c, t, _pos.y)
+	_pos = Vector2(x[0], c[0])
+	_vel = Vector2(x[1], c[1])
+	return Vector2(x[2], c[2])
+
+
+## [position, rate, acceleration] of one axis at t (keep: where it rests
+## before its first move).
+static func _eval_axis(axis: Array, t: float, keep: float) -> Array:
+	if axis.is_empty():
+		return [keep, 0.0, 0.0]
+	var seg: Dictionary = axis[0]
+	if t < float(seg["t0"]):
+		return [float(seg["a"]), 0.0, 0.0]
+	for sg in axis:
+		if t >= float(sg["t0"]):
+			seg = sg
+	var a: float = seg["a"]
+	var d: float = float(seg["b"]) - a
 	var dur: float = seg["dur"]
-	var u := clampf((t - float(seg["t0"])) / dur, 0.0, 1.0)
-	var d := a.distance_to(b)
-	var dir := (b - a) / d if d > 1e-6 else Vector2.ZERO
-	var x := 0.0
-	var v := 0.0
-	var ac := 0.0
-	if t < _total:
-		match seg["kind"]:
-			"cos":
-				x = d * (1.0 - cos(PI * u)) * 0.5
-				v = d * PI / (2.0 * dur) * sin(PI * u)
-				ac = d * PI * PI / (2.0 * dur * dur) * cos(PI * u)
-			"trolley":
-				# minimum jerk: no sudden change of acceleration
-				x = d * u * u * u * (10.0 - 15.0 * u + 6.0 * u * u)
-				v = d / dur * 30.0 * u * u * (1.0 - u) * (1.0 - u)
-				ac = d / (dur * dur) * 60.0 * u * (1.0 - u) * (1.0 - 2.0 * u)
-	else:
-		x = d
-	_pos = a + dir * x
-	_vel = dir * v
-	return dir * ac
+	var u := (t - float(seg["t0"])) / dur
+	if u >= 1.0:
+		return [a + d, 0.0, 0.0]
+	match seg["kind"]:
+		"trolley":
+			# minimum jerk: no sudden change of acceleration
+			return [a + d * u * u * u * (10.0 - 15.0 * u + 6.0 * u * u),
+				d / dur * 30.0 * u * u * (1.0 - u) * (1.0 - u),
+				d / (dur * dur) * 60.0 * u * (1.0 - u) * (1.0 - 2.0 * u)]
+		_:
+			return [a + d * (1.0 - cos(PI * u)) * 0.5,
+				d * PI / (2.0 * dur) * sin(PI * u),
+				d * PI * PI / (2.0 * dur * dur) * cos(PI * u)]
 
 
 func _place_pivot() -> void:

@@ -95,7 +95,7 @@ var _ap: AiDriver
 var _ground_dist := 0.0   # debug: path distance driven with wheel 0 on the ground
 var _accept_pressed := false
 var _ready_sent := false      # online: READY goes out once the car hangs over the road
-var _arrived_time := -1.0     # state_time the player's crane got over the road
+var _arrived_time := -1.0     # state_time the player's car may be dropped from
 
 const PAUSE_ITEMS := ["CONTINUE", "RETIRE"]
 
@@ -359,11 +359,11 @@ func _physics_process(dt: float) -> void:
 				XrManager.fade_to(1.0, 0.3).tween_callback(_crane_reposition)
 		"craned":
 			race_time += dt
-			var over := crane.arrived()
+			var over := crane.droppable()
 			message = Lang.t("GAS = DROP") if over else ""
 			if over and _arrived_time < 0.0:
 				_arrived_time = state_time
-			if over and state_time - _arrived_time > 0.3 and (car.input["throttle"] > 0.5 or _accept_pressed or (autopilot and state_time - _arrived_time > 1.0)):
+			if over and (car.input["throttle"] > 0.5 or _accept_pressed or (autopilot and state_time - _arrived_time > 1.0)):
 				_crane_drop(car, crane)
 				Sfx.play("drop", -6.0)
 				message = ""
