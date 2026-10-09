@@ -32,6 +32,9 @@ const LINE_WIDTH := 1.5
 const LINE_STEP := 2.0                  # profile metres per line piece ...
 const LINE_STEP_MAX := 10.0             # ... longer on long spline segments,
 const LINE_STEPS := 120.0               # at most this many per segment
+const ARROW_SPACING := 40.0             # driving direction: an arrow every ... m
+const ARROW_LENGTH := 8.0
+const ARROW_WIDTH := 5.5
 const POINT_PX := 11.0                  # point size on the screen (pixels)
 const PICK_PX := 12.0                   # a click this near a point takes it
 const CLICK_SLOP := 4.0                 # px a right click may move (else: turning)
@@ -548,7 +551,32 @@ func _segment_line(pts: Array, k: int) -> Array:
 		v.append_array(_band(prev, cur, ribbon.tangent_at(x).orthogonal(), LINE_WIDTH))
 		c.append_array(_six(line_color(h)))
 		prev = cur
+	# arrows in the driving direction, on a grid along the lap (they stay
+	# where they are while a point is dragged)
+	var xa := ceilf(x0 / ARROW_SPACING) * ARROW_SPACING
+	while xa < x1:
+		if xa - x0 > ARROW_LENGTH and x1 - xa > ARROW_LENGTH:
+			_arrow(v, c, herm, xa)
+		xa += ARROW_SPACING
 	return [v, c]
+
+
+## An arrow on the line at profile x, pointing along the lap (and up or
+## down the slope there), darker than the line.
+func _arrow(v: PackedVector3Array, c: PackedColorArray, herm: Array, x: float) -> void:
+	var lift := Vector3.UP * (LINE_LIFT + 0.08)
+	var h := HeightSpline.hermite_at(herm, x)
+	var p := ribbon.point_at(x, h) + lift
+	var d := (ribbon.point_at(x + 0.5, HeightSpline.hermite_at(herm, x + 0.5)) \
+		- ribbon.point_at(x - 0.5, HeightSpline.hermite_at(herm, x - 0.5))).normalized()
+	var n := ribbon.tangent_at(x).orthogonal()
+	var s := Vector3(n.x, 0.0, n.y) * ARROW_WIDTH * 0.5
+	var tip := p + d * ARROW_LENGTH * 0.6
+	var back := p - d * ARROW_LENGTH * 0.4
+	var notch := p - d * ARROW_LENGTH * 0.1     # an arrowhead with a notch
+	var col := line_color(h).darkened(0.8)
+	v.append_array(PackedVector3Array([back - s, tip, notch, notch, tip, back + s]))
+	c.append_array(_six(col))
 
 
 ## The selected piece (red strips along both road edges, the line stays
