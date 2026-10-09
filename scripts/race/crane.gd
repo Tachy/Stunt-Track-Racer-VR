@@ -44,8 +44,8 @@ const LINK_FRICTION := 0.005      # m: friction torque in the links = this x cha
 const GROUND_GAP := 3.0           # car origin this far beside the road edge
 const EDGE_CLEAR := 1.0           # wheels this high over the edge of a cut
 const WAIT_TIME := 0.6            # on the ground before the lift (chains tighten)
-const LIFT_TIME := 2.0
-const TROLLEY_LEAD := 2.0         # chain (m) still to pull in when the trolley sets off
+const LIFT_TIME := 5.0
+const TROLLEY_LEAD := 3.0         # chain (m) still to pull in when the trolley sets off
 const CAR_HALF_WIDTH := 1.1       # dropped early only with the car all over the road
 ## Trolley run over the road (minimum jerk). The swing it leaves depends on
 ## this time against the pendulum's period (~4.8 s): 4 s leaves 35-70 deg,
