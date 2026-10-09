@@ -1,5 +1,7 @@
 class_name TrackLibrary
-## The eight tracks, rebuilt freely in the spirit of the 1989 originals.
+## The tracks: the eight league tracks (rebuilt freely in the spirit of the
+## 1989 originals), the extra release tracks and the ones from the editor.
+## Official track data: server/official/<id>.json (see OFFICIAL_DIR).
 ## No original track data is used.
 ##
 ## Piece fields:
@@ -53,328 +55,46 @@ const DIVISION_TRACKS := {
 	1: ["bridge_run", "ski_flyer"],
 }
 
-const TRACKS := {
-	# Long figure eight with everything: camel humps, two jumps, a pit, the
-	# drawbridge, a loop and a 400 m tunnel with an S-bend that passes 17 m
-	# under the start straight. Straights solved so the lap closes exactly.
-	"grand_tour": {
-		"name": "Grand Tour", "theme": 0, "base": 8.0, "boost": 70, "boost_super": 55, "division": 1,
-		"pieces": [
-			{"t": "S", "l": 120},                                  # start straight
-			{"t": "S", "l": 80, "bump": 4.0},                      # camel humps
-			{"t": "S", "l": 80, "bump": 4.0},
-			{"t": "S", "l": 80, "bump": 3.0},
-			{"t": "L", "r": 50, "bank": -36.0},
-			{"t": "S", "l": 40},
-			{"t": "S", "l": 30, "h": 11.0, "p": "kick"},           # jump 1
-			{"t": "S", "l": 14, "h": 9.0, "p": "lin", "gap": true},
-			{"t": "S", "l": 30, "h": 8.0, "p": "land"},
-			{"t": "S", "l": 40},
-			{"t": "L", "r": 50, "bank": -36.0},
-			{"t": "S", "l": 30},
-			{"t": "S", "l": 30, "h": 10.0, "p": "kick"},           # pit
-			{"t": "S", "l": 3, "h": 4.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 12, "h": 4.0, "no_crane": true},
-			{"t": "S", "l": 3, "h": 9.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 40, "h": 8.0, "p": "land"},
-			{"t": "S", "l": 40},
-			{"t": "S", "l": 80, "h": 20.0},                        # up to the drawbridge
-			{"t": "S", "l": 40},
-			{"t": "S", "l": 60, "bridge": true},
-			{"t": "S", "l": 40},
-			{"t": "S", "l": 80, "h": 8.0},
-			{"t": "L", "r": 50, "bank": -36.0},
-			{"t": "S", "l": 40},
-			{"t": "S", "l": 100, "h": -9.0},                       # down into the cut
-			{"t": "S", "l": 200},                                  # tunnel, under the start straight
-			{"t": "R", "r": 70, "a": 35, "bank": 14.0},            # S-bend in the tunnel
-			{"t": "L", "r": 70, "a": 35, "bank": -14.0},
-			{"t": "S", "l": 120, "bump": 1.2},                     # waves in the tunnel
-			{"t": "S", "l": 60},
-			{"t": "S", "l": 100, "h": 6.0},                        # climb out
-			{"t": "S", "l": 30, "h": 9.0, "p": "kick"},            # jump 2
-			{"t": "S", "l": 14, "h": 7.0, "p": "lin", "gap": true},
-			{"t": "S", "l": 30, "h": 6.0, "p": "land"},
-			{"t": "S", "l": 40},
-			{"t": "R", "r": 50, "bank": 36.0},
-			{"t": "S", "l": 156.68},
-			{"t": "S", "l": 70},
-			{"t": "O", "side": 1},                                 # loop
-			{"t": "S", "l": 70},
-			{"t": "R", "r": 50, "bank": 36.0},
-			{"t": "S", "l": 549.3, "h": 8.0},
-			{"t": "R", "r": 50, "bank": 36.0},
-			{"t": "S", "l": 520},                                  # back over the tunnel
-		],
-	},
-	# Figure eight: the north-south branch crosses the east-west branch on a
-	# deck 10 m above it (underpass), two loops, a jump and steep banking.
-	"loop_and_jump": {
-		"name": "Loop and Jump", "theme": 5, "base": 12.0, "boost": 60, "boost_super": 45, "division": 1,
-		"pieces": [
-			{"t": "S", "l": 80},                                   # over the underpass
-			{"t": "S", "l": 30},
-			{"t": "S", "l": 110, "h": 7.0},
-			{"t": "L", "r": 40, "bank": -35.0},
-			{"t": "S", "l": 80},
-			{"t": "O", "side": 1},                                 # loop 1
-			{"t": "S", "l": 80},
-			{"t": "L", "r": 40, "bank": -35.0},
-			{"t": "S", "l": 10},
-			{"t": "S", "l": 30, "h": 9.5, "p": "kick"},
-			{"t": "S", "l": 12, "h": 8.0, "p": "lin", "gap": true},
-			{"t": "S", "l": 28.5, "h": 7.0, "p": "land"},
-			{"t": "S", "l": 25, "h": 6.0},                         # run-out after the jump
-			{"t": "L", "r": 40, "bank": -30.0, "h": 4.0},
-			{"t": "S", "l": 100, "h": 1.5},
-			{"t": "S", "l": 94.5},
-			{"t": "S", "l": 30},                                   # underpass
-			{"t": "S", "l": 110, "h": 8.0},
-			{"t": "R", "r": 40, "bank": 35.0},
-			{"t": "S", "l": 80},
-			{"t": "O", "side": -1},                                # loop 2
-			{"t": "S", "l": 80},
-			{"t": "R", "r": 40, "bank": 35.0},
-			{"t": "S", "l": 105.5, "bump": 4.0},
-			{"t": "R", "r": 40, "bank": 35.0},
-			{"t": "S", "l": 114.5, "h": 12.0},
-		],
-	},
-	"first_flight": {
-		"name": "First Flight", "theme": 0, "base": 6.0, "boost": 40, "boost_super": 30,
-		"pieces": [
-			{"t": "S", "l": 80},
-			{"t": "S", "l": 60},
-			{"t": "S", "l": 40, "h": 9.0, "p": "kick"},
-			{"t": "S", "l": 3, "h": 3.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 14, "h": 3.0, "no_crane": true},
-			{"t": "S", "l": 3, "h": 8.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 50, "h": 6.0, "p": "land"},
-			{"t": "S", "l": 80},
-			{"t": "R", "r": 40, "a": 120, "bank": 36.0},
-			{"t": "S", "l": 90},
-			{"t": "S", "l": 30, "h": 8.0, "p": "kick"},
-			{"t": "S", "l": 3, "h": 3.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 10, "h": 3.0, "no_crane": true},
-			{"t": "S", "l": 3, "h": 7.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 40, "h": 6.0, "p": "land"},
-			{"t": "S", "l": 154},
-			{"t": "R", "r": 40, "a": 120, "bank": 36.0},
-			{"t": "S", "l": 120, "bump": 3.0},
-			{"t": "S", "l": 210},
-			{"t": "R", "r": 40, "a": 120, "bank": 36.0},
-		],
-	},
-	"camel_back": {
-		"name": "Camel Back", "theme": 1, "base": 7.0, "boost": 40, "boost_super": 30,
-		"pieces": [
-			{"t": "S", "l": 60},
-			{"t": "S", "l": 80, "bump": 4.5},
-			{"t": "S", "l": 80, "bump": 4.5},
-			{"t": "S", "l": 70, "bump": 3.0},
-			{"t": "S", "l": 60},
-			{"t": "R", "r": 45, "a": 90, "bank": 36.0},
-			{"t": "S", "l": 126.43},
-			{"t": "R", "r": 50, "a": 45, "bank": 36.0},
-			{"t": "S", "l": 80},
-			{"t": "R", "r": 50, "a": 45, "bank": 36.0},
-			{"t": "S", "l": 40},
-			{"t": "S", "l": 80, "bump": 3.5},
-			{"t": "S", "l": 80, "bump": 3.5},
-			{"t": "S", "l": 60},
-			{"t": "S", "l": 28.43},
-			{"t": "R", "r": 45, "a": 90, "bank": 36.0},
-			{"t": "S", "l": 30, "h": 10.0, "p": "kick"},
-			{"t": "S", "l": 3, "h": 4.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 12, "h": 4.0, "no_crane": true},
-			{"t": "S", "l": 3, "h": 9.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 60, "h": 7.0, "p": "land"},
-			{"t": "S", "l": 80},
-			{"t": "R", "r": 45, "a": 90, "bank": 36.0},
-		],
-	},
-	"mega_ramp": {
-		"name": "Mega Ramp", "theme": 2, "base": 6.0, "boost": 45, "boost_super": 34,
-		"pieces": [
-			{"t": "S", "l": 60},
-			{"t": "S", "l": 90, "h": 14.0},
-			{"t": "S", "l": 30, "h": 16.0, "p": "kick"},
-			{"t": "S", "l": 3, "h": 4.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 18, "h": 4.0, "no_crane": true},
-			{"t": "S", "l": 3, "h": 14.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 90, "h": 7.0},
-			{"t": "S", "l": 60},
-			{"t": "R", "r": 45, "a": 90, "bank": 36.0},
-			{"t": "S", "l": 60},
-			{"t": "L", "r": 40, "a": 45, "bank": -30},
-			{"t": "S", "l": 50},
-			{"t": "R", "r": 40, "a": 45, "bank": 30},
-			{"t": "S", "l": 60},
-			{"t": "R", "r": 45, "a": 90, "bank": 36.0},
-			{"t": "S", "l": 30},
-			{"t": "S", "l": 90, "h": 15.0},
-			{"t": "S", "l": 30, "h": 17.0, "p": "kick"},
-			{"t": "S", "l": 3, "h": 4.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 16, "h": 4.0, "no_crane": true},
-			{"t": "S", "l": 3, "h": 15.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 90, "h": 6.0},
-			{"t": "S", "l": 150.79, "bump": 3.0},
-			{"t": "R", "r": 45, "a": 90, "bank": 36.0},
-			{"t": "S", "l": 211.92, "bump": 4.0},
-			{"t": "R", "r": 45, "a": 90, "bank": 36.0},
-		],
-	},
-	"stone_hopper": {
-		"name": "Stone Hopper", "theme": 3, "base": 7.0, "boost": 45, "boost_super": 34,
-		"pieces": [
-			{"t": "S", "l": 60},
-			{"t": "S", "l": 50, "h": 12.0},
-			{"t": "S", "l": 30, "h": 13.0, "p": "kick"},
-			{"t": "S", "l": 3, "h": 4.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 8, "h": 4.0, "no_crane": true},
-			{"t": "S", "l": 3, "h": 11.5, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 25},
-			{"t": "S", "l": 3, "h": 4.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 8, "h": 4.0, "no_crane": true},
-			{"t": "S", "l": 3, "h": 10.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 25},
-			{"t": "S", "l": 3, "h": 4.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 8, "h": 4.0, "no_crane": true},
-			{"t": "S", "l": 3, "h": 8.5, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 25},
-			{"t": "S", "l": 3, "h": 4.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 8, "h": 4.0, "no_crane": true},
-			{"t": "S", "l": 3, "h": 7.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 60},
-			{"t": "S", "l": 40},
-			{"t": "R", "r": 40, "a": 90, "bank": 36.0},
-			{"t": "S", "l": 73},
-			{"t": "L", "r": 40, "a": 90, "bank": -36.0},
-			{"t": "S", "l": 40},
-			{"t": "R", "r": 40, "a": 90, "bank": 36.0},
-			{"t": "S", "l": 60},
-			{"t": "R", "r": 45, "a": 90, "bank": 36.0},
-			{"t": "S", "l": 486, "bump": 4.0},
-			{"t": "R", "r": 45, "a": 90, "bank": 36.0},
-			{"t": "S", "l": 50},
-			{"t": "S", "l": 30, "h": 9.0, "p": "kick"},
-			{"t": "S", "l": 3, "h": 3.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 12, "h": 3.0, "no_crane": true},
-			{"t": "S", "l": 3, "h": 8.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 50, "h": 7.0, "p": "land"},
-			{"t": "S", "l": 60},
-			{"t": "R", "r": 45, "a": 90, "bank": 36.0},
-		],
-	},
-	"big_dipper": {
-		"name": "Big Dipper", "theme": 5, "base": 10.0, "boost": 50, "boost_super": 38,
-		"pieces": [
-			{"t": "S", "l": 60},
-			{"t": "S", "l": 80, "h": 26.0},
-			{"t": "S", "l": 80, "h": 12.0},
-			{"t": "S", "l": 70, "h": 20.0},
-			{"t": "R", "r": 40, "a": 90, "h": 20.0, "bank": 36.0},
-			{"t": "S", "l": 80, "h": 32.0},
-			{"t": "S", "l": 80, "h": 14.0},
-			{"t": "L", "r": 28, "a": 180, "h": 14.0, "bank": -38},
-			{"t": "S", "l": 70, "h": 24.0},
-			{"t": "S", "l": 90, "h": 10.0},
-			{"t": "S", "l": 70, "h": 18.0},
-			{"t": "R", "r": 28, "a": 180, "h": 18.0, "bank": 38},
-			{"t": "S", "l": 80, "h": 34.0},
-			{"t": "S", "l": 80, "h": 16.0},
-			{"t": "S", "l": 60, "h": 10.0},
-			{"t": "S", "l": 120, "bump": 5.0},
-			{"t": "R", "r": 40, "a": 90, "h": 10.0, "bank": 36.0},
-			{"t": "S", "l": 402, "bump": 8.0},
-			{"t": "R", "r": 40, "a": 90, "bank": 36.0},
-			{"t": "S", "l": 270},
-			{"t": "R", "r": 40, "a": 90, "bank": 36.0},
-		],
-	},
-	"the_tower": {
-		"name": "The Tower", "theme": 4, "base": 7.0, "boost": 50, "boost_super": 38,
-		"pieces": [
-			{"t": "S", "l": 60},
-			{"t": "S", "l": 120, "h": 18.0},
-			{"t": "S", "l": 30, "h": 21.0, "p": "kick"},
-			{"t": "S", "l": 3, "h": 6.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 12, "h": 6.0, "no_crane": true},
-			{"t": "S", "l": 3, "h": 22.5, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 3},
-			{"t": "S", "l": 3, "h": 6.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 14, "h": 6.0, "no_crane": true},
-			{"t": "S", "l": 3, "h": 20.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 80, "h": 8.0, "p": "land"},
-			{"t": "S", "l": 50},
-			{"t": "R", "r": 40, "a": 135, "bank": 36.0},
-			{"t": "S", "l": 294.91, "bump": 4.0},
-			{"t": "R", "r": 45, "a": 45, "bank": 36.0},
-			{"t": "S", "l": 168.93, "bump": 3.0},
-			{"t": "R", "r": 45, "a": 90, "bank": 36.0},
-			{"t": "S", "l": 70, "h": 12.0},
-			{"t": "S", "l": 70, "h": 7.0},
-			{"t": "S", "l": 60},
-			{"t": "R", "r": 45, "a": 90, "bank": 36.0},
-		],
-	},
-	"bridge_run": {
-		"name": "Bridge Run", "theme": 3, "base": 8.0, "boost": 55, "boost_super": 42,
-		"pieces": [
-			{"t": "S", "l": 60},
-			{"t": "S", "l": 80, "h": 20.0},
-			{"t": "S", "l": 40},
-			{"t": "S", "l": 60, "bridge": true},
-			{"t": "S", "l": 40},
-			{"t": "S", "l": 80, "h": 9.0},
-			{"t": "R", "r": 45, "a": 60, "bank": 36.0},
-			{"t": "S", "l": 60},
-			{"t": "S", "l": 30, "h": 12.0, "p": "kick"},
-			{"t": "S", "l": 3, "h": 4.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 14, "h": 4.0, "no_crane": true},
-			{"t": "S", "l": 3, "h": 11.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 50, "h": 9.0, "p": "land"},
-			{"t": "S", "l": 40},
-			{"t": "R", "r": 45, "a": 60, "bank": 36.0},
-			{"t": "S", "l": 80},
-			{"t": "R", "r": 45, "a": 60, "bank": 36.0},
-			{"t": "S", "l": 370, "bump": 4.0},
-			{"t": "R", "r": 45, "a": 60, "bank": 36.0},
-			{"t": "S", "l": 50},
-			{"t": "S", "l": 30, "h": 12.0, "p": "kick"},
-			{"t": "S", "l": 3, "h": 4.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 14, "h": 4.0, "no_crane": true},
-			{"t": "S", "l": 3, "h": 11.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 50, "h": 8.0, "p": "land"},
-			{"t": "S", "l": 40},
-			{"t": "R", "r": 45, "a": 60, "bank": 36.0},
-			{"t": "S", "l": 90},
-			{"t": "R", "r": 45, "a": 60, "bank": 36.0},
-		],
-	},
-	"ski_flyer": {
-		"name": "Ski Flyer", "theme": 4, "base": 8.0, "boost": 55, "boost_super": 42,
-		"pieces": [
-			{"t": "S", "l": 50},
-			{"t": "S", "l": 130, "h": 45.0},
-			{"t": "S", "l": 25},
-			{"t": "S", "l": 70, "h": 26.0},
-			{"t": "S", "l": 25, "h": 28.0, "p": "kick"},
-			{"t": "S", "l": 3, "h": 21.0, "p": "lin", "no_crane": true},
-			{"t": "S", "l": 110, "h": 8.0},
-			{"t": "S", "l": 60},
-			{"t": "R", "r": 45, "a": 90, "bank": 36.0},
-			{"t": "S", "l": 111.21, "bump": 5.0},
-			{"t": "R", "r": 45, "a": 135, "bank": 36.0},
-			{"t": "S", "l": 60},
-			{"t": "L", "r": 45, "a": 45, "bank": -30},
-			{"t": "S", "l": 324.51, "bump": 4.0},
-			{"t": "R", "r": 45, "a": 45, "bank": 30},
-			{"t": "S", "l": 60},
-			{"t": "R", "r": 45, "a": 135, "bank": 36.0},
-		],
-	},
-}
+## The official tracks (the league and the extra release tracks) live in
+## server/official/<id>.json, in the editor's format: "def" is what the
+## game builds, the rest lets the track editor load it (admin mode). The
+## online server embeds the very same files.
+const OFFICIAL_DIR := "res://server/official"
+## Whole-number fields of a definition.
+const INT_FIELDS := ["theme", "boost", "boost_super", "division"]
+
+## id -> definition of every official track (loaded once).
+static var TRACKS: Dictionary = _load_official()
+
+
+static func official_path(id: String) -> String:
+	return OFFICIAL_DIR.path_join(id + ".json")
+
+
+## The editor file of an official track ({} if missing).
+static func load_official(id: String) -> Dictionary:
+	var text := FileAccess.get_file_as_string(official_path(id))
+	var data = JSON.parse_string(text) if text != "" else null
+	return data if data is Dictionary else {}
+
+
+static func is_official(id: String) -> bool:
+	return TRACKS.has(id)
+
+
+static func _load_official() -> Dictionary:
+	var out := {}
+	for id in ORDER + CUSTOM:
+		var data := load_official(id)
+		if data.get("def") is Dictionary:
+			var def: Dictionary = data["def"]
+			for k in INT_FIELDS:      # JSON knows no integers
+				if def.has(k):
+					def[k] = int(def[k])
+			out[id] = def
+		else:
+			push_error("[TrackLibrary] official track missing or broken: %s" % official_path(id))
+	return out
 
 
 ## Tracks built in the editor live in user://tracks/<name>.json; their id is
@@ -476,7 +196,7 @@ static func division_of(id: String) -> int:
 	if is_custom(id) or id == SHARED_ID:
 		return 1
 	if TRACKS.has(id) and TRACKS[id].has("division"):
-		return TRACKS[id]["division"]
+		return int(TRACKS[id]["division"])
 	for div in DIVISION_TRACKS:
 		if id in DIVISION_TRACKS[div]:
 			return div
