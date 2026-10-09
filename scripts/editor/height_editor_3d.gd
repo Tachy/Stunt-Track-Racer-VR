@@ -29,7 +29,9 @@ const PROBLEM_STEEP := Color(1.0, 0.6, 0.1)
 const PREVIEW_RATE := 4.0               # road rebuilds per second while dragging
 const LINE_LIFT := 0.35                 # the line above the road (m)
 const LINE_WIDTH := 1.5
-const LINE_STEP := 2.0                  # profile metres per line segment
+const LINE_STEP := 2.0                  # profile metres per line piece ...
+const LINE_STEP_MAX := 10.0             # ... longer on long spline segments,
+const LINE_STEPS := 120.0               # at most this many per segment
 const POINT_PX := 11.0                  # point size on the screen (pixels)
 const PICK_PX := 12.0                   # a click this near a point takes it
 const CLICK_SLOP := 4.0                 # px a right click may move (else: turning)
@@ -81,6 +83,10 @@ var _rebuild_t := 0.0
 var _line_mesh := ArrayMesh.new()
 var _point_mesh := ArrayMesh.new()
 var _line_dirty := true
+var _static_dirty := true        # selected piece / problems changed
+var _static_v := PackedVector3Array()
+var _static_c := PackedColorArray()
+var _seg_cache: Array = []         # [corners, colours] of the line per spline segment
 
 
 func setup(m: TrackEditorModel, v: EditorView, track_name: String) -> void:
@@ -166,6 +172,7 @@ func _take(out: Dictionary) -> void:
 	if out.has("problems"):
 		problems = out["problems"]
 	_line_dirty = true
+	_static_dirty = true
 
 
 ## The model changed outside (keys, undo): line, road and camera follow.
@@ -230,6 +237,7 @@ func select_point(i: int) -> void:
 	if i >= 0:
 		piece = _piece_at_x(float(model.points()[i][0]))
 	_line_dirty = true
+	_static_dirty = true
 	_retarget()
 	selected.emit()
 
@@ -238,6 +246,7 @@ func select_piece(k: int) -> void:
 	piece = k
 	point = -1
 	_line_dirty = true
+	_static_dirty = true
 	_retarget()
 	selected.emit()
 
@@ -466,38 +475,86 @@ func _road_hit(pos: Vector2) -> Variant:
 
 # --- overlay ------------------------------------------------------------------------------
 
-## Flat band from a to b, width w across the plan normal n.
-static func _band(kit: MeshKit, a: Vector3, b: Vector3, n: Vector2, w: float, col: Color) -> void:
+## The six corners of a flat band from a to b, w wide across the plan
+## normal n (unlit overlay: no normals needed).
+static func _band(a: Vector3, b: Vector3, n: Vector2, w: float) -> PackedVector3Array:
 	var s := Vector3(n.x, 0.0, n.y) * w * 0.5
-	kit.quad(a - s, b - s, b + s, a + s, col)
+	return PackedVector3Array([a - s, b - s, b + s, a - s, b + s, a + s])
 
 
-## The height line (walls yellow), the selected piece, the problems.
+static func _six(col: Color) -> PackedColorArray:
+	return PackedColorArray([col, col, col, col, col, col])
+
+
+## The height line (walls yellow) and the selected piece and the problems
+## (kept until they change). The line is kept per spline segment: while a
+## point is dragged only the segments its move reaches are drawn anew.
 func _draw_line() -> void:
-	var kit := MeshKit.new()
+	if _static_dirty:
+		_static_dirty = false
+		_draw_static()
 	var pts := model.points()
-	var length := ribbon.length
-	var seg := 0
-	var x := 0.0
-	var prev := ribbon.point_at(0.0, float(pts[0][1])) + Vector3.UP * LINE_LIFT
-	while x < length:
-		x = minf(x + LINE_STEP, length)
-		while seg < pts.size() - 2 and x >= float(pts[seg + 1][0]):
-			if HeightSpline.is_wall(pts, seg + 1):
-				var wx := float(pts[seg + 1][0])
-				var n := ribbon.tangent_at(wx).orthogonal()
-				var top := ribbon.point_at(wx, HeightSpline.segment_height(pts, seg, wx)) + Vector3.UP * LINE_LIFT
-				var foot := ribbon.point_at(wx, float(pts[seg + 2][1])) + Vector3.UP * LINE_LIFT
-				_band(kit, prev, top, n, LINE_WIDTH, line_color(top.y))
-				_band(kit, top, foot, n, LINE_WIDTH, WALL_LINE)
-				prev = foot
-			seg += 1
-		var h := HeightSpline.segment_height(pts, seg, x)
-		var cur := ribbon.point_at(x, h) + Vector3.UP * LINE_LIFT
-		_band(kit, prev, cur, ribbon.tangent_at(x).orthogonal(), LINE_WIDTH, line_color(h))
+	var nseg := pts.size() - 1
+	var first := 0
+	var last := nseg - 1
+	if _drag >= 0 and _seg_cache.size() == nseg:
+		# point i changes the tangents at i-1 .. i+1: segments i-2 .. i+1
+		first = maxi(0, _drag - 2)
+		last = mini(nseg - 1, _drag + 1)
+	else:
+		_seg_cache.resize(nseg)
+	for k in range(first, last + 1):
+		_seg_cache[k] = _segment_line(pts, k)
+	var v := PackedVector3Array()
+	var c := PackedColorArray()
+	for s in _seg_cache:
+		v.append_array(s[0])
+		c.append_array(s[1])
+	v.append_array(_static_v)
+	c.append_array(_static_c)
+	_line_mesh.clear_surfaces()
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = v
+	arrays[Mesh.ARRAY_COLOR] = c
+	_line_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+
+
+## The line along spline segment k (a wall: the yellow vertical one), as
+## [corners, colours].
+func _segment_line(pts: Array, k: int) -> Array:
+	var v := PackedVector3Array()
+	var c := PackedColorArray()
+	var lift := Vector3.UP * LINE_LIFT
+	var x0 := float(pts[k][0])
+	var x1 := float(pts[k + 1][0])
+	if HeightSpline.is_wall(pts, k):
+		var n := ribbon.tangent_at(x0).orthogonal()
+		v.append_array(_band(ribbon.point_at(x0, float(pts[k][1])) + lift, ribbon.point_at(x0, float(pts[k + 1][1])) + lift, n, LINE_WIDTH))
+		c.append_array(_six(WALL_LINE))
+		return [v, c]
+	var herm := HeightSpline.segment_hermite(pts, k)
+	# long segments in longer steps (at most LINE_STEPS of them): smooth
+	# enough, and quick to draw anew while dragging
+	var step := clampf((x1 - x0) / LINE_STEPS, LINE_STEP, LINE_STEP_MAX)
+	var x := x0
+	var prev := ribbon.point_at(x0, HeightSpline.hermite_at(herm, x0)) + lift
+	while x < x1 - 1e-4:
+		# on a grid along the lap (rounding must not keep x where it is)
+		var nx := (floorf(x / step + 1e-6) + 1.0) * step
+		x = minf(nx if nx > x + 1e-3 else x + step, x1)
+		var h := HeightSpline.hermite_at(herm, x)
+		var cur := ribbon.point_at(x, h) + lift
+		v.append_array(_band(prev, cur, ribbon.tangent_at(x).orthogonal(), LINE_WIDTH))
+		c.append_array(_six(line_color(h)))
 		prev = cur
-	# the selected piece: red strips along both road edges (the line stays
-	# visible between them)
+	return [v, c]
+
+
+## The selected piece (red strips along both road edges, the line stays
+## visible between them) and rings around the problems.
+func _draw_static() -> void:
+	var kit := MeshKit.new()
 	if piece >= 0 and piece < path.pieces.size():
 		var pc: Dictionary = path.pieces[piece]
 		for i in range(int(pc["i0"]), int(pc["i1"])):
@@ -510,16 +567,15 @@ func _draw_line() -> void:
 				var b_i := a_i - path.right[i] * side * 1.6
 				var b_j := a_j - path.right[j] * side * 1.6
 				kit.quad(a_i, a_j, b_j, b_i, PIECE_ON)
-	# problems: rings around the spot
 	for o in problems:
-		var c: Vector3 = o["at"]
+		var at: Vector3 = o["at"]
 		var ring := PackedVector3Array()
 		for k in 24:
 			var a := TAU * k / 24.0
-			ring.append(c + Vector3(cos(a), 0.0, sin(a)) * TrackPath.ROAD_WIDTH * 1.2 + Vector3.UP * 1.0)
+			ring.append(at + Vector3(cos(a), 0.0, sin(a)) * TrackPath.ROAD_WIDTH * 1.2 + Vector3.UP * 1.0)
 		kit.tube(ring, 0.5, 4, PROBLEM_CROSSING if o["kind"] == "crossing" else PROBLEM_STEEP, true)
-	_line_mesh.clear_surfaces()
-	kit.build(_line_mesh)
+	_static_v = kit.verts
+	_static_c = kit.colors
 
 
 ## The points: squares (corners: diamonds) of a constant size on the screen.

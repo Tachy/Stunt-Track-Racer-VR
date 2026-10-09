@@ -667,10 +667,11 @@ static func _max_slope(pts: Array, x0: float, x1: float) -> float:
 			continue
 		var x := maxf(a, x0)
 		var end := minf(b, x1)
-		var prev := HeightSpline.segment_height(pts, i, x)
+		var seg := HeightSpline.segment_hermite(pts, i)     # once per segment
+		var prev := HeightSpline.hermite_at(seg, x)
 		while x < end - 1e-6:
 			var nx := minf(x + 1.0, end)
-			var h := HeightSpline.segment_height(pts, i, nx)
+			var h := HeightSpline.hermite_at(seg, nx)
 			m = maxf(m, absf(h - prev) / maxf(nx - x, 0.01))
 			prev = h
 			x = nx

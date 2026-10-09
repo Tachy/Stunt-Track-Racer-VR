@@ -65,6 +65,12 @@ static func height(pts: Array, x: float) -> float:
 ## Height on segment i -> i+1 at x (clamped to the segment). The point at
 ## the top or foot of a wall acts as a corner on that side.
 static func segment_height(pts: Array, i: int, x: float) -> float:
+	return hermite_at(segment_hermite(pts, i), x)
+
+
+## The Hermite segment i -> i+1 as [x0, width, h0, h1, tangent0, tangent1]
+## (for evaluating it many times: hermite_at).
+static func segment_hermite(pts: Array, i: int) -> Array:
 	var a: Array = pts[i]
 	var b: Array = pts[i + 1]
 	var w := maxf(float(b[0]) - float(a[0]), 0.01)
@@ -77,8 +83,14 @@ static func segment_height(pts: Array, i: int, x: float) -> float:
 		ma = 2.0 * sec - mb
 	elif cb and not ca:
 		mb = 2.0 * sec - ma
-	var u := clampf((x - float(a[0])) / w, 0.0, 1.0)
+	return [float(a[0]), w, float(a[1]), float(b[1]), ma, mb]
+
+
+## Height of a segment from segment_hermite at x (clamped to it).
+static func hermite_at(c: Array, x: float) -> float:
+	var w: float = c[1]
+	var u := clampf((x - float(c[0])) / w, 0.0, 1.0)
 	var u2 := u * u
 	var u3 := u2 * u
-	return (2.0 * u3 - 3.0 * u2 + 1.0) * float(a[1]) + (u3 - 2.0 * u2 + u) * w * ma \
-		+ (-2.0 * u3 + 3.0 * u2) * float(b[1]) + (u3 - u2) * w * mb
+	return (2.0 * u3 - 3.0 * u2 + 1.0) * float(c[2]) + (u3 - 2.0 * u2 + u) * w * float(c[4]) \
+		+ (-2.0 * u3 + 3.0 * u2) * float(c[3]) + (u3 - u2) * w * float(c[5])
