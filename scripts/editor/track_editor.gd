@@ -21,7 +21,8 @@ extends Control
 ## height). Click a point: it is selected (blue) and can be dragged (along
 ## the lap and up / down); double click on it: the camera turns around it;
 ## double click on the road: a new point; right click: remove it; C kink at the
-## point; Up/Down (Shift: x4) its height. The spline is kept within
+## point; Up/Down (Shift: x4) its height, Left/Right 1 m back / on along the
+## lap. The spline is kept within
 ## MAX_SLOPE (100 %). Dragged on by force under (or over) a neighbour, a
 ## point snaps there as a vertical wall: wall down + wall up = pit (floor on
 ## the ground: the ground), wall down alone = ski jump. Dragged away to the
@@ -350,7 +351,7 @@ func _update() -> void:
 		_nav.position = o + Vector2(10, 72)
 		_nav.size = Vector2(maxf(220.0, us.x * 0.28), maxf(160.0, us.y * 0.34))
 		_info.text = _height_info()
-		_status.text = Lang.t("CLICK = SELECT / DRAG POINT  DOUBLE CLICK = CAMERA TO POINT / NEW POINT ON ROAD  RIGHT CLICK = REMOVE  RIGHT MOUSE = TURN  WHEEL = DISTANCE  C KINK  UP/DOWN HEIGHT  B BRIDGE  ESC UNDO")
+		_status.text = Lang.t("CLICK = SELECT / DRAG POINT  DOUBLE CLICK = CAMERA TO POINT / NEW POINT ON ROAD  RIGHT CLICK = REMOVE  RIGHT MOUSE = TURN  WHEEL = DISTANCE  C KINK  UP/DOWN HEIGHT  LEFT/RIGHT ALONG  B BRIDGE  ESC UNDO")
 		if model.official != "":
 			_status.text += "  " + Lang.t("N NO CRANE  G GAP")
 		queue_redraw()
@@ -726,6 +727,12 @@ func _height_key(k: InputEventKey) -> bool:
 			var q: Array = model.points()[pt]
 			var step := TrackEditorModel.HEIGHT_STEP * (4.0 if k.shift_pressed else 1.0)
 			model.move_point(pt, float(q[0]), float(q[1]) + (step if k.keycode == KEY_UP else -step))
+		KEY_LEFT, KEY_RIGHT:
+			var pt := _h3d.point
+			if pt < 0:
+				return true
+			var q: Array = model.points()[pt]
+			model.move_point(pt, float(q[0]) + (1.0 if k.keycode == KEY_RIGHT else -1.0), float(q[1]))
 		KEY_C:
 			if _h3d.point <= 0 or _h3d.point >= model.points().size() - 1:
 				_flash(Lang.t("SELECT A POINT FIRST"))
