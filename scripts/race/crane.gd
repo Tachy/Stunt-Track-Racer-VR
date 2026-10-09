@@ -1,17 +1,20 @@
 class_name Crane
 extends Node3D
 ## The crane that sets the car onto the track at the start and after falling
-## off. The car starts on the ground beside the road; the jib lifts it (in a
-## fixed time: the higher the road, the faster), then the trolley carries it
-## sideways over the road, where it hangs until the drop.
+## off. It stands beside the road, its jib across it at a fixed height that
+## follows the road height there. The car starts on the ground beside the
+## road below the trolley; the winch pulls the chain in (in a fixed time: the
+## higher the road, the faster), then the trolley carries the car sideways
+## over the road, where it hangs until the drop.
 ##
 ## The car on its chains is a physical pendulum swinging across the road: a
-## fixed chain (CHAIN_LEN) from the trolley to the hook, four slings from the
-## hook to the car. Mass and roll inertia of the car, the trolley's and jib's
-## accelerations, air drag on the car's side and friction in the chain links
-## drive and damp the swing. (The period depends on the chain length and the
-## mass distribution, not on the mass itself; the mass decides how much the
-## air drag damps.) At the drop the car keeps the swing's velocity.
+## chain from the trolley to the hook (CHAIN_LEN once pulled in), four slings
+## from the hook to the car. Mass and roll inertia of the car, the trolley's
+## acceleration, the changing chain length, air drag on the car's side and
+## friction in the chain links drive and damp the swing. (The period depends
+## on the chain length and the mass distribution, not on the mass itself; the
+## mass decides how much the air drag damps.) At the drop the car keeps the
+## swing's velocity.
 ##
 ## After the drop the chains are simulated (Verlet particles with fixed link
 ## spacing and gravity) and swing free from the trolley. They are drawn as real
@@ -21,8 +24,8 @@ extends Node3D
 ## road, y up, -z along it.
 
 const HOOK_HEIGHT := 2.8          # hook above the car origin
-const CHAIN_LEN := 2.5            # chain from the trolley (jib) to the hook
-const PIVOT := HOOK_HEIGHT + CHAIN_LEN   # trolley above the car origin
+const CHAIN_LEN := 2.5            # chain from the trolley to the hook, pulled in
+const PIVOT := HOOK_HEIGHT + CHAIN_LEN   # trolley above the car origin, pulled in
 const CORNERS := [Vector3(-0.32, -0.15, -2.0), Vector3(0.32, -0.15, -2.0), Vector3(-0.46, 1.32, 1.4), Vector3(0.46, 1.32, 1.4)]
 
 ## The car as a pendulum body: centre of mass (PlayerCar.center_of_mass), a
@@ -34,8 +37,9 @@ const DRAG_CD := 1.1
 const AIR_DENSITY := 1.2          # kg/m3
 const LINK_FRICTION := 0.005      # m: friction torque in the links = this x chain tension
 
-## Sequence: on the ground, lift, carry over the road (trolley, without jerk), lower (only
-## where the road lies lower than the ground spot).
+## Sequence: on the ground, pull the chain in, carry over the road (trolley,
+## without jerk), let the chain out (only where the road lies lower than the
+## ground spot).
 const GROUND_GAP := 3.0           # car origin this far beside the road edge
 const WAIT_TIME := 0.6            # on the ground before the lift (chains tighten)
 const LIFT_TIME := 2.0
@@ -52,6 +56,7 @@ const LINK_LEN := 0.13
 const LINK_W := 0.07
 const LINK_WIRE := 0.018
 const PARTICLE_STEP := 0.2
+const MAX_CHAIN := 40.0           # longest main chain drawn (m)
 const ITERATIONS := 12
 const DAMPING := 0.995            # per physics step: air drag / friction in the links
 
@@ -59,10 +64,11 @@ var _mode := "idle"               # idle, lift (simulated), hang (shown at a giv
 var _target := Transform3D()      # car pose over the road (= the crane's frame, world)
 var _car_xf := Transform3D()      # car pose now (world)
 var _pivot := Vector3.ZERO        # trolley pivot now (world)
+var _jib_y := PIVOT               # trolley pivot height (crane frame), fixed
 var _t := 0.0                     # time since the sequence started
-var _segments: Array = []         # [{t0, dur, a (Vector2), b, kind}] pivot path in the crane's x-y plane
+var _segments: Array = []         # [{t0, dur, a (Vector2), b, kind}] in (trolley x, chain length)
 var _total := 0.0
-var _pos := Vector2.ZERO          # pivot (crane x, y)
+var _pos := Vector2.ZERO          # trolley x (crane frame), chain length
 var _vel := Vector2.ZERO
 # pendulum: angle of the car from hanging straight down (towards +x), rate
 var _phi := 0.0
@@ -70,13 +76,13 @@ var _omega := 0.0
 var _mass := 900.0
 var _inertia := 1.0               # about the pivot
 var _com_dist := 1.0              # pivot -> centre of mass
-var _x_range := Vector2.ZERO      # crane x the pivot travels (min, max)
+var _x_range := Vector2.ZERO      # crane x the trolley travels (min, max)
 
-var _top: Node3D                  # jib + inner mast (moves up with the lift)
+var _top: Node3D                  # jib
 var _trolley: Node3D
 var _mast: MeshInstance3D
 var _hook: MeshInstance3D
-var _chains: Array = []           # [main chain, 4 slings]: {n, pts, prev, seg}
+var _chains: Array = []           # [main chain, 4 slings]: {n, end, pts, prev, seg}
 var _links: MultiMeshInstance3D
 static var _link_mesh: ArrayMesh
 
@@ -105,12 +111,11 @@ func _init() -> void:
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.mesh = link_mesh()
-	var total := 0
-	var ends := [Vector3(0, HOOK_HEIGHT, 0)] + CORNERS
-	for k in ends.size():
-		var from := Vector3(0, PIVOT, 0) if k == 0 else Vector3(0, HOOK_HEIGHT, 0)
-		var n := maxi(2, int(ceil((ends[k] as Vector3).distance_to(from) / PARTICLE_STEP)))
-		_chains.append({"n": n, "end": ends[k], "pts": PackedVector3Array(), "prev": PackedVector3Array(), "seg": 0.0})
+	var total := int(ceil(MAX_CHAIN / PARTICLE_STEP)) * 2
+	_chains.append({"n": 2, "end": Vector3(0, HOOK_HEIGHT, 0), "pts": PackedVector3Array(), "prev": PackedVector3Array(), "seg": 0.0})
+	for c in CORNERS:
+		var n := maxi(2, int(ceil((c as Vector3).distance_to(Vector3(0, HOOK_HEIGHT, 0)) / PARTICLE_STEP)))
+		_chains.append({"n": n, "end": c, "pts": PackedVector3Array(), "prev": PackedVector3Array(), "seg": 0.0})
 		total += n * 2
 	mm.instance_count = total
 	_links.multimesh = mm
@@ -136,27 +141,30 @@ static func link_mesh() -> ArrayMesh:
 
 ## Puts the crane up for a car that starts at ground (world pose, beside the
 ## road) and is dropped at target (over the road): tower beside the ground
-## spot, jib across the road. Does not move the car.
+## spot, jib across the road at the height the road there asks for. Does not
+## move the car.
 func setup(target: Transform3D, ground: Transform3D) -> void:
 	_target = target
 	if is_inside_tree():
 		global_transform = target
 	var g := target.affine_inverse() * ground.origin
 	var side := signf(g.x) if absf(g.x) > 0.01 else 1.0
-	var travel := maxf(g.y, 0.0) + PIVOT
-	var start := Vector2(g.x, g.y + PIVOT)
-	var over := Vector2(0.0, travel)
+	# the trolley as high above the higher of road and ground spot as the
+	# pulled-in chain needs
+	_jib_y = maxf(g.y, 0.0) + PIVOT
+	var hanging := _jib_y - HOOK_HEIGHT       # chain length with the car at y = 0
+	var start := Vector2(g.x, _jib_y - g.y - HOOK_HEIGHT)
+	var up := Vector2(g.x, CHAIN_LEN)
 	_segments.clear()
 	_total = 0.0
 	_add_segment(start, start, WAIT_TIME, "hold")
-	_add_segment(start, Vector2(g.x, travel), LIFT_TIME, "cos")
-	_add_segment(Vector2(g.x, travel), over, TROLLEY_TIME, "trolley")
-	_add_segment(over, Vector2(0.0, PIVOT), LIFT_TIME, "cos")
+	_add_segment(start, up, LIFT_TIME, "cos")
+	_add_segment(up, Vector2(0.0, CHAIN_LEN), TROLLEY_TIME, "trolley")
+	_add_segment(Vector2(0.0, CHAIN_LEN), Vector2(0.0, hanging), LIFT_TIME, "cos")
 	_x_range = Vector2(minf(g.x, 0.0), maxf(g.x, 0.0))
-	_build_structure(g, side, start.y, travel)
+	_build_structure(g, side)
 	_pos = start
 	_vel = Vector2.ZERO
-	_place_pivot()
 	visible = true
 
 
@@ -167,9 +175,9 @@ func _add_segment(a: Vector2, b: Vector2, dur: float, kind: String) -> void:
 	_total += dur
 
 
-## Lower mast from the ground to the jib's starting height, inner mast and
-## jib on _top (which rises with the lift).
-func _build_structure(g: Vector3, side: float, pivot0: float, travel: float) -> void:
+## Mast from the ground up to the jib, jib across the road with the counter
+## jib and its weight.
+func _build_structure(g: Vector3, side: float) -> void:
 	for c in _top.get_children():
 		if c != _trolley:
 			c.queue_free()
@@ -180,15 +188,12 @@ func _build_structure(g: Vector3, side: float, pivot0: float, travel: float) -> 
 	var col := Palette.CRANE
 	var dark := Palette.CRANE.darkened(0.3)
 	var kit := MeshKit.new()
-	_lattice(kit, Vector3(tx, ground_y, 0), pivot0 - ground_y, 1.6, col, dark)
+	_lattice(kit, Vector3(tx, ground_y, 0), _jib_y + 0.8 - ground_y, 1.6, col, dark)
 	kit.box(Vector3(tx, ground_y + 0.15, 0), Vector3(3.0, 0.3, 3.0), dark)
 	_mast = kit.build_instance()
 	add_child(_mast)
-	# inner mast: slides out of the lower one as the jib rises
+	_top.position = Vector3(0, _jib_y, 0)
 	kit = MeshKit.new()
-	var inner := travel - pivot0 + 1.5
-	_lattice(kit, Vector3(tx, -inner, 0), inner + 0.8, 1.2, col, dark)
-	# jib: lattice beam across the road, counter jib with its weight
 	var x0 := tx + side * COUNTER_JIB
 	var x1 := -side * JIB_OVER
 	var mid := (x0 + x1) * 0.5
@@ -229,12 +234,18 @@ func start(target: Transform3D, ground: Transform3D, mass: float) -> void:
 	_phi = 0.0
 	_omega = 0.0
 	_mass = mass
-	_com_dist = PIVOT - CAR_COM.y
-	var i_com := mass * (CAR_ROLL_BOX.x * CAR_ROLL_BOX.x + CAR_ROLL_BOX.y * CAR_ROLL_BOX.y) / 12.0
-	_inertia = i_com + mass * _com_dist * _com_dist
+	_update_body()
 	_update_car()
 	_pin_chains()
 	_draw_links()
+
+
+## Distance to the centre of mass and inertia about the trolley for the
+## chain length now.
+func _update_body() -> void:
+	_com_dist = _pos.y + HOOK_HEIGHT - CAR_COM.y
+	var i_com := _mass * (CAR_ROLL_BOX.x * CAR_ROLL_BOX.x + CAR_ROLL_BOX.y * CAR_ROLL_BOX.y) / 12.0
+	_inertia = i_com + _mass * _com_dist * _com_dist
 
 
 ## The sequence takes this long (s) until the car hangs over the road.
@@ -266,8 +277,9 @@ func car_xform() -> Transform3D:
 func car_velocity(com: Vector3) -> Array:
 	var axis := _target.basis.z.normalized()
 	var w := axis * _omega
-	var pv := _target.basis * Vector3(_vel.x, _vel.y, 0.0)
-	return [pv + w.cross(_car_xf * com - _pivot), w]
+	var down := (_car_xf.origin - _pivot).normalized()
+	var v := _target.basis * Vector3(_vel.x, 0.0, 0.0) + down * _vel.y
+	return [v + w.cross(_car_xf * com - _pivot), w]
 
 
 ## One physics step of the sequence and the swing.
@@ -275,28 +287,27 @@ func step(dt: float) -> void:
 	if _mode != "lift":
 		return
 	_t += dt
+	var i0 := _inertia
 	var acc := _eval(_t)
+	_update_body()
 	if _t > WAIT_TIME:
-		# physical pendulum with a moving pivot (in the crane's x-y plane):
-		# I phi'' = -m d ((g + ay) sin phi + ax cos phi) + drag + friction
-		var g := 9.81 + acc.y
-		var torque := -_mass * _com_dist * (g * sin(_phi) + acc.x * cos(_phi))
+		# physical pendulum on the trolley, chain length changing:
+		# d(I w)/dt = -m d (g sin phi + ax cos phi) + drag + friction
+		var torque := -_mass * _com_dist * (9.81 * sin(_phi) + acc.x * cos(_phi))
 		# air drag on the side of the car: its speed across the road
-		var vx := _vel.x + _com_dist * _omega * cos(_phi)
+		var vx := _vel.x + _com_dist * _omega * cos(_phi) + _vel.y * sin(_phi)
 		var drag := -0.5 * AIR_DENSITY * DRAG_CD * SIDE_AREA * vx * absf(vx)
 		torque += drag * _com_dist * cos(_phi)
-		var friction := LINK_FRICTION * _mass * g
-		var alpha := torque / _inertia
-		_omega += alpha * dt
+		_omega = (i0 * _omega + torque * dt) / _inertia
 		# friction in the links: stops a slow swing instead of reversing it
-		var dw := friction / _inertia * dt
+		var dw := LINK_FRICTION * _mass * 9.81 / _inertia * dt
 		_omega = 0.0 if absf(_omega) <= dw else _omega - signf(_omega) * dw
 		_phi += _omega * dt
 	_update_car()
 
 
-## Pivot (and its velocity, kept in _pos/_vel) at time t; returns its
-## acceleration.
+## Trolley x and chain length (and their rates, kept in _pos/_vel) at time t;
+## returns their accelerations.
 func _eval(t: float) -> Vector2:
 	if _segments.is_empty():
 		return Vector2.ZERO
@@ -333,22 +344,21 @@ func _eval(t: float) -> Vector2:
 
 
 func _place_pivot() -> void:
-	_top.position.y = _pos.y
 	_trolley.position = Vector3(_pos.x, 0.0, 0.0)
-	_pivot = _target * Vector3(_pos.x, _pos.y, 0.0)
+	_pivot = _target * Vector3(_pos.x, _jib_y, 0.0)
 
 
-## The car hangs from the pivot at the swing angle.
+## The car hangs from the trolley at the swing angle.
 func _update_car() -> void:
 	_place_pivot()
 	var rot := Basis(_target.basis.z.normalized(), _phi)
 	var basis := rot * _target.basis
-	_car_xf = Transform3D(basis, _pivot - basis * Vector3(0, PIVOT, 0))
+	_car_xf = Transform3D(basis, _pivot - basis * Vector3(0, _pos.y + HOOK_HEIGHT, 0))
 	_place_hook()
 
 
 func _place_hook() -> void:
-	var hook := _car_xf * Vector3(0, HOOK_HEIGHT, 0)
+	var hook := _hook_pos()
 	var up := (_pivot - hook).normalized()
 	var fwd := _target.basis.z.normalized()
 	var x := up.cross(fwd).normalized()
@@ -356,13 +366,16 @@ func _place_hook() -> void:
 
 
 ## Shows the crane holding a car at car_xform (online: the other player's
-## car, whose crane runs on its own machine). The crane is put up anew where
-## needed (target, ground: as for setup).
+## car, whose crane runs on its own machine): the trolley above the hook,
+## the chain as long as it takes.
 func hang(car_xform: Transform3D) -> void:
 	_mode = "hang"
 	_car_xf = car_xform
-	var p := _target.affine_inverse() * (car_xform * Vector3(0, PIVOT, 0))
-	_pos = Vector2(p.x, p.y)
+	var inv := _target.affine_inverse()
+	var hook := inv * _hook_pos()
+	var up := inv.basis * car_xform.basis.y.normalized()
+	var c := (_jib_y - hook.y) / maxf(up.y, 0.2)
+	_pos = Vector2(hook.x + up.x * c, c)
 	_place_pivot()
 	_place_hook()
 	_pin_chains()
@@ -388,6 +401,7 @@ func _hook_pos() -> Vector3:
 ## Taut chains: trolley -> hook, hook -> car corners, at rest.
 func _pin_chains() -> void:
 	var hook := _hook_pos()
+	_chains[0]["n"] = clampi(int(ceil(_pivot.distance_to(hook) / PARTICLE_STEP)), 2, int(ceil(MAX_CHAIN / PARTICLE_STEP)))
 	for k in _chains.size():
 		var ch: Dictionary = _chains[k]
 		var n: int = ch["n"]
@@ -477,3 +491,4 @@ func _draw_links() -> void:
 				var twist := basis if (k % 2 == 0) else Basis(y, -x, z)
 				mm.set_instance_transform(k, Transform3D(twist, a.lerp(b, 0.25 + 0.5 * h)))
 				k += 1
+	mm.visible_instance_count = k
