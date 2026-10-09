@@ -47,10 +47,13 @@ const WAIT_TIME := 0.6            # on the ground before the lift (chains tighte
 const LIFT_TIME := 5.0
 const TROLLEY_LEAD := 3.0         # chain (m) still to pull in when the trolley sets off
 const CAR_HALF_WIDTH := 1.1       # dropped early only with the car all over the road
-## Trolley run over the road (minimum jerk). The swing it leaves depends on
-## this time against the pendulum's period (~4.8 s): 4 s leaves 35-70 deg,
-## 7.5 s 4-11 deg (up to ~1 m sideways), 9.5 s (two periods) almost none.
+## Trolley run over the road: it sets off briskly (acceleration rising as a
+## half sine over TROLLEY_RAMP, no jolt), runs at constant speed and brakes
+## the same way. The swing it leaves depends on these times against the
+## pendulum's period (~4.8 s): 7.5 s with 2 s ramps leaves 5-10 deg
+## (1 s ramps 10-20 deg, 2.5 s ramps 2-3 deg).
 const TROLLEY_TIME := 7.5
+const TROLLEY_RAMP := 2.0
 const TOWER_OUT := 4.0            # tower beyond the ground spot
 const JIB_OVER := 4.0             # jib reaches this far beyond the target
 const COUNTER_JIB := 7.0
@@ -181,7 +184,7 @@ func setup(target: Transform3D, ground: Transform3D, travel := 0.0) -> void:
 	var t_x := WAIT_TIME
 	if pull > TROLLEY_LEAD:
 		t_x += LIFT_TIME * _smooth_at(1.0 - TROLLEY_LEAD / pull)
-	_plan(_plan_x, g.x, 0.0, t_x, TROLLEY_TIME)
+	_plan(_plan_x, g.x, 0.0, t_x, TROLLEY_TIME, TROLLEY_RAMP)
 	_plan(_plan_c, CHAIN_LEN, hanging, t_x + TROLLEY_TIME, LIFT_TIME)
 	_total = maxf(_total, WAIT_TIME)
 	_lagged = false
@@ -194,10 +197,12 @@ func setup(target: Transform3D, ground: Transform3D, travel := 0.0) -> void:
 
 
 ## A move of one axis from a to b, starting at t0 (none if there is no way to go).
-func _plan(axis: Array, a: float, b: float, t0: float, dur: float) -> void:
+## ramp > 0: speed up and slow down over ramp (s) with a constant speed
+## between; else one minimum jerk move.
+func _plan(axis: Array, a: float, b: float, t0: float, dur: float, ramp := 0.0) -> void:
 	if absf(b - a) < 0.05:
 		return
-	axis.append({"t0": t0, "dur": dur, "a": a, "b": b})
+	axis.append({"t0": t0, "dur": dur, "a": a, "b": b, "ramp": minf(ramp, dur * 0.5)})
 	_total = maxf(_total, t0 + dur)
 
 
@@ -398,10 +403,29 @@ static func _eval_axis(axis: Array, t: float, keep: float) -> Array:
 	var u := (t - float(seg["t0"])) / dur
 	if u >= 1.0:
 		return [a + d, 0.0, 0.0]
+	var ramp: float = seg.get("ramp", 0.0)
+	if ramp > 0.0:
+		# half sine of acceleration up, constant speed, the same down
+		var tt := u * dur
+		var vmax := d / (dur - ramp)
+		var k := vmax * PI / (2.0 * ramp)      # peak acceleration
+		if tt < ramp:
+			return _ramp_up(tt, ramp, k, a)
+		if tt > dur - ramp:
+			var r := _ramp_up(dur - tt, ramp, k, 0.0)
+			return [a + d - float(r[0]), r[1], -float(r[2])]
+		return [a + vmax * ramp * 0.5 + vmax * (tt - ramp), vmax, 0.0]
 	# minimum jerk: no sudden change of acceleration
 	return [a + d * _smooth(u),
 		d / dur * 30.0 * u * u * (1.0 - u) * (1.0 - u),
 		d / (dur * dur) * 60.0 * u * (1.0 - u) * (1.0 - 2.0 * u)]
+
+
+## [position, rate, acceleration] t into a ramp of length ramp, peak
+## acceleration k, from a.
+static func _ramp_up(t: float, ramp: float, k: float, a: float) -> Array:
+	var w := PI / ramp
+	return [a + k / w * (t - sin(w * t) / w), k / w * (1.0 - cos(w * t)), k * sin(w * t)]
 
 
 func _place_pivot() -> void:
