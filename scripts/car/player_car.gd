@@ -39,6 +39,9 @@ var on_ground_plane := false
 var airtime := 0.0
 ## Fell off the road: no flight alignment, the car tumbles as it comes.
 var off_road := false
+## Dropped by the crane: no flight alignment until a wheel touches down (it
+## falls with the swing it had, a sideways drop must not tip the nose).
+var crane_drop := false
 var _wheel_boxes: Array[CollisionShape3D] = []
 var engine_load := 0.0
 
@@ -331,10 +334,11 @@ func _physics_process(dt: float) -> void:
 	slip_speed = slip_sum / 4.0
 	if grounded == 0:
 		airtime += dt
-		if not off_road:
+		if not off_road and not crane_drop:
 			_align_to_flight(b, dt)
 	else:
 		airtime = 0.0
+		crane_drop = false
 
 	var drag_f := -linear_velocity * linear_velocity.length() * tuning.drag
 	apply_central_force(drag_f)
