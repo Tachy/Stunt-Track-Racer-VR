@@ -35,6 +35,7 @@ void light() {
 """
 
 static var _material: ShaderMaterial
+static var _see_through_shader: Shader
 
 var verts := PackedVector3Array()
 var colors := PackedColorArray()
@@ -49,6 +50,20 @@ static func material() -> ShaderMaterial:
 		_material = ShaderMaterial.new()
 		_material.shader = sh
 	return _material
+
+
+## Material that lets the world behind show through (the editor's ground and
+## tunnel walls): opacity alpha, drawn without depth (no shadows either).
+static func see_through_material(alpha: float) -> ShaderMaterial:
+	if _see_through_shader == null:
+		_see_through_shader = Shader.new()
+		_see_through_shader.code = SHADER 			.replace("render_mode cull_disabled,", "render_mode blend_mix, depth_draw_never, cull_disabled,") 			.replace("varying vec3 v_albedo;", "varying vec3 v_albedo;
+uniform float alpha = 1.0;") 			.replace("SPECULAR = 0.0;", "SPECULAR = 0.0;
+	ALPHA = alpha;")
+	var mat := ShaderMaterial.new()
+	mat.shader = _see_through_shader
+	mat.set_shader_parameter("alpha", alpha)
+	return mat
 
 
 static func shade_color(col: Color, n: Vector3) -> Color:
@@ -191,8 +206,12 @@ func build(mesh: ArrayMesh = null) -> ArrayMesh:
 	return mesh
 
 
-func build_instance() -> MeshInstance3D:
+## alpha < 1: see-through (see_through_material), casting no shadow.
+func build_instance(alpha := 1.0) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	mi.mesh = build()
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	if alpha < 1.0:
+		mi.material_override = see_through_material(alpha)
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return mi

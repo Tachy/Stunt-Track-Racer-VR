@@ -42,8 +42,8 @@ func _init() -> void:
 func build(path: TrackPath) -> void:
 	for c in _world.get_children():
 		c.queue_free()
-	_world.add_child(TrackNode.new().build(path))
-	EnvironmentBuilder.build(_world, 0, path.bounds(), path.ground_holes())
+	_world.add_child(TrackNode.new().build(path, true))
+	EnvironmentBuilder.build(_world, 0, path.bounds(), path.ground_holes(), TrackNode.SEE_THROUGH_ALPHA)
 	_bounds = path.bounds()
 	_retarget()
 

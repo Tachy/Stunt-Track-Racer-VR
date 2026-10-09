@@ -27,16 +27,24 @@ const STRIPE_MAX := 30.0
 ## the whole width is folded along its diagonal where the road twists into or
 ## out of a banked curve - a bump of up to 6 cm every metre under the wheels.
 const ROAD_COLUMNS := 8
+## Opacity of the tunnel walls, ceiling and cut walls in the editor.
+const SEE_THROUGH_ALPHA := 0.3
 
 var path: TrackPath
 var time := 0.0
 var _leaves: Array = []
 var _stripe := PackedByteArray()      # per sample: 0 = dark, 1 = light
+## Editor: tunnel walls, ceilings and cut walls are built see-through into
+## this kit (null in the game).
+var _glass: MeshKit
 
 
 
-func build(p: TrackPath) -> TrackNode:
+## see_through: the editor's look into tunnels (walls, ceiling and cut walls
+## at SEE_THROUGH_ALPHA, no lamps).
+func build(p: TrackPath, see_through := false) -> TrackNode:
 	path = p
+	_glass = MeshKit.new() if see_through else null
 	name = "Track"
 	_stripes()
 	_build_static()
@@ -101,7 +109,12 @@ func _build_static() -> void:
 		tmi.name = "TunnelMesh"
 		tmi.layers = 1 | TUNNEL_LIGHT_LAYER
 		add_child(tmi)
-		_build_tunnel_lamps()
+		if _glass == null:
+			_build_tunnel_lamps()
+	if _glass != null and not _glass.is_empty():
+		var gmi := _glass.build_instance(SEE_THROUGH_ALPHA)
+		gmi.name = "TunnelGlass"
+		add_child(gmi)
 
 	add_child(_static_body("RoadBody", road_faces, LAYER_ROAD))
 	add_child(_static_body("WallBody", wall_faces, LAYER_WALL))
@@ -229,15 +242,17 @@ func _emit_tunnel_segment(kit: MeshKit, road_faces: PackedVector3Array, wall_fac
 	kit.quad(ri, rj, cj[1], ci[1], Palette.WALL_EDGE)   # pure white, also inside
 	_road_faces(road_faces, li, lj, rj, ri)
 	road_faces.append_array([ci[0], cj[0], lj, ci[0], lj, li, ri, rj, cj[1], ri, cj[1], ci[1]])
+	var wk := _glass if _glass != null else kit     # walls (see-through in the editor)
 	if inside:
 		var wall := Palette.WALL.darkened(TUNNEL_DIM)
-		kit.quad(ci[0], cj[0], cj[2], ci[2], wall)
-		kit.quad(ci[1], cj[1], cj[3], ci[3], wall)
-		kit.quad(ci[2], cj[2], cj[3], ci[3], _road_color(i).darkened(TUNNEL_DIM))   # ceiling
+		wk.quad(ci[0], cj[0], cj[2], ci[2], wall)
+		wk.quad(ci[1], cj[1], cj[3], ci[3], wall)
+		wk.quad(ci[2], cj[2], cj[3], ci[3], _road_color(i).darkened(TUNNEL_DIM))   # ceiling
 		# roof top (under the ground, unseen): casts the tunnel's shadow
-		var lift_i: Vector3 = path.tunnel_up(i) * TrackPath.TUNNEL_ROOF
-		var lift_j: Vector3 = path.tunnel_up(j) * TrackPath.TUNNEL_ROOF
-		kit.quad(ci[2] + lift_i, cj[2] + lift_j, cj[3] + lift_j, ci[3] + lift_i, Palette.WALL)
+		if _glass == null:
+			var lift_i: Vector3 = path.tunnel_up(i) * TrackPath.TUNNEL_ROOF
+			var lift_j: Vector3 = path.tunnel_up(j) * TrackPath.TUNNEL_ROOF
+			kit.quad(ci[2] + lift_i, cj[2] + lift_j, cj[3] + lift_j, ci[3] + lift_i, Palette.WALL)
 		wall_faces.append_array([ci[0], cj[0], cj[2], ci[0], cj[2], ci[2],
 			ci[1], cj[1], cj[3], ci[1], cj[3], ci[3],
 			ci[2], cj[2], cj[3], ci[2], cj[3], ci[3]])
@@ -251,9 +266,9 @@ func _emit_tunnel_segment(kit: MeshKit, road_faces: PackedVector3Array, wall_fac
 	_cut_wall(kit, wall_faces, ci[1], cj[1], ui, uj)
 	# portal over the tunnel mouth
 	if path.tunnel[i] == 1:
-		_portal(kit, wall_faces, ci, ui)
+		_portal(wk, wall_faces, ci, ui)
 	if path.tunnel[j] == 1:
-		_portal(kit, wall_faces, cj, uj)
+		_portal(wk, wall_faces, cj, uj)
 
 
 ## Wall of an open cut from the road edge a-b along the tunnel's up vectors
@@ -274,11 +289,13 @@ func _cut_wall(kit: MeshKit, faces: PackedVector3Array, a: Vector3, b: Vector3, 
 		return
 	var ga := TrackPath.to_ground(a, ua)
 	var gb := TrackPath.to_ground(b, ub)
-	# white band as high as the ramps' band (a lower wall is white all over)
+	# white band as high as the ramps' band (a lower wall is white all over);
+	# below the ground: see-through in the editor
 	var ea := ga - ua * (minf(EDGE_BAND, -a.y) / ua.y)
 	var eb := gb - ub * (minf(EDGE_BAND, -b.y) / ub.y)
-	kit.quad(a, b, eb, ea, Palette.WALL)
-	kit.quad(ea, eb, gb, ga, Palette.WALL_EDGE)
+	var wk := _glass if _glass != null else kit
+	wk.quad(a, b, eb, ea, Palette.WALL)
+	wk.quad(ea, eb, gb, ga, Palette.WALL_EDGE)
 	faces.append_array([a, b, gb, a, gb, ga])
 
 

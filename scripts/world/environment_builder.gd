@@ -6,7 +6,9 @@ const GROUND_SIZE := 8000.0
 
 
 ## holes: plan-view polygons (x, z) left open in the ground (TrackPath.ground_holes).
-static func build(parent: Node3D, theme: int, track_bounds: AABB, holes: Array = []) -> void:
+## ground_alpha < 1: a see-through ground (the editor's look into tunnels),
+## without the darker patches.
+static func build(parent: Node3D, theme: int, track_bounds: AABB, holes: Array = [], ground_alpha := 1.0) -> void:
 	var env := WorldEnvironment.new()
 	env.name = "WorldEnvironment"
 	var e := Environment.new()
@@ -59,8 +61,9 @@ static func build(parent: Node3D, theme: int, track_bounds: AABB, holes: Array =
 	GroundMesh.area(Rect2(c.x - g, c.z - g, GROUND_SIZE, GROUND_SIZE), holes, ground_tris)
 	for t in range(0, ground_tris.size(), 3):
 		kit.tri(ground_tris[t], ground_tris[t + 1], ground_tris[t + 2], Palette.GROUND)
-	_ground_marks(kit, track_bounds, holes)
-	var gm := kit.build_instance()
+	if ground_alpha >= 1.0:
+		_ground_marks(kit, track_bounds, holes)
+	var gm := kit.build_instance(ground_alpha)
 	gm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	gm.name = "Ground"
 	parent.add_child(gm)
