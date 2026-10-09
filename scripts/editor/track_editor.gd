@@ -115,6 +115,7 @@ func _ready() -> void:
 		_h3d.select_piece(mini(3, model.pieces.size() - 1))
 	_update()
 	XrManager.set_fade(0.0)
+	Sfx.stop_music()      # the title music is for the menus only
 
 
 ## Where the controls (and the plan) go: ui_rect, else the whole window.
