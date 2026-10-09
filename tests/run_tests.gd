@@ -143,18 +143,38 @@ func test_lap_tracker() -> void:
 	check(lt3.laps_done == 1, "skip one piece ok")
 
 
+## The crane sets the car down where it left the road, back to at least
+## JUMP_RUNUP before a jump and before a tunnel, only on plain road.
 func test_recovery() -> void:
 	for id in TrackLibrary.ORDER:
 		var p := TrackPath.new(TrackLibrary.get_def(id))
+		var jumps := p.gaps()
 		var ok := true
-		for pi_ in p.pieces.size():
-			var s: float = float(p.pieces[pi_]["s0"]) + float(p.pieces[pi_]["length"]) * 0.5
+		var runup := true
+		var exact := true
+		var behind := true
+		var s := 0.0
+		while s < p.total_length:
 			var rs := p.recovery_s(s)
-			if not p.is_crane_allowed(p.piece_at_s(rs)):
+			var k := p.index_at_s(rs)
+			if not p._crane_spot(k):
 				ok = false
-			if p.road[p.index_at_s(rs)] != 1:
-				ok = false
-		check(ok, "%s crane positions valid" % id)
+			var clear := true
+			for jp in jumps:
+				var ahead := fposmod(p.s_arr[jp[0]] - rs, p.total_length)
+				if ahead < TrackPath.JUMP_RUNUP - 0.5 or p._fwd_dist(jp[0], k) <= p._fwd_dist(jp[0], jp[1]):
+					clear = false
+			runup = runup and clear
+			# a good spot is kept exactly, otherwise the car goes back
+			if p._recovery_back(s, jumps) == s:
+				exact = exact and is_equal_approx(rs, p.wrap_s(s))
+			elif p.delta_s(rs, s) <= 0.0:
+				behind = false
+			s += 7.0
+		check(ok, "%s: crane sets down on plain road only" % id)
+		check(runup, "%s: crane sets down %d m before a jump at least" % [id, TrackPath.JUMP_RUNUP])
+		check(exact, "%s: crane sets down where the car left the road" % id)
+		check(behind, "%s: crane goes back, not on" % id)
 
 
 func test_bridge() -> void:
@@ -803,9 +823,9 @@ func test_tunnel_track() -> void:
 	for pi_ in p.pieces.size():
 		var rs := p.recovery_s(float(p.pieces[pi_]["s0"]) + float(p.pieces[pi_]["length"]) * 0.5)
 		var k := p.index_at_s(rs)
-		if not p.is_crane_allowed(p.piece_at_s(rs)) or p.road[k] != 1 or p.tunnel[k] == 1 or p.cut[k] == 1:
+		if p.road[k] != 1 or p.tunnel[k] == 1:
 			crane_ok = false
-	check(crane_ok, "crane never sets down in a tunnel or cut")
+	check(crane_ok, "crane never sets down in a tunnel")
 
 
 func test_tunnel_mesh_and_ground() -> void:

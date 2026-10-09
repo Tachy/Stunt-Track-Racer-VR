@@ -21,6 +21,7 @@ var off_timer := 0.0
 var flip_timer := 0.0
 var stuck_timer := 0.0
 var hang_timer := 0.0
+var left_s := -1.0          # where the car left the road (-1: still on it)
 const STUCK_TIME := 2.5
 const HANG_TIME := 2.0     # no wheel on the ground and not moving: wedged
 
@@ -75,6 +76,8 @@ func check_off(dt: float) -> bool:
 		below = true
 	# over the edge in the air: from here on it falls freely
 	if below or car.on_ground_plane or car.grounded == 0 and absf(lateral()) > path.half_width[idx] + 1.0:
+		if not car.off_road and left_s < 0.0:
+			left_s = s
 		car.off_road = true
 	if car.on_ground_plane or below:
 		off_timer += dt
@@ -103,8 +106,15 @@ func check_off(dt: float) -> bool:
 	return false
 
 
+## Where the car came off the road (or is now, if it never left it: on its
+## roof, stuck, wedged).
+func off_s() -> float:
+	return left_s if left_s >= 0.0 else s
+
+
 ## The crane put the car back at rs.
 func move_to(rs: float) -> void:
+	left_s = -1.0
 	progress += path.delta_s(s, rs)
 	s = rs
 	idx = path.index_at_s(rs)

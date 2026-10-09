@@ -41,6 +41,7 @@ const LINK_FRICTION := 0.005      # m: friction torque in the links = this x cha
 ## without jerk; it sets off TROLLEY_LEAD before the chain is all in), let the chain out
 ## (only where the road lies lower than the ground spot).
 const GROUND_GAP := 3.0           # car origin this far beside the road edge
+const EDGE_CLEAR := 1.0           # wheels this high over the edge of a cut
 const WAIT_TIME := 0.6            # on the ground before the lift (chains tighten)
 const LIFT_TIME := 2.0
 const TROLLEY_LEAD := 2.0         # chain (m) still to pull in when the trolley sets off
@@ -159,7 +160,7 @@ func setup(target: Transform3D, ground: Transform3D) -> void:
 	var side := signf(g.x) if absf(g.x) > 0.01 else 1.0
 	# the trolley as high above the higher of road and ground spot as the
 	# pulled-in chain needs
-	_jib_y = maxf(g.y, 0.0) + PIVOT
+	_jib_y = (g.y + EDGE_CLEAR if g.y > 0.0 else 0.0) + PIVOT
 	var hanging := _jib_y - HOOK_HEIGHT       # chain length with the car at y = 0
 	var start := Vector2(g.x, _jib_y - g.y - HOOK_HEIGHT)
 	_side = side

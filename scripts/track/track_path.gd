@@ -16,6 +16,12 @@ const ROAD_WIDTH := 10.0
 const HALF_WIDTH := ROAD_WIDTH * 0.5
 const STEP := 1.0
 const DEFAULT_RADIUS := 55.0
+## Crane: a car is set down at least this far (m) before a jump, this far
+## before a stretch where the crane can't go, nowhere within this margin (m)
+## of a road above.
+const JUMP_RUNUP := 200.0
+const CRANE_BACK := 2.0
+const CRANE_COVER_MARGIN := 2.0
 const BRIDGE_U0 := 0.2
 const BRIDGE_U1 := 0.8
 const BRIDGE_MAX_ANGLE := deg_to_rad(14.0)
@@ -796,16 +802,64 @@ func is_crane_allowed(piece_index: int) -> bool:
 	return absf(float(p["h1"]) - float(p["h0"])) / float(p["length"]) < 0.3
 
 
-## Where the crane puts a car back: a few metres into the nearest allowed
-## piece at or before s.
+## Where the crane puts a car back that left the road at s: right there, but
+## at least JUMP_RUNUP before a jump ahead (or one it was on), before a tunnel,
+## and never on a loop, a gap, a drawbridge, a deck, under another road or on
+## a piece marked "no crane". Open cuts are fine: the crane lowers the car in.
 func recovery_s(s: float) -> float:
-	var pi_ := piece_at_s(s)
-	for k in pieces.size():
-		var idx := (pi_ - k + pieces.size()) % pieces.size()
-		if is_crane_allowed(idx):
-			var p: Dictionary = pieces[idx]
-			return wrap_s(float(p["s0"]) + minf(6.0, float(p["length"]) * 0.3))
-	return 6.0
+	var r := wrap_s(s)
+	var jumps := gaps()
+	for _guard in 64:
+		var nr := _recovery_back(r, jumps)
+		if is_equal_approx(nr, r):
+			return r
+		r = nr
+	return r
+
+
+## r, or further back if r is no place for the crane (see recovery_s).
+func _recovery_back(r: float, jumps: Array) -> float:
+	var i := index_at_s(r)
+	for jp in jumps:
+		var take: int = jp[0]
+		var land: int = jp[1]
+		var ahead := fposmod(s_arr[take] - r, total_length)
+		var over := _fwd_dist(take, i) <= _fwd_dist(take, land)
+		if ahead < JUMP_RUNUP or over:
+			return wrap_s(s_arr[take] - JUMP_RUNUP)
+	if not _crane_spot(i):
+		# back to just before the stretch that is no place for it
+		var k := i
+		for _guard in n:
+			if _crane_spot(k):
+				break
+			k = (k - 1 + n) % n
+		return wrap_s(s_arr[k] - CRANE_BACK)
+	return r
+
+
+## Whether the crane may set a car down at sample i.
+func _crane_spot(i: int) -> bool:
+	var p: Dictionary = pieces[piece_of[i]]
+	if p["gap"] or p["bridge"] or p["no_crane"]:
+		return false
+	if road[i] != 1 or tunnel[i] == 1 or loop_mask[i] == 1 or deck[i] == 1 or bridge_zone[i] == 1:
+		return false
+	if (pit_mask.size() == n and pit_mask[i] == 1) or (step.size() == n and step[i] == 1):
+		return false
+	return not _covered(i)
+
+
+## Another part of the track passes over sample i (the crane's chain would
+## go through it).
+func _covered(i: int) -> bool:
+	var c := center[i]
+	var reach := half_width[i] + CRANE_COVER_MARGIN
+	for j in n:
+		if center[j].y > c.y + 2.0 and absf(delta_s(s_arr[i], s_arr[j])) > 30.0:
+			if Vector2(center[j].x - c.x, center[j].z - c.z).length() < reach + half_width[j]:
+				return true
+	return false
 
 
 ## Returns [takeoff_index, landing_index] pairs for every gap.

@@ -411,7 +411,7 @@ func _update_opponent(dt: float) -> void:
 			opp_track.update_position()
 			opp_car.input = idle
 			if opp_state_time > AI_CRANE_DELAY:
-				var rs := path.recovery_s(opp_track.s)
+				var rs := path.recovery_s(opp_track.off_s())
 				var fell := opp_track.lateral()
 				opp_track.move_to(rs)
 				var lat := 0.0
@@ -606,7 +606,7 @@ func _lap_completed() -> void:
 
 
 func _crane_reposition() -> void:
-	var rs := path.recovery_s(ptrack.s)
+	var rs := path.recovery_s(ptrack.off_s())
 	var fell := ptrack.lateral()
 	ptrack.move_to(rs)
 	var lat := 0.0
