@@ -450,35 +450,70 @@ func test_shifted_loop_view() -> void:
 
 func test_crane_chains() -> void:
 	var crane := Crane.new()
-	var xf := Transform3D(Basis(Vector3.UP, 0.7), Vector3(10, 5, -20))
-	crane.hold(xf)
+	root.add_child(crane)
+	var basis := Basis(Vector3.UP, 0.7)
+	var target := Transform3D(basis, Vector3(10, 9, -20))
+	var ground := Transform3D(basis, target * Vector3(7.0, 0, 0))
+	ground.origin.y = CarModel.RIDE_HEIGHT
+	crane.start(target, ground, 900.0)
+	check(crane.car_xform().origin.is_equal_approx(ground.origin), "crane: the car starts on the ground")
+	# lift + trolley: then the car hangs over the road, swinging a little
+	var dt := 1.0 / 120.0
+	var t := 0.0
+	var max_phi := 0.0
+	while not crane.arrived() and t < 30.0:
+		crane.step(dt)
+		t += dt
+		max_phi = maxf(max_phi, absf(crane._phi))
+	check(crane.arrived() and near(t, crane.duration(), 0.02), "crane: over the road after %.1f s" % t)
+	var off := crane.car_xform().origin - target.origin
+	check(off.length() < 2.0, "crane: the car hangs near its drop pose (%.2f m)" % off.length())
+	check(max_phi > deg_to_rad(2.0) and max_phi < deg_to_rad(25.0), "crane: the car swings (max %.1f deg)" % rad_to_deg(max_phi))
+	# taut chains: trolley -> hook -> car corners
+	crane._pin_chains()
+	var xf := crane.car_xform()
 	var hook := xf * Vector3(0, Crane.HOOK_HEIGHT, 0)
-	# held: taut and straight from the hook to the car corners
-	for c in crane._chains.size():
-		var pts: PackedVector3Array = crane._chains[c]["pts"]
-		check(pts[0].is_equal_approx(hook), "chain %d starts at the hook" % c)
-		check(pts[pts.size() - 1].is_equal_approx(xf * (Crane.CORNERS[c] as Vector3)), "chain %d ends at the car corner" % c)
-	# released (hook kept in place here): the chains swing down and settle
-	crane._free = true
+	var main: PackedVector3Array = crane._chains[0]["pts"]
+	check(main[0].is_equal_approx(crane._pivot) and main[main.size() - 1].is_equal_approx(hook), "main chain from the trolley to the hook")
+	check(near(crane._pivot.distance_to(hook), Crane.CHAIN_LEN, 1e-3), "main chain %.1f m long" % Crane.CHAIN_LEN)
+	for c in Crane.CORNERS.size():
+		var pts: PackedVector3Array = crane._chains[c + 1]["pts"]
+		check(pts[0].is_equal_approx(hook) and pts[pts.size() - 1].is_equal_approx(xf * (Crane.CORNERS[c] as Vector3)), "sling %d from the hook to the car corner" % c)
+	# the swing: a physical pendulum, period 2 pi sqrt(I / (m g d))
+	var crossings: Array = []
+	var prev := crane._phi
+	for k in 120 * 30:
+		crane.step(dt)
+		if signf(crane._phi) != signf(prev) and prev != 0.0:
+			crossings.append(k * dt)
+		prev = crane._phi
+	var expect := TAU * sqrt(crane._inertia / (900.0 * 9.81 * crane._com_dist))
+	var period := 2.0 * (float(crossings[-1]) - float(crossings[0])) / (crossings.size() - 1) if crossings.size() > 2 else 0.0
+	check(near(period, expect, expect * 0.03), "crane: swing period %.2f s (pendulum %.2f s)" % [period, expect])
+	var v: Array = crane.car_velocity(Crane.CAR_COM)
+	check((v[1] as Vector3).length() > 0.0 and absf((v[1] as Vector3).normalized().dot(target.basis.z)) > 0.99, "crane: dropped car keeps the swing (roll rate)")
+	# released: the chains swing down from the trolley and settle
+	crane.release()
+	var pivot := crane._pivot
 	var max_stretch := 0.0
 	var swing_late := 0.0
-	for step in 1200:   # 10 s at 120 Hz
-		var before: Vector3 = crane._chains[0]["pts"][crane._chains[0]["pts"].size() - 1]
-		crane._simulate(1.0 / 120.0)
-		var after: Vector3 = crane._chains[0]["pts"][crane._chains[0]["pts"].size() - 1]
-		if step > 1080:
-			swing_late = maxf(swing_late, before.distance_to(after) * 120.0)
+	for k in 1200:   # 10 s at 120 Hz
+		var before: Vector3 = main[main.size() - 1]
+		crane._simulate(dt)
+		main = crane._chains[0]["pts"]
+		if k > 1080:
+			swing_late = maxf(swing_late, before.distance_to(main[main.size() - 1]) * 120.0)
+	var total := 0.0
 	for c in crane._chains.size():
 		var ch: Dictionary = crane._chains[c]
 		var pts: PackedVector3Array = ch["pts"]
 		var seg: float = ch["seg"]
+		total += seg * (pts.size() - 1)
 		for i in pts.size() - 1:
 			max_stretch = maxf(max_stretch, absf(pts[i].distance_to(pts[i + 1]) - seg) / seg)
 		var end := pts[pts.size() - 1]
 		check(not is_nan(end.x), "chain %d: no NaN" % c)
-		var length := seg * (pts.size() - 1)
-		check(Vector2(end.x - hook.x, end.z - hook.z).length() < 0.15 * length, "chain %d hangs below the hook (offset %.2f)" % [c, Vector2(end.x - hook.x, end.z - hook.z).length()])
-		check(end.y < hook.y - 0.9 * length, "chain %d hangs straight down" % c)
+		check(Vector2(end.x - pivot.x, end.z - pivot.z).length() < 0.15 * total, "chain %d hangs below the trolley" % c)
 	check(max_stretch < 0.03, "chain links keep their length (max stretch %.1f %%)" % (max_stretch * 100.0))
 	check(swing_late < 0.3, "swinging dies down (end speed %.2f m/s after 9 s)" % swing_late)
 	crane.free()

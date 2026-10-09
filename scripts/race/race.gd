@@ -94,6 +94,8 @@ var _banner_text := ""
 var _ap: AiDriver
 var _ground_dist := 0.0   # debug: path distance driven with wheel 0 on the ground
 var _accept_pressed := false
+var _ready_sent := false      # online: READY goes out once the car hangs over the road
+var _arrived_time := -1.0     # state_time the player's crane got over the road
 
 const PAUSE_ITEMS := ["CONTINUE", "RETIRE"]
 
@@ -189,25 +191,28 @@ func _ready() -> void:
 		opp_car.damage.wrecked.connect(_on_opponent_wrecked)
 		opp_crane = Crane.new()
 		add_child(opp_crane)
-		var oxf := _hold_transform(START_S, -lat, HOLD_HEIGHT)
-		opp_car.teleport(oxf)
-		opp_car.hold(true)
-		opp_crane.hold(oxf)
 		opp_track = CarTracker.new(path, opp_car, START_S)
+		if not online:
+			_crane_lift(opp_car, opp_crane, START_S, -lat, 1.0)
 		if online:
 			_remote = RemoteDriver.new(opp_car)
 		else:
 			opp_ai = AiDriver.new(opp_track, profile, floors, opp_driver.get("skill", 0.85), opp_driver.get("flags", []))
+			opp_ai.lat = -lat      # its lane: where it is dropped, not beside the road
+			opp_ai.lat_target = -lat
 
-	var xf := _hold_transform(START_S, lat, HOLD_HEIGHT)
-	car.teleport(xf)
-	car.hold(true)
-	crane.hold(xf)
-	_held_xf = xf
+	_crane_lift(car, crane, START_S, lat, 1.0)
+	_held_xf = car.global_transform
 	ptrack = CarTracker.new(path, car, START_S)
 	if autopilot:
 		_ap = AiDriver.new(ptrack, profile, floors, 0.95, [])
-	drop_at = 2.0 + _rng.randf_range(1.0, 3.0)
+		_ap.lat = lat
+		_ap.lat_target = lat
+	# both cars drop together, a moment after both hang over the road
+	var lift_time := crane.duration()
+	if opp_crane and not online:
+		lift_time = maxf(lift_time, opp_crane.duration())
+	drop_at = lift_time + _rng.randf_range(1.0, 2.5)
 	state = "hold"
 	state_time = 0.0
 
@@ -221,7 +226,6 @@ func _ready() -> void:
 		Net.opponent_event.connect(_on_net_opponent)
 		Net.result_received.connect(_on_net_result)
 		Net.disconnected.connect(_on_net_lost)
-		Net.send_ready()
 		message = Lang.t("WAITING FOR OPPONENT")
 	print("[Race] %s vs %s (super=%s%s)" % [def["name"], opp_driver.get("name", "-"), super_league, ", online" if online else ""])
 
@@ -252,10 +256,49 @@ func _hold_transform(s: float, lat: float, height: float) -> Transform3D:
 	return Transform3D(basis, pos)
 
 
+## The crane's two poses for a car set down at s, lat: [over the road (drop
+## pose), on the ground beside the road on side (-1 left, 1 right)].
+func _crane_frames(s: float, lat: float, side: float) -> Array:
+	var target := _hold_transform(s, lat, HOLD_HEIGHT)
+	var i := path.index_at_s(s)
+	var pos := path.frame_at_s(s).origin + path.right_flat[i] * side * (path.half_width[i] + Crane.GROUND_GAP)
+	pos.y = CarModel.RIDE_HEIGHT
+	return [target, Transform3D(target.basis, pos)]
+
+
+## Car c starts on the ground beside the road (on the side of lat, else of
+## fallback_side) and its crane lifts it over the road to s, lat.
+func _crane_lift(c: PlayerCar, cr: Crane, s: float, lat: float, fallback_side: float) -> void:
+	var side := signf(lat) if absf(lat) > 0.1 else (signf(fallback_side) if fallback_side != 0.0 else 1.0)
+	var f := _crane_frames(s, lat, side)
+	c.teleport(f[1])
+	c.hold(true)
+	cr.start(f[0], f[1], c.mass)
+
+
+## One step of the crane carrying c (no-op once dropped).
+func _crane_step(c: PlayerCar, cr: Crane, dt: float) -> void:
+	if c.freeze and cr.lifting():
+		cr.step(dt)
+		c.global_transform = cr.car_xform()
+
+
+## The crane lets go: c falls with the velocity of its swing.
+func _crane_drop(c: PlayerCar, cr: Crane) -> void:
+	var v := cr.car_velocity(c.center_of_mass)
+	c.hold(false)
+	c.linear_velocity = v[0]
+	c.angular_velocity = v[1]
+	cr.release()
+
+
 # --- simulation ----------------------------------------------------------------
 
 func _physics_process(dt: float) -> void:
 	car.input = _ap.compute(dt, opp_track) if autopilot else InputManager.get_drive()
+	_crane_step(car, crane, dt)
+	if car.freeze:
+		_held_xf = car.global_transform
 	if opp_car:
 		if online:
 			_update_remote(dt)
@@ -264,7 +307,19 @@ func _physics_process(dt: float) -> void:
 	state_time += dt
 	match state:
 		"hold" when online:
-			if _net_drop >= 0.0:
+			if not _ready_sent and crane.arrived():
+				_ready_sent = true
+				Net.send_ready()
+			if _opp_gone and _net_drop < 0.0:
+				# alone: drop as soon as the car hangs over the road
+				if crane.arrived():
+					if Net.is_online():
+						_net_drop = Net.server_time()
+					else:
+						_drop_start()
+				if not Net.is_online():
+					message = Lang.t("CONNECTION LOST")
+			elif _net_drop >= 0.0:
 				message = "DROP START"
 				if Net.server_time() >= _net_drop:
 					_drop_start()
@@ -275,7 +330,7 @@ func _physics_process(dt: float) -> void:
 				# pedal values unknown until moved once - wait for them
 				message = Lang.t("PRESS GAS + BRAKE")
 				drop_at = maxf(drop_at, state_time + 2.0)
-			elif state_time > 1.5:
+			elif crane.arrived():
 				message = "DROP START"
 			if state_time >= drop_at:
 				_drop_start()
@@ -304,9 +359,12 @@ func _physics_process(dt: float) -> void:
 				XrManager.fade_to(1.0, 0.3).tween_callback(_crane_reposition)
 		"craned":
 			race_time += dt
-			if state_time > 0.8 and (car.input["throttle"] > 0.5 or _accept_pressed or (autopilot and state_time > 1.5)):
-				car.hold(false)
-				crane.release()
+			var over := crane.arrived()
+			message = Lang.t("GAS = DROP") if over else ""
+			if over and _arrived_time < 0.0:
+				_arrived_time = state_time
+			if over and state_time - _arrived_time > 0.3 and (car.input["throttle"] > 0.5 or _accept_pressed or (autopilot and state_time - _arrived_time > 1.0)):
+				_crane_drop(car, crane)
 				Sfx.play("drop", -6.0)
 				message = ""
 				state = "racing"
@@ -335,6 +393,7 @@ func _update_opponent(dt: float) -> void:
 	match opp_state:
 		"held":
 			opp_car.input = idle
+			_crane_step(opp_car, opp_crane, dt)
 		"racing", "finished":
 			opp_track.update_position()
 			opp_ai.race_time = race_time
@@ -352,25 +411,23 @@ func _update_opponent(dt: float) -> void:
 			opp_car.input = idle
 			if opp_state_time > AI_CRANE_DELAY:
 				var rs := path.recovery_s(opp_track.s)
+				var fell := opp_track.lateral()
 				opp_track.move_to(rs)
 				var lat := 0.0
 				if car.freeze and absf(path.delta_s(ptrack.s, rs)) < CRANE_NEAR:
 					# the player hangs on the crane here: set down beside it (the
 					# player's view is not moved)
-					var plat := ptrack.lateral()
+					var plat := _crane_lat(crane)
 					var side := -signf(plat) if absf(plat) > 0.1 else 1.0
 					lat = clampf(plat + side * CRANE_BESIDE, -CRANE_MAX_LAT, CRANE_MAX_LAT)
-				var xf := _hold_transform(rs, lat, HOLD_HEIGHT)
-				opp_car.teleport(xf)
-				opp_car.hold(true)
-				opp_crane.hold(xf)
+				_crane_lift(opp_car, opp_crane, rs, lat, fell)
 				opp_state = "craned"
 				opp_state_time = 0.0
 		"craned":
 			opp_car.input = idle
-			if opp_state_time > AI_DROP_DELAY:
-				opp_car.hold(false)
-				opp_crane.release()
+			_crane_step(opp_car, opp_crane, dt)
+			if opp_crane.arrived() and opp_state_time > opp_crane.duration() + AI_DROP_DELAY:
+				_crane_drop(opp_car, opp_crane)
 				opp_state = "finished" if opp_ai.finished else "racing"
 				opp_state_time = 0.0
 		"wrecked":
@@ -386,11 +443,16 @@ func _update_remote(dt: float) -> void:
 		return
 	if s["held"]:
 		var xf := RemoteDriver.target(s, float(s["t"]))
-		if not opp_car.freeze or opp_car.global_position.distance_to(xf.origin) > 0.05:
+		if not opp_car.freeze or opp_car.global_position.distance_to(xf.origin) > 2.0:
 			opp_car.teleport(xf)
 			opp_car.hold(true)
-			opp_crane.hold(xf)
 			opp_track.move_to(path.s_of(xf.origin, path.nearest(xf.origin)))
+		else:
+			# 30 states a second: glide between them (the car swings on its crane)
+			opp_car.global_transform = opp_car.global_transform.interpolate_with(xf, minf(1.0, dt * 15.0))
+		if not opp_crane.covers(xf.origin):
+			_remote_crane(xf.origin)
+		opp_crane.hang(opp_car.global_transform)
 	elif opp_car.freeze:
 		opp_car.hold(false)
 		opp_crane.release()
@@ -431,6 +493,25 @@ func _status_lines() -> PackedStringArray:
 		else:
 			lines.append(Lang.t("PING %d MS") % roundi(Net.rtt * 1000.0))
 	return lines
+
+
+## Puts the other player's crane up for its car held at pos: on the ground
+## beside the road its side tells where the crane stands.
+func _remote_crane(pos: Vector3) -> void:
+	var i := path.nearest(pos)
+	var s := path.s_of(pos, i)
+	var lat := path.lateral(pos, i)
+	var side := signf(lat) if absf(lat) > 0.1 else 1.0
+	if absf(lat) > path.half_width[i]:
+		lat = side * minf(START_LAT, path.half_width[i] * 0.5)
+	var f := _crane_frames(s, lat, side)
+	opp_crane.setup(f[0], f[1])
+
+
+## Lateral offset of the drop pose of a crane (where its car hangs or will).
+func _crane_lat(cr: Crane) -> float:
+	var o := cr.drop_pose().origin
+	return path.lateral(o, path.nearest(o))
 
 
 func _remote_wrecked() -> void:
@@ -490,10 +571,7 @@ func _opponent_gone(text: String) -> void:
 	opp_crane.visible = false
 	if state != "finished" and state != "wrecked":
 		_flash(text)
-	if state == "hold" and _net_drop < 0.0:
-		_net_drop = Net.server_time() if Net.is_online() else -1.0
-		if _net_drop < 0.0:
-			_drop_start()
+	# still on the crane: "hold" drops alone once the car hangs over the road
 
 
 ## The opponent hangs on its crane close to s.
@@ -502,11 +580,9 @@ func _opp_held_near(s: float) -> bool:
 
 
 func _drop_start() -> void:
-	car.hold(false)
-	crane.release()
+	_crane_drop(car, crane)
 	if opp_car and not online:
-		opp_car.hold(false)
-		opp_crane.release()
+		_crane_drop(opp_car, opp_crane)
 		opp_state = "racing"
 		opp_state_time = 0.0
 	Sfx.play("drop")
@@ -530,33 +606,32 @@ func _lap_completed() -> void:
 
 func _crane_reposition() -> void:
 	var rs := path.recovery_s(ptrack.s)
+	var fell := ptrack.lateral()
 	ptrack.move_to(rs)
 	var lat := 0.0
 	var opp_beside := _opp_held_near(rs)
 	if opp_beside and online:
 		# the other player's car is theirs: set down beside it
-		var olat := opp_track.lateral()
+		var olat := _crane_lat(opp_crane)
 		var side := -signf(olat) if absf(olat) > 0.1 else 1.0
 		lat = clampf(olat + side * CRANE_BESIDE, -CRANE_MAX_LAT, CRANE_MAX_LAT)
 		opp_beside = false
 	elif opp_beside:
 		# both on the crane at the same spot: one left, one right (the
 		# opponent is moved, the player is placed during the fade)
-		lat = (-signf(opp_track.lateral()) if absf(opp_track.lateral()) > 0.1 else -1.0) * CRANE_SIDE_LAT
-	var xf := _hold_transform(rs, lat, HOLD_HEIGHT)
-	car.teleport(xf)
-	car.hold(true)
-	crane.hold(xf)
-	_held_xf = xf
+		var olat := _crane_lat(opp_crane)
+		lat = (-signf(olat) if absf(olat) > 0.1 else -1.0) * CRANE_SIDE_LAT
+	_crane_lift(car, crane, rs, lat, fell)
+	_held_xf = car.global_transform
 	if opp_beside:
-		var oxf := _hold_transform(opp_track.s, -lat, HOLD_HEIGHT)
-		opp_car.teleport(oxf)
-		opp_car.hold(true)
-		opp_crane.hold(oxf)
+		# the opponent starts its lift anew on the other side
+		_crane_lift(opp_car, opp_crane, opp_track.s, -lat, -lat)
+		opp_state_time = 0.0
 	Sfx.play("clank")
 	state = "craned"
 	state_time = 0.0
-	message = Lang.t("GAS = DROP")
+	_arrived_time = -1.0
+	message = ""
 	_update_view()
 	XrManager.fade_to(0.0, 0.35)
 
