@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_league_track_features", "test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -1060,6 +1060,43 @@ func test_wall_on_sample() -> void:
 				ok = absf(p.center[(i + 1) % p.n].y - p.center[i].y) > 5.0
 			check(ok, "wall at x %.1f (%s): one step on the jump (%s)" % [wx, "down" if down else "up", steps])
 			check(m.problems(p).filter(func(o): return o["kind"] == "steep").is_empty(), "wall at x %.1f (%s): not reported steep" % [wx, "down" if down else "up"])
+
+
+## A wall down whose foot is above the ground, on it or below it (a cut):
+## every triangle of the built track that spans the drop stands upright
+## (the tunnel / cut pieces drew it as a slope).
+func test_wall_mesh_upright() -> void:
+	for foot in [6.0, 0.0, -3.0]:
+		var m := TrackEditorModel.new()
+		m.set_start(Vector2(0, 0))
+		m.place_first(Vector2(0, -400))
+		for pc in [TrackEditorModel.curve("R", 90, 55), TrackEditorModel.straight(60), TrackEditorModel.curve("R", 90, 55),
+				TrackEditorModel.straight(400), TrackEditorModel.curve("R", 90, 55)]:
+			m.place(m.group_for(pc))
+		m.place(m.closing_group(), true)
+		var wx := 56.0
+		m.heights = [[30.0, 13.0, false, 0], [wx, 13.0, false, 0], [wx, foot, false, 1], [110.0, foot + 2.0, false, 0]]
+		m._tidy_heights()
+		var p := TrackPath.new(m.to_def("t"))
+		var node := TrackNode.new().build(p)
+		var slanted := 0
+		for c in node.get_children():     # (the drop: from about 13 m down to the foot)
+			if not (c is MeshInstance3D) or (c as MeshInstance3D).mesh == null:
+				continue
+			var mesh := (c as MeshInstance3D).mesh
+			for sf in mesh.get_surface_count():
+				var v: PackedVector3Array = mesh.surface_get_arrays(sf)[Mesh.ARRAY_VERTEX]
+				for t in range(0, v.size(), 3):
+					var lo := minf(v[t].y, minf(v[t + 1].y, v[t + 2].y))
+					var hi := maxf(v[t].y, maxf(v[t + 1].y, v[t + 2].y))
+					var a0 := minf(-v[t].z, minf(-v[t + 1].z, -v[t + 2].z))     # along the start straight
+					var a1 := maxf(-v[t].z, maxf(-v[t + 1].z, -v[t + 2].z))
+					var nrm := (v[t + 1] - v[t]).cross(v[t + 2] - v[t])
+					# spanning the drop and not upright (walls and side walls are)
+					if lo < foot + 2.0 and hi > 11.0 and a1 > wx - 5.0 and a0 < wx + 5.0 							and nrm.length() > 1e-6 and absf(nrm.normalized().y) > 0.05:
+						slanted += 1
+		check(slanted == 0, "wall down to %.0f m: drop built upright (%d slanted triangles)" % [foot, slanted])
+		node.free()
 
 
 func _editor_oval() -> TrackEditorModel:

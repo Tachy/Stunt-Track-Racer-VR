@@ -97,7 +97,11 @@ func _build_static() -> void:
 	var road_faces := PackedVector3Array()
 	var wall_faces := PackedVector3Array()
 	for i in path.n:
-		if _is_tunnel_segment(i) or _is_cut_segment(i):
+		# a vertical wall (pit, jump) is a step even where its foot reaches the
+		# ground or below (a cut): the tunnel pieces know no steps and would
+		# draw the drop as a slope
+		var is_step := path.road[i] == 1 and path.step[i] == 1 and path.deck[i] == 0
+		if not is_step and (_is_tunnel_segment(i) or _is_cut_segment(i)):
 			_emit_tunnel_segment(tkit, road_faces, wall_faces, i)
 		else:
 			_emit_segment(kit, road_faces, wall_faces, i)
