@@ -39,7 +39,8 @@ const LINK_FRICTION := 0.005      # m: friction torque in the links = this x cha
 
 ## Sequence: on the ground, pull the chain in, carry over the road (trolley,
 ## without jerk; it sets off TROLLEY_LEAD before the chain is all in), let the chain out
-## (only where the road lies lower than the ground spot).
+## (only where the road lies lower than the ground spot or a banked road's
+## upper edge). Winch and trolley both move without jerk.
 const GROUND_GAP := 3.0           # car origin this far beside the road edge
 const EDGE_CLEAR := 1.0           # wheels this high over the edge of a cut
 const WAIT_TIME := 0.6            # on the ground before the lift (chains tighten)
@@ -156,17 +157,18 @@ static func link_mesh() -> ArrayMesh:
 
 ## Puts the crane up for a car that starts at ground (world pose, beside the
 ## road) and is dropped at target (over the road): tower beside the ground
-## spot, jib across the road at the height the road there asks for. Does not
-## move the car.
-func setup(target: Transform3D, ground: Transform3D) -> void:
+## spot, jib across the road at the height the road there asks for. travel:
+## how high (crane y) the car must be carried over the road (a banked road's
+## upper edge). Does not move the car.
+func setup(target: Transform3D, ground: Transform3D, travel := 0.0) -> void:
 	_target = target
 	if is_inside_tree():
 		global_transform = target
 	var g := target.affine_inverse() * ground.origin
 	var side := signf(g.x) if absf(g.x) > 0.01 else 1.0
-	# the trolley as high above the higher of road and ground spot as the
-	# pulled-in chain needs
-	_jib_y = (g.y + EDGE_CLEAR if g.y > 0.0 else 0.0) + PIVOT
+	# the trolley as high above the highest of road, its upper edge and the
+	# ground spot as the pulled-in chain needs
+	_jib_y = maxf(g.y + EDGE_CLEAR if g.y > 0.0 else 0.0, travel) + PIVOT
 	var hanging := _jib_y - HOOK_HEIGHT       # chain length with the car at y = 0
 	var start := Vector2(g.x, _jib_y - g.y - HOOK_HEIGHT)
 	_side = side
@@ -175,13 +177,12 @@ func setup(target: Transform3D, ground: Transform3D) -> void:
 	_plan_c.clear()
 	_total = 0.0
 	var pull := start.y - CHAIN_LEN
-	_plan(_plan_c, start.y, CHAIN_LEN, WAIT_TIME, LIFT_TIME, "cos")
-	# (the lift is a cosine move: TROLLEY_LEAD left at u = acos(2 lead / pull - 1) / pi)
+	_plan(_plan_c, start.y, CHAIN_LEN, WAIT_TIME, LIFT_TIME)
 	var t_x := WAIT_TIME
 	if pull > TROLLEY_LEAD:
-		t_x += LIFT_TIME * acos(2.0 * TROLLEY_LEAD / pull - 1.0) / PI
-	_plan(_plan_x, g.x, 0.0, t_x, TROLLEY_TIME, "trolley")
-	_plan(_plan_c, CHAIN_LEN, hanging, t_x + TROLLEY_TIME, LIFT_TIME, "cos")
+		t_x += LIFT_TIME * _smooth_at(1.0 - TROLLEY_LEAD / pull)
+	_plan(_plan_x, g.x, 0.0, t_x, TROLLEY_TIME)
+	_plan(_plan_c, CHAIN_LEN, hanging, t_x + TROLLEY_TIME, LIFT_TIME)
 	_total = maxf(_total, WAIT_TIME)
 	_lagged = false
 	_swung = false
@@ -193,11 +194,30 @@ func setup(target: Transform3D, ground: Transform3D) -> void:
 
 
 ## A move of one axis from a to b, starting at t0 (none if there is no way to go).
-func _plan(axis: Array, a: float, b: float, t0: float, dur: float, kind: String) -> void:
+func _plan(axis: Array, a: float, b: float, t0: float, dur: float) -> void:
 	if absf(b - a) < 0.05:
 		return
-	axis.append({"t0": t0, "dur": dur, "a": a, "b": b, "kind": kind})
+	axis.append({"t0": t0, "dur": dur, "a": a, "b": b})
 	_total = maxf(_total, t0 + dur)
+
+
+## Minimum jerk move (winch and trolley alike): share of the way at time
+## share u - long, gentle phases of speeding up and slowing down.
+static func _smooth(u: float) -> float:
+	return u * u * u * (10.0 - 15.0 * u + 6.0 * u * u)
+
+
+## Time share at which a minimum jerk move has done share f of its way.
+static func _smooth_at(f: float) -> float:
+	var lo := 0.0
+	var hi := 1.0
+	for _it in 40:
+		var mid := (lo + hi) * 0.5
+		if _smooth(mid) < f:
+			lo = mid
+		else:
+			hi = mid
+	return (lo + hi) * 0.5
 
 
 ## Mast from the ground up to the jib, jib across the road with the counter
@@ -253,8 +273,8 @@ static func _lattice(kit: MeshKit, base: Vector3, h: float, w: float, col: Color
 ## Car at ground (world pose beside the road), to be set down at target: the
 ## lift starts. mass: the car's (kg). road: the road's extent across (crane x,
 ## from the target) - an early drop needs the car over it.
-func start(target: Transform3D, ground: Transform3D, mass: float, road := Vector2(-INF, INF)) -> void:
-	setup(target, ground)
+func start(target: Transform3D, ground: Transform3D, mass: float, road := Vector2(-INF, INF), travel := 0.0) -> void:
+	setup(target, ground, travel)
 	_road = road
 	_mode = "lift"
 	_t = 0.0
@@ -378,16 +398,10 @@ static func _eval_axis(axis: Array, t: float, keep: float) -> Array:
 	var u := (t - float(seg["t0"])) / dur
 	if u >= 1.0:
 		return [a + d, 0.0, 0.0]
-	match seg["kind"]:
-		"trolley":
-			# minimum jerk: no sudden change of acceleration
-			return [a + d * u * u * u * (10.0 - 15.0 * u + 6.0 * u * u),
-				d / dur * 30.0 * u * u * (1.0 - u) * (1.0 - u),
-				d / (dur * dur) * 60.0 * u * (1.0 - u) * (1.0 - 2.0 * u)]
-		_:
-			return [a + d * (1.0 - cos(PI * u)) * 0.5,
-				d * PI / (2.0 * dur) * sin(PI * u),
-				d * PI * PI / (2.0 * dur * dur) * cos(PI * u)]
+	# minimum jerk: no sudden change of acceleration
+	return [a + d * _smooth(u),
+		d / dur * 30.0 * u * u * (1.0 - u) * (1.0 - u),
+		d / (dur * dur) * 60.0 * u * (1.0 - u) * (1.0 - 2.0 * u)]
 
 
 func _place_pivot() -> void:
@@ -442,7 +456,7 @@ func release() -> void:
 	_t_free = 0.0
 	_plan_back.clear()
 	if absf(_pos.x - _home_x) > 0.05:
-		_plan_back.append({"t0": RETURN_DELAY, "dur": RETURN_TIME, "a": _pos.x, "b": _home_x, "kind": "trolley"})
+		_plan_back.append({"t0": RETURN_DELAY, "dur": RETURN_TIME, "a": _pos.x, "b": _home_x})
 
 
 func _hook_pos() -> Vector3:

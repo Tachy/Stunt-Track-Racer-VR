@@ -274,7 +274,16 @@ func _crane_lift(c: PlayerCar, cr: Crane, s: float, lat: float, fallback_side: f
 	c.teleport(f[1])
 	c.hold(true)
 	var hw := path.half_width[path.index_at_s(s)]
-	cr.start(f[0], f[1], c.mass, Vector2(-hw - lat, hw - lat))
+	cr.start(f[0], f[1], c.mass, Vector2(-hw - lat, hw - lat), _crane_travel(s, f[0]))
+
+
+## How high (crane y over the drop pose) the crane carries a car over the
+## road at s: its drop height over the upper edge of a banked road.
+func _crane_travel(s: float, target: Transform3D) -> float:
+	var i := path.index_at_s(s)
+	var hw := path.half_width[i]
+	var edge := maxf(path.road_height(i, -hw), path.road_height(i, hw))
+	return maxf(edge + CarModel.RIDE_HEIGHT + HOLD_HEIGHT - target.origin.y, 0.0)
 
 
 ## One step of the crane carrying c (no-op once dropped).
@@ -502,7 +511,7 @@ func _remote_crane(pos: Vector3) -> void:
 	if absf(lat) > path.half_width[i]:
 		lat = side * minf(START_LAT, path.half_width[i] * 0.5)
 	var f := _crane_frames(s, lat, side)
-	opp_crane.setup(f[0], f[1])
+	opp_crane.setup(f[0], f[1], _crane_travel(s, f[0]))
 
 
 ## Lateral offset of the drop pose of a crane (where its car hangs or will).

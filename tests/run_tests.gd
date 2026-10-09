@@ -549,6 +549,21 @@ func test_crane_chains() -> void:
 	check(near(crane._pos.x, 7.0, 0.01), "crane: trolley back over the ground spot (x %.2f)" % crane._pos.x)
 	var main_end: Vector3 = crane._chains[0]["pts"][crane._chains[0]["pts"].size() - 1]
 	check(not is_nan(main_end.x) and Vector2(main_end.x - crane._pivot.x, main_end.z - crane._pivot.z).length() < Crane.CHAIN_LEN, "crane: the chain came along")
+	# banked road: carried over the upper edge, then let down onto the drop pose
+	crane.start(target, ground, 900.0, Vector2(-INF, INF), 2.0)
+	var top := -INF
+	t = 0.0
+	while not crane.arrived() and t < 30.0:
+		crane.step(dt)
+		t += dt
+		if absf((target.affine_inverse() * crane.car_xform().origin).x) < 3.0:
+			top = maxf(top, (target.affine_inverse() * crane.car_xform().origin).y)
+	check(top > 1.9, "crane: carried over the upper edge (%.2f m over the drop pose)" % top)
+	check(near((target.affine_inverse() * crane.car_xform().origin).y, 0.0, 0.3), "crane: then let down to its drop pose")
+	# winch: starts and stops gently (no jump in speed or acceleration)
+	var lift: Dictionary = crane._plan_c[0]
+	var v0: Array = Crane._eval_axis(crane._plan_c, float(lift["t0"]) + 0.01, 0.0)
+	check(absf(v0[1]) < 0.05 and absf(v0[2]) < 1.0, "crane: the winch starts gently (v %.3f, a %.2f)" % [v0[1], v0[2]])
 	crane.free()
 
 
