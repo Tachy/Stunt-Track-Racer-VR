@@ -72,7 +72,7 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_elapsed += delta
 	if _args.has("joydump") and fmod(_elapsed, 0.5) < delta:
-		print("[Joy] live axes: %s  pedals_ready=%s gas=%.2f brake=%.2f" % [InputManager._live_axes, InputManager.pedals_ready(), InputManager.gas(), InputManager.brake()])
+		print("[Joy] live axes: %s  gas=%.2f brake=%.2f" % [InputManager._live_axes, InputManager.gas(), InputManager.brake()])
 		for id in Input.get_connected_joypads():
 			var axes := []
 			for a in 10:

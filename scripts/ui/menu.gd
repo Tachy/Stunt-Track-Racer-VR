@@ -28,7 +28,6 @@ var _showcase: Node3D
 var _preview: TrackPreview3D
 var _cal: Dictionary = {}
 var _time := 0.0
-var _pedals_shown := true
 # online screen: the open races of the others (a window of OFFER_ROWS rows),
 # then our own offer
 const OFFER_ROWS := 4
@@ -118,9 +117,6 @@ func _process(delta: float) -> void:
 		_refresh()
 	elif screen_name in ["online", "online_setup", "edit"] and Engine.get_process_frames() % 30 == 0:
 		_refresh()   # connection state, ping
-	elif screen_name == "main" and InputManager.pedals_ready() != _pedals_shown:
-		_pedals_shown = InputManager.pedals_ready()
-		_refresh()
 
 
 # --- screens -----------------------------------------------------------------------
@@ -218,8 +214,6 @@ func _screen_main(sc: PixelScreen) -> void:
 	sc.text_centered(140, Lang.t("INPUT: ") + dev.left(40), Palette.WHITE, 3.0)
 	if InputManager.device >= 0 and not InputManager.calibrated:
 		sc.text_centered(180, Lang.t("PLEASE CALIBRATE THE WHEEL FIRST!"), Palette.RED, 3.0)
-	elif not InputManager.pedals_ready():
-		sc.text_centered(180, Lang.t("PLEASE PRESS GAS AND BRAKE ONCE"), Palette.RED, 3.0)
 	if XrManager.xr_active:
 		sc.text_centered(220, Lang.t("VR MODE"), Palette.GREEN, 3.0)
 	else:

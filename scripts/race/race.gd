@@ -327,11 +327,7 @@ func _physics_process(dt: float) -> void:
 			elif not Net.is_online():
 				message = Lang.t("CONNECTION LOST")
 		"hold":
-			if not autopilot and not InputManager.pedals_ready():
-				# pedal values unknown until moved once - wait for them
-				message = Lang.t("PRESS GAS + BRAKE")
-				drop_at = maxf(drop_at, state_time + 2.0)
-			elif crane.arrived():
+			if crane.arrived():
 				message = "DROP START"
 			if state_time >= drop_at:
 				_drop_start()

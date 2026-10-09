@@ -47,8 +47,11 @@ var _nav_timer := 0.0
 var _gas_latched := false
 var _brake_latched := false
 var _btn_state := {}
-## Axes that have reported a real value since start. Godot/SDL report 0 for
-## an axis until it moves - a pedal resting at -1 would read as half pressed.
+## Axes that have reported a real value since start. SDL keeps an axis'
+## first value to itself until the axis really moves (then it sends that
+## value, then the motion), and Godot reads 0 until then - a pedal resting at
+## -1 would read as half pressed. A pedal that has not moved yet is at rest:
+## gas() and brake() read it as released.
 var _live_axes := {}
 
 
@@ -156,13 +159,6 @@ func wheel_angle_deg() -> float:
 	if device >= 0 and calibrated:
 		return wheel_norm() * Settings.wheel_range_deg * 0.5
 	return _kb_steer * Settings.wheel_range_deg * 0.5
-
-
-## True once both pedals have sent real values (pressed once after start).
-func pedals_ready() -> bool:
-	if device < 0 or not calibrated:
-		return true
-	return axis_live(gas_axis) and axis_live(brake_axis)
 
 
 func axis_live(axis: int) -> bool:
