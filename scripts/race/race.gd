@@ -53,7 +53,7 @@ var _opp_slow_time := 0.0
 # online: req["online"] = {slot, opp_name, opp_color}
 var online := false
 var _remote: RemoteDriver
-var _net_drop := -1.0         # drop time on the server clock (s), -1 until START
+var _net_drop := -1.0         # our drop on the server clock (s): race clock zero, -1 until then
 var _net_result := {}         # {winner, reason} from the server
 var _opp_gone := false        # opponent left or the connection is lost
 var _opp_lap_ms := 0.0
@@ -70,7 +70,6 @@ var state := "hold"
 var state_time := 0.0
 var race_time := 0.0
 var message := ""
-var drop_at := 3.0
 var opp_finished_first := false
 var result := {}
 var autopilot := false
@@ -94,7 +93,7 @@ var _banner_text := ""
 var _ap: AiDriver
 var _ground_dist := 0.0   # debug: path distance driven with wheel 0 on the ground
 var _accept_pressed := false
-var _ready_sent := false      # online: READY goes out once the car hangs over the road
+var _lift_at := -1.0          # online: server time both cranes start lifting (START), -1 until then
 var _arrived_time := -1.0     # state_time the player's car may be dropped from
 
 const PAUSE_ITEMS := ["CONTINUE", "RETIRE"]
@@ -208,11 +207,6 @@ func _ready() -> void:
 		_ap = AiDriver.new(ptrack, profile, floors, 0.95, [])
 		_ap.lat = lat
 		_ap.lat_target = lat
-	# both cars drop together, a moment after both hang over the road
-	var lift_time := crane.duration()
-	if opp_crane and not online:
-		lift_time = maxf(lift_time, opp_crane.duration())
-	drop_at = lift_time + _rng.randf_range(1.0, 2.5)
 	state = "hold"
 	state_time = 0.0
 
@@ -226,6 +220,7 @@ func _ready() -> void:
 		Net.opponent_event.connect(_on_net_opponent)
 		Net.result_received.connect(_on_net_result)
 		Net.disconnected.connect(_on_net_lost)
+		Net.send_ready()
 		message = Lang.t("WAITING FOR OPPONENT")
 	print("[Race] %s vs %s (super=%s%s)" % [def["name"], opp_driver.get("name", "-"), super_league, ", online" if online else ""])
 
@@ -306,7 +301,8 @@ func _crane_drop(c: PlayerCar, cr: Crane) -> void:
 
 func _physics_process(dt: float) -> void:
 	car.input = _ap.compute(dt, opp_track) if autopilot else InputManager.get_drive()
-	_crane_step(car, crane, dt)
+	if not online or state != "hold" or _lifting():
+		_crane_step(car, crane, dt)
 	if car.freeze:
 		_held_xf = car.global_transform
 	if opp_car:
@@ -317,28 +313,19 @@ func _physics_process(dt: float) -> void:
 	state_time += dt
 	match state:
 		"hold" when online:
-			if not _ready_sent and crane.arrived():
-				_ready_sent = true
-				Net.send_ready()
-			if _opp_gone and _net_drop < 0.0:
-				# alone: drop as soon as the car hangs over the road
-				if crane.arrived():
-					if Net.is_online():
-						_net_drop = Net.server_time()
-					else:
-						_drop_start()
-				if not Net.is_online():
-					message = Lang.t("CONNECTION LOST")
-			elif _net_drop >= 0.0:
+			if _lifting():
+				# both cranes started together: drop at the first chance
 				message = "DROP START"
-				if Net.server_time() >= _net_drop:
+				if crane.droppable():
 					_drop_start()
+			elif _lift_at >= 0.0:
+				message = "DROP START"
 			elif not Net.is_online():
 				message = Lang.t("CONNECTION LOST")
 		"hold":
-			if crane.arrived():
-				message = "DROP START"
-			if state_time >= drop_at:
+			# both cars at the first chance (mirrored start: the same moment)
+			message = "DROP START"
+			if crane.droppable() and (opp_crane == null or opp_crane.droppable()):
 				_drop_start()
 		"racing":
 			race_time += dt
@@ -528,8 +515,14 @@ func _remote_wrecked() -> void:
 
 
 func _on_net_start(server_s: float) -> void:
-	_net_drop = server_s
-	print("[Race] online drop in %.2f s" % (server_s - Net.server_time()))
+	_lift_at = server_s
+	print("[Race] online: cranes lift in %.2f s" % (server_s - Net.server_time()))
+
+
+## Online, at the start: the cranes lift from the server's START time on
+## (alone: right away).
+func _lifting() -> bool:
+	return _opp_gone or (_lift_at >= 0.0 and Net.server_time() >= _lift_at)
 
 
 func _on_net_opponent(what: int, laps: int, race_s: float) -> void:
@@ -586,6 +579,9 @@ func _opp_held_near(s: float) -> bool:
 
 
 func _drop_start() -> void:
+	if online:
+		# the shared race clock starts at the drop (both cranes run alike)
+		_net_drop = Net.server_time() if Net.is_online() else -1.0
 	_crane_drop(car, crane)
 	if opp_car and not online:
 		_crane_drop(opp_car, opp_crane)
