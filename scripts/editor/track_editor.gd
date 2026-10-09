@@ -25,9 +25,10 @@ extends Control
 ## point snaps there as a vertical wall: wall down + wall up = pit (floor on
 ## the ground: the ground), wall down alone = ski jump. Dragged away to the
 ## side again it is a spline point. A click on the road marks its piece
-## (B drawbridge). The camera turns around the point selected last (right
-## mouse button; wheel = distance); marking a piece does not move it. Top left the plan (PlanNav):
-## click = piece, right mouse = push, wheel = zoom. Esc undo.
+## (B drawbridge) and leaves the camera where it is. The camera turns around
+## the point selected last (right mouse button; wheel = distance). Top left
+## the plan (PlanNav): click = the piece there, the camera turns around it;
+## right mouse = push, wheel = zoom. Esc undo.
 ## Below the ground the road becomes a cut and a tunnel by itself.
 
 signal start_race(request: Dictionary)
@@ -174,7 +175,7 @@ func _build_bar() -> void:
 	# navigation window of the height stage
 	_nav = PlanNav.new()
 	_nav.visible = false
-	_nav.piece_clicked.connect(func(k: int): _h3d.select_piece(k))
+	_nav.piece_clicked.connect(func(k: int): _h3d.select_piece(k, true))   # the camera goes there
 	add_child(_nav)
 
 

@@ -2,8 +2,9 @@ class_name HeightEditor3D
 extends Node3D
 ## The track editor's height stage in 3D (desktop and VR): the track with a
 ## see-through ground and tunnels, the height line and its points drawn on
-## the road, the camera circling the point selected last (XrManager's
-## rig: the HMD adds the head's own movement in VR).
+## the road, the camera circling the point selected last or the piece
+## picked in the navigation window (XrManager's rig: the HMD adds the head's
+## own movement in VR).
 ##   left click   a point: select and drag it (along the lap and up / down,
 ##                on the vertical surface over the plan - HeightRibbon);
 ##                the road: mark its piece (the camera stays put)
@@ -56,7 +57,8 @@ var problems: Array = []
 ## VR keeps the eye level (only yaw); the desktop camera also pitches.
 var level_eye := false
 ## Where the camera turns around when no point is selected (the point
-## selected last; null: the whole track).
+## selected last or the piece picked in the navigation window; null: the
+## whole track).
 var _pivot: Variant = null
 
 var _hover := -1
@@ -250,10 +252,16 @@ func select_point(i: int) -> void:
 	selected.emit()
 
 
-## Marks piece k (B drawbridge, info line); the camera stays where it is.
-func select_piece(k: int) -> void:
+## Marks piece k (B drawbridge, info line). move_camera (a click in the
+## navigation window): the camera turns around its middle from now on; else
+## (a click in the 3D view) it stays where it is.
+func select_piece(k: int, move_camera := false) -> void:
 	piece = k
 	point = -1
+	if move_camera and k >= 0 and k < path.pieces.size():
+		var pc: Dictionary = path.pieces[k]
+		_pivot = path.center[(int(pc["i0"]) + int(pc["i1"])) / 2]
+		_retarget()
 	_line_dirty = true
 	_static_dirty = true
 	selected.emit()
@@ -268,8 +276,9 @@ func _piece_at_x(x: float) -> int:
 	return path.pieces.size() - 1
 
 
-## What the camera turns around: the selected point, else the point selected
-## last (marking a piece does not move the camera); null: the whole track.
+## What the camera turns around: the selected point, else _pivot (the point
+## selected last, or the middle of the piece picked in the navigation
+## window; a piece marked in the 3D view does not move it).
 func focus() -> Variant:
 	if point >= 0 and point < model.points().size():
 		return point_pos(point)
