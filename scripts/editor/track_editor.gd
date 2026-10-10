@@ -459,7 +459,7 @@ func _update() -> void:
 		_nav.position = o + Vector2(10, 72)
 		_nav.size = Vector2(maxf(220.0, us.x * 0.28), maxf(160.0, us.y * 0.34))
 		_info.text = _height_info()
-		_status.text = Lang.t("CLICK = SELECT / DRAG POINT (SHIFT/CTRL: MORE)  DOUBLE CLICK = CAMERA TO POINT / NEW POINT ON ROAD  RIGHT CLICK = REMOVE  RIGHT MOUSE = TURN  MIDDLE MOUSE = MOVE  WHEEL = DISTANCE  C KINK  UP/DOWN HEIGHT  LEFT/RIGHT ALONG  B BRIDGE  ESC UNDO")
+		_status.text = Lang.t("CLICK = SELECT / DRAG POINT (SHIFT/CTRL: MORE)  DOUBLE CLICK = CAMERA TO POINT / NEW POINT ON ROAD  RIGHT CLICK = REMOVE  RIGHT MOUSE = TURN  MIDDLE MOUSE = MOVE  WHEEL = DISTANCE  C KINK  UP/DOWN HEIGHT  LEFT/RIGHT ALONG  W WAVE  B BRIDGE  ESC UNDO")
 		if model.official != "":
 			_status.text += "  " + Lang.t("N NO CRANE  G GAP")
 		queue_redraw()
@@ -900,7 +900,18 @@ func _height_key(k: InputEventKey) -> bool:
 			if not model.undo_height():
 				_flash(Lang.t("NOTHING TO UNDO"))
 				return true
+			_h3d.wave = -1
 			_h3d.select_point(mini(_h3d.point, model.points().size() - 1))
+		KEY_W:
+			if not _h3d.add_wave_at_mouse():
+				_flash(Lang.t("POINT AT THE ROAD FIRST"))
+				return true
+		KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT when _h3d.wave >= 0 and _h3d.wave < model.waves.size():
+			var w: Array = model.waves[_h3d.wave]
+			var step := TrackEditorModel.WAVE_STEP if k.keycode in [KEY_UP, KEY_DOWN] else 1.0
+			var dx: float = {KEY_LEFT: -1.0, KEY_RIGHT: 1.0}.get(k.keycode, 0.0) * (4.0 if k.shift_pressed else 1.0)
+			var dh: float = {KEY_UP: step, KEY_DOWN: -step}.get(k.keycode, 0.0)
+			_h3d.wave = model.set_wave(_h3d.wave, float(w[0]) + dx, float(w[2]) + dh)
 		KEY_UP, KEY_DOWN:
 			var pt := _h3d.point
 			if pt < 0:
@@ -955,7 +966,11 @@ func _height_info() -> String:
 		t += "  " + Lang.t("TOO STEEP %d") % ns
 	var pts := model.points()
 	var pt := _h3d.point
-	if pt == 0 or pt == pts.size() - 1:
+	if _h3d.wave >= 0 and _h3d.wave < model.waves.size():
+		var w: Array = model.waves[_h3d.wave]
+		t += "   >  " + Lang.t("WAVE AT %d M  HEIGHT %.1f M") % [roundi(float(w[0])), float(w[2])] + "  " \
+			+ Lang.t("RIGHT EDGE" if int(w[1]) > 0 else "LEFT EDGE")
+	elif pt == 0 or pt == pts.size() - 1:
 		t += "   >  " + Lang.t("START HEIGHT %.1f M") % model.base
 	elif pt > 0:
 		t += "   >  " + Lang.t("POINT AT %d M  HEIGHT %.1f M") % [roundi(pts[pt][0]), float(pts[pt][1])]

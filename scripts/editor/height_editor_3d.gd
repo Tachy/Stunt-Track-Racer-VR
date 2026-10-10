@@ -16,8 +16,12 @@ extends Node3D
 ##                the road: a new point there (not selected)
 ##   right click  a point: delete it; dragged: turn the camera
 ##   middle mouse dragged: moves the camera and the point it turns around
+##   W            a wave on the edge of the road under the mouse (TrackPath
+##                "waves"); a click on its orange mark selects it and drags
+##                it along the lap (its height: the cursor keys only), a
+##                right click removes it
 ##   wheel        camera distance
-## The point logic is TrackEditorModel's (snapping to walls, slope limit,
+## The point logic is TrackEditorModel's (snapping to walls at 80 deg,
 ## undo). While a point is dragged the line follows at once, the road
 ## PREVIEW_RATE times a second (built in a worker thread).
 
@@ -30,6 +34,7 @@ signal selected
 
 const WALL_LINE := Color("#ffd400")     # vertical walls and their lower points
 const POINT_ON := Color("#4fd8ff")      # selected point
+const WAVE_MARK := Color("#ff8a3d")     # a wave on the edge of the road
 const PIECE_ON := Color("#e0302a")      # selected piece (also in the plan)
 const PROBLEM_CROSSING := Color(1.0, 0.25, 0.2)
 const PROBLEM_STEEP := Color(1.0, 0.6, 0.1)
@@ -64,6 +69,8 @@ var point := -1                   # selected point (index in model.points())
 ## they move together. _mark_anchor: where Ctrl+click marks from.
 var marked: Array = []
 var _mark_anchor := -1
+var wave := -1                    # selected wave (index in model.waves)
+var _wave_drag := false           # the selected wave follows the mouse
 var piece := -1                   # selected piece
 ## Problems of the built track: [{pos: plan point, kind, at: path point}].
 var problems: Array = []
@@ -163,7 +170,7 @@ static func line_color(h: float) -> Color:
 
 
 func dragging() -> bool:
-	return _drag >= 0
+	return _drag >= 0 or _wave_drag
 
 
 # --- building the track ------------------------------------------------------------
@@ -269,6 +276,7 @@ func point_pos(i: int) -> Vector3:
 ## turns around it from now on; else it stays where it is.
 func select_point(i: int, move_camera := false) -> void:
 	point = i
+	wave = -1
 	marked = [i] if i >= 0 else []
 	_mark_anchor = i
 	if i >= 0:
@@ -288,6 +296,7 @@ func select_piece(k: int, move_camera := false) -> void:
 	piece = k
 	point = -1
 	marked = []
+	wave = -1
 	if move_camera and k >= 0 and k < path.pieces.size():
 		var pc: Dictionary = path.pieces[k]
 		_pivot = path.center[(int(pc["i0"]) + int(pc["i1"])) / 2]
@@ -304,6 +313,70 @@ func _piece_at_x(x: float) -> int:
 		if pc["type"] != "O" and x >= float(pc["x0"]) and x < float(pc["x0"]) + float(pc["length"]):
 			return k
 	return path.pieces.size() - 1
+
+
+## Selects wave k (orange mark; -1: none).
+func select_wave(k: int) -> void:
+	wave = k
+	point = -1
+	marked = []
+	if k >= 0:
+		piece = _piece_at_x(float(model.waves[k][0]))
+	_line_dirty = true
+	_static_dirty = true
+	selected.emit()
+
+
+## 3D position of the mark of wave k: on its edge of the road.
+func wave_pos(k: int) -> Vector3:
+	var w: Array = model.waves[k]
+	var i := path._index_at_x(float(w[0]))
+	return path.center[i] + path.right[i] * path.half_width[i] * float(w[1]) + path.up[i] * LINE_LIFT
+
+
+## W: a wave where the mouse is on the road, on the edge of the half it
+## points at; selected. False if the mouse is not on the road.
+func add_wave_at_mouse() -> bool:
+	var hit: Variant = _road_hit(_mouse) if _mouse.x >= 0.0 else null
+	if hit == null:
+		return false
+	var i: int = hit[1]
+	var side := 1 if ((hit[0] as Vector3) - path.center[i]).dot(path.right[i]) >= 0.0 else -1
+	var k := model.add_wave(_x_of_hit(hit[0], hit[1]), side)
+	if k < 0:
+		return false
+	select_wave(k)
+	rebuild(true)
+	edited.emit()
+	return true
+
+
+## Dragging the selected wave: along the lap to where the mouse is (on the
+## surface over the plan, as a dragged point); its height stays.
+func _wave_to(pos: Vector2) -> void:
+	if wave < 0 or wave >= model.waves.size():
+		return
+	var w: Array = model.waves[wave]
+	var r := view.ray(pos)
+	var h: Variant = ribbon.hit(r[0], r[1], float(w[0]))
+	if h == null:
+		return
+	wave = model.set_wave(wave, (h as Vector2).x, float(w[2]), false)
+	rebuild(false)
+	_line_dirty = true
+	dragged.emit()
+
+
+## Wave mark under the screen position (-1 if none).
+func _wave_at(pos: Vector2) -> int:
+	var best := -1
+	var best_d := PICK_PX
+	for k in model.waves.size():
+		var sp: Variant = view.to_screen(wave_pos(k))
+		if sp != null and (sp as Vector2).distance_to(pos) < best_d:
+			best_d = (sp as Vector2).distance_to(pos)
+			best = k
+	return best
 
 
 ## Shift+click (toggle) / Ctrl+click (span) on point i: marks it
@@ -428,6 +501,8 @@ func handle(event: InputEvent) -> bool:
 		_mouse = mm.position
 		if _drag >= 0:
 			_drag_to(mm.position)
+		elif _wave_drag:
+			_wave_to(mm.position)
 		elif _panning:
 			pan(mm.relative)
 		elif _right_down:
@@ -445,6 +520,10 @@ func handle(event: InputEvent) -> bool:
 		MOUSE_BUTTON_LEFT:
 			if mb.pressed:
 				_left_click(mb.position, mb.double_click, mb.shift_pressed, mb.ctrl_pressed)
+			elif _wave_drag:
+				_wave_drag = false
+				rebuild(true)
+				edited.emit()
 			elif _drag >= 0:
 				if _drag_single and not _drag_moved:
 					select_point(_drag)       # a click on one of several: that one alone
@@ -460,6 +539,11 @@ func handle(event: InputEvent) -> bool:
 			else:
 				if not _turning:
 					var i := _point_at(mb.position)
+					var wk := _wave_at(mb.position) if i < 0 else -1
+					if wk >= 0 and model.delete_wave(wk):
+						wave = -1
+						rebuild(true)
+						edited.emit()
 					if i >= 0 and model.delete_point(i):
 						point = -1
 						marked = []
@@ -481,6 +565,13 @@ func handle(event: InputEvent) -> bool:
 
 func _left_click(pos: Vector2, double: bool, shift := false, ctrl := false) -> void:
 	var i := _point_at(pos)
+	if i < 0 and not double:
+		var wk := _wave_at(pos)
+		if wk >= 0:
+			select_wave(wk)
+			model.snapshot_heights()
+			_wave_drag = true
+			return
 	if i >= 0:
 		if (shift or ctrl) and not double:
 			mark_point(i, ctrl)
@@ -818,6 +909,10 @@ func _draw_points() -> void:
 			_diamond(kit, p, s * 0.75, col)
 		else:
 			kit.box(p, Vector3.ONE * s, col)
+	for k in model.waves.size():
+		var wp := wave_pos(k)
+		var ws := POINT_PX * view.pixel_metres(wp)
+		_diamond(kit, wp, ws * 0.9, POINT_ON if k == wave else WAVE_MARK)
 	_point_mesh.clear_surfaces()
 	kit.build(_point_mesh)
 

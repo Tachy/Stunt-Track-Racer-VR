@@ -45,6 +45,9 @@ var _next_group := 0
 ## undo snapshots of the height stage.
 var base := DEFAULT_BASE
 var heights: Array = []
+## Waves on one edge of the road ([x, side, h], see TrackPath "waves"),
+## sorted by x.
+var waves: Array = []
 var _height_undo: Array = []
 ## An official track (TrackLibrary, server/official): its id ("" for an
 ## own track) and the rest of its definition - name, theme, boost values,
@@ -61,7 +64,7 @@ var tail_pos := Vector2.ZERO
 var tail_dir := Vector2.ZERO
 var _cut: Dictionary = {}
 ## Undo snapshots of moved stretches and start lines (move_block(),
-## move_start()): [start, start_dir, pieces, base, heights, next group].
+## move_start()): [start, start_dir, pieces, base, heights, next group, waves].
 var _plan_undo: Array = []
 
 
@@ -308,12 +311,14 @@ func undo() -> void:
 		base = u[3]
 		heights = u[4]
 		_next_group = u[5]
+		waves = u[6]
 		_height_undo.clear()
 		return
 	if _cut.has("pieces") and pieces.size() <= int(_cut["size"]):
 		# nothing drawn into the gap (any more): the lap as before the cut
 		pieces = _cut["pieces"]
 		heights = _cut["old_heights"]
+		waves = _cut["old_waves"]
 		tail.clear()
 		_cut = {}
 		_redo.clear()
@@ -415,8 +420,19 @@ func cut(first: int, last: int) -> bool:
 			var r: Array = q.duplicate()
 			r[0] = x - x1
 			tail_h.append(r)
+	var head_w := []
+	var tail_w := []
+	for w in waves:
+		var x := float(w[0])
+		if x <= x0 + 0.01:
+			head_w.append(w)
+		elif x >= x1 - 0.01:
+			var r: Array = w.duplicate()
+			r[0] = x - x1
+			tail_w.append(r)
 	_cut = {"pieces": pieces.duplicate(true), "old_heights": heights.duplicate(true), "size": first,
-		"heights": tail_h}
+		"heights": tail_h, "old_waves": waves.duplicate(true), "waves": tail_w}
+	waves = head_w
 	tail = pieces.slice(last + 1)
 	tail_pos = pos
 	tail_dir = dir
@@ -436,10 +452,15 @@ func _join() -> void:
 		var r: Array = (q as Array).duplicate()
 		r[0] = float(r[0]) + x
 		heights.append(r)
+	for w in _cut.get("waves", []):
+		var r: Array = (w as Array).duplicate()
+		r[0] = float(r[0]) + x
+		waves.append(r)
 	pieces.append_array(tail)
 	tail.clear()
 	_cut = {}
 	_tidy_heights()
+	_tidy_waves()
 
 
 # --- closing the lap -----------------------------------------------------------------
@@ -691,7 +712,8 @@ func move_block(first: int, last: int, offset: Vector2) -> bool:
 		return false
 	_plan_snapshot()
 	var bound := _bind_heights()
-	for b in bound:
+	var wbound := _bind_waves()
+	for b in bound + wbound:
 		for m in r["remap"]:
 			if not is_same(b[0], m[0]):
 				continue
@@ -709,6 +731,7 @@ func move_block(first: int, last: int, offset: Vector2) -> bool:
 	pieces = r["pieces"]
 	_next_group += 2
 	_place_heights(bound)
+	_place_waves(wbound)
 	return true
 
 
@@ -799,6 +822,7 @@ func move_start(k: int, o: float) -> bool:
 	if on >= 0:
 		heights.remove_at(on)
 	var bound := _bind_heights()
+	var wbound := _bind_waves()
 	var old0: Dictionary = pieces[0]
 	bound.append([old0, 0.0, base, false, 0])
 	var seq := pieces.duplicate()
@@ -810,7 +834,7 @@ func move_start(k: int, o: float) -> bool:
 		b.erase("auto")
 		_next_group += 1
 		new0["l"] = o
-		for e in bound:
+		for e in bound + wbound:
 			if is_same(e[0], new0) and float(e[1]) >= o - 0.01:
 				e[0] = b
 				e[1] = float(e[1]) - o
@@ -822,7 +846,7 @@ func move_start(k: int, o: float) -> bool:
 		var lp := float(prev["l"])
 		prev["l"] = lp + float(old0["l"])
 		prev.erase("auto")
-		for e in bound:
+		for e in bound + wbound:
 			if is_same(e[0], old0):
 				e[0] = prev
 				e[1] = float(e[1]) + lp
@@ -836,13 +860,15 @@ func move_start(k: int, o: float) -> bool:
 	start_dir = pose[1]
 	base = h_new
 	_place_heights(bound)
+	_place_waves(wbound)
 	return true
 
 
 ## Reverses the direction of the closed lap: the pieces backwards (left
 ## curves turn right and bank the other way; a loop keeps its side), the
-## start line where it is, the height profile mirrored (the same heights at
-## the same places). Esc undoes it.
+## start line where it is, the height profile and the waves mirrored (the
+## same heights at the same places; a wave on the other edge then). Esc
+## undoes it.
 func reverse() -> bool:
 	if not closed:
 		return false
@@ -863,12 +889,17 @@ func reverse() -> bool:
 		# a wall's points swap sides: the flag goes to the other one's side
 		hs.append([length - float(q[0]), q[1], q[2] if q.size() > 2 else false, -int(q[3]) if q.size() > 3 else 0])
 	heights = hs
-	_tidy_heights()
+	var ws := []
+	for w in waves:
+		ws.append([length - float(w[0]), -int(w[1]), w[2]])
+	waves = ws
+	_tidy_waves()
 	return true
 
 
 func _plan_snapshot() -> void:
-	_plan_undo.append([start, start_dir, pieces.duplicate(true), base, heights.duplicate(true), _next_group])
+	_plan_undo.append([start, start_dir, pieces.duplicate(true), base, heights.duplicate(true), _next_group,
+		waves.duplicate(true)])
 	_redo.clear()
 	_height_undo.clear()     # its snapshots hold the lap as it was
 
@@ -888,6 +919,37 @@ func _bind_heights() -> Array:
 				break
 			x0 += l
 	return out
+
+
+## The waves bound to their pieces like the profile points: [piece, metres
+## into it, side, h].
+func _bind_waves() -> Array:
+	var out := []
+	for w in waves:
+		var x := float(w[0])
+		var x0 := 0.0
+		for p in pieces:
+			var l := profile_len(p)
+			if l > 0.0 and x < x0 + l - 0.01:
+				out.append([p, x - x0, int(w[1]), float(w[2])])
+				break
+			x0 += l
+	return out
+
+
+## Waves from _bind_waves() at their pieces' places now.
+func _place_waves(bound: Array) -> void:
+	waves = []
+	for b in bound:
+		if not (b[0] is Dictionary):
+			continue
+		var x0 := 0.0
+		for p in pieces:
+			if is_same(p, b[0]):
+				waves.append([x0 + float(b[1]), b[2], b[3]])
+				break
+			x0 += profile_len(p)
+	_tidy_waves()
 
 
 ## Profile points from _bind_heights() at their pieces' places now (those of
@@ -1000,7 +1062,7 @@ func points() -> Array:
 
 
 func _snapshot() -> void:
-	_height_undo.append([pieces.duplicate(true), base, heights.duplicate(true)])
+	_height_undo.append([pieces.duplicate(true), base, heights.duplicate(true), waves.duplicate(true)])
 	if _height_undo.size() > 100:
 		_height_undo.pop_front()
 
@@ -1013,11 +1075,71 @@ func undo_height() -> bool:
 	pieces = snap[0]
 	base = snap[1]
 	heights = snap[2]
+	waves = snap[3]
 	return true
 
 
 func snapshot_heights() -> void:
 	_snapshot()
+
+
+## Keeps the waves sorted and inside the lap.
+func _tidy_waves() -> void:
+	var length := profile_length()
+	waves = waves.filter(func(w): return float(w[0]) >= 0.0 and float(w[0]) <= length)
+	waves.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
+
+
+# --- waves ---
+
+const WAVE_HEIGHT := 1.0        # a new wave (m)
+const WAVE_STEP := 0.5
+const WAVE_MAX := 3.0           # highest wave / deepest hollow (m)
+
+
+## New wave at profile x on the edge `side` (-1 left, 1 right); its index in
+## waves, -1 if not on the lap.
+func add_wave(x: float, side: int) -> int:
+	x = roundf(x)
+	if x < 0.0 or x > profile_length():
+		return -1
+	_snapshot()
+	var w := [x, -1 if side < 0 else 1, WAVE_HEIGHT]
+	waves.append(w)
+	_tidy_waves()
+	for i in waves.size():
+		if is_same(waves[i], w):
+			return i
+	return -1
+
+
+## Wave i to profile x with height h (a hollow below 0; never 0, within
+## WAVE_MAX); returns its index then (the waves stay sorted by x).
+func set_wave(i: int, x: float, h: float, record := true) -> int:
+	if i < 0 or i >= waves.size():
+		return -1
+	h = clampf(snappedf(h, WAVE_STEP), -WAVE_MAX, WAVE_MAX)
+	if is_zero_approx(h):
+		h = WAVE_STEP * (-1.0 if float(waves[i][2]) > 0.0 else 1.0)    # over 0: the other way
+	x = clampf(roundf(x), 0.0, profile_length())
+	if record:
+		_snapshot()
+	var w: Array = waves[i]
+	w[0] = x
+	w[2] = h
+	_tidy_waves()
+	for k in waves.size():
+		if is_same(waves[k], w):
+			return k
+	return -1
+
+
+func delete_wave(i: int) -> bool:
+	if i < 0 or i >= waves.size():
+		return false
+	_snapshot()
+	waves.remove_at(i)
+	return true
 
 
 ## Keeps the free points sorted and inside the lap.
@@ -1434,18 +1556,26 @@ func to_def(track_name: String) -> Dictionary:
 	var d := {} if official != "" else {"theme": 0, "boost": 60, "boost_super": 45, "division": 1}
 	d.merge(meta, true)
 	d.merge({"name": track_name, "base": base, "pieces": ps, "heights": points().slice(1, -1)}, true)
+	var length := profile_length()
+	var ws := waves.filter(func(w): return float(w[0]) >= 0.0 and float(w[0]) <= length)
+	if not ws.is_empty():
+		d["waves"] = ws.duplicate(true)
+	else:
+		d.erase("waves")
 	return d
 
 
 func to_dict(track_name: String) -> Dictionary:
 	var d := {"version": 1, "name": track_name, "start": [start.x, start.y], "start_dir": [start_dir.x, start_dir.y],
 		"has_start": has_start, "closed": closed, "base": base, "heights": heights.duplicate(true),
+		"waves": waves.duplicate(true),
 		"pieces": pieces.duplicate(true)}
 	if has_gap():
 		d["tail"] = tail.duplicate(true)
 		d["tail_pos"] = [tail_pos.x, tail_pos.y]
 		d["tail_dir"] = [tail_dir.x, tail_dir.y]
 		d["tail_heights"] = (_cut.get("heights", []) as Array).duplicate(true)
+		d["tail_waves"] = (_cut.get("waves", []) as Array).duplicate(true)
 	if official != "":
 		d["official"] = official
 	if not meta.is_empty():
@@ -1469,10 +1599,13 @@ static func from_dict(d: Dictionary) -> TrackEditorModel:
 		var td: Array = d.get("tail_dir", [0, -1])
 		m.tail_pos = Vector2(tp[0], tp[1])
 		m.tail_dir = Vector2(td[0], td[1])
-		m._cut = {"heights": (d.get("tail_heights", []) as Array).duplicate(true)}
+		m._cut = {"heights": (d.get("tail_heights", []) as Array).duplicate(true),
+			"waves": (d.get("tail_waves", []) as Array).duplicate(true)}
 		m.closed = false
 	for p in m.pieces + m.tail:
 		m._next_group = maxi(m._next_group, int(p.get("g", 0)) + 1)
+	for w in d.get("waves", []):
+		m.waves.append([float(w[0]), int(w[1]), float(w[2])])     # JSON knows no integers
 	if d.has("heights"):
 		m.heights = (d["heights"] as Array).duplicate(true)
 	else:

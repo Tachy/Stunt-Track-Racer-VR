@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -1232,6 +1232,66 @@ func test_editor_reverse() -> void:
 	mr.pieces.reverse()        # (as reverse() orders them)
 	check(mr.pieces[1].get("auto", false) and mr.group_range(0) == Vector2i(0, 1) and mr.group_range(1) == Vector2i(0, 1)
 		and mr.group_range(2) == Vector2i(2, 2), "run-out after its curve")
+
+
+## Waves: one edge of the road lifted (or lowered) at a point, fading out
+## as a cosine over 20 m each way; they go along with the pieces.
+func test_track_waves() -> void:
+	var m := _editor_oval()
+	var flat := TrackPath.new(m.to_def("t"))
+	check(m.add_wave(100.0, 1) == 0 and m.waves[0] == [100.0, 1, TrackEditorModel.WAVE_HEIGHT], "wave added")
+	check(m.undo_height() and m.waves.is_empty(), "Esc takes it back")
+	m.add_wave(100.0, 1)
+	var p := TrackPath.new(m.to_def("t"))
+	check(p.n == flat.n and p.closure_error < 0.5, "the lap as before")
+	var edges := func(path: TrackPath, x: float) -> Array:
+		var i := path._index_at_x(x)
+		return [path.center[i] - path.right[i] * path.half_width[i], path.center[i] + path.right[i] * path.half_width[i]]
+	for c in [[100.0, 1.0], [110.0, 0.5], [90.0, 0.5], [125.0, 0.0], [75.0, 0.0]]:
+		var e0: Array = edges.call(flat, c[0])
+		var e1: Array = edges.call(p, c[0])
+		check(near(e1[1].y - e0[1].y, c[1], 0.02) and near(e1[0].y - e0[0].y, 0.0, 0.02),
+			"right edge up %.1f m at %d m, left edge stays (%.3f / %.3f)" % [c[1], c[0], e1[1].y - e0[1].y, e1[0].y - e0[0].y])
+		check(Vector2(e1[1].x, e1[1].z).distance_to(Vector2(e0[1].x, e0[1].z)) < 0.02, "the edge stays above its place at %d m" % c[0])
+	var i100 := p._index_at_x(100.0)
+	check(near(p.road_height(i100, p.half_width[i100] * (p.right[i100].dot(p.right_flat[i100]))), (edges.call(p, 100.0) as Array)[1].y, 0.02),
+		"the road surface follows the edge")
+	# a hollow; never 0 (over 0: the other way)
+	check(m.set_wave(0, 100.0, -1.0) == 0, "hollow")
+	var e2: Array = edges.call(TrackPath.new(m.to_def("t")), 100.0)
+	check(near(e2[1].y - (edges.call(flat, 100.0) as Array)[1].y, -1.0, 0.02), "the right edge goes down")
+	m.set_wave(0, 100.0, -0.5)
+	m.set_wave(0, 100.0, 0.0)
+	check(near(float(m.waves[0][2]), 0.5), "over 0 to the other side (%s)" % [m.waves[0]])
+	m.set_wave(0, 100.0, 1.0)
+	# saved and loaded
+	var back := TrackEditorModel.from_dict(JSON.parse_string(JSON.stringify(m.to_dict("x"))))
+	check(back.waves == m.waves and typeof(back.waves[0][1]) == TYPE_INT, "save / load (%s)" % [back.waves])
+	check(m.to_def("x")["waves"] == m.waves, "in the track definition")
+	# along with a moved stretch: on the straight after it, its distance to the end
+	m = _editor_oval()
+	m.add_wave(m.piece_x(4) + 100.0, -1)
+	m.add_wave(m.piece_x(2) + 30.0, 1)          # on the moved stretch
+	var into := float(m.waves[0][0]) - m.piece_x(2)
+	m.move_block(1, 3, Vector2(0, 40))
+	check(m.waves.size() == 2 and near(float(m.waves[0][0]), m.piece_x(2) + into), "a wave on the stretch goes along")
+	check(near(float(m.waves[1][0]), m.piece_x(4) + 60.0, 0.5) and int(m.waves[1][1]) == -1, "a wave on the straight after it keeps its distance to the end (%s)" % [m.waves])
+	# the start line moved, the lap reversed
+	m = _editor_oval()
+	m.add_wave(150.0, 1)
+	m.move_start(0, 100.0)
+	check(near(float(m.waves[0][0]), 50.0), "the start line moved: the wave stays where it is")
+	var length := m.profile_length()
+	m.reverse()
+	check(near(float(m.waves[0][0]), length - 50.0) and int(m.waves[0][1]) == -1, "reversed: mirrored, on the other edge")
+	# a cut: the waves in the gap go, Esc brings them back
+	m = _editor_oval()
+	m.add_wave(m.piece_x(3) + 20.0, 1)
+	m.add_wave(m.piece_x(5) + 20.0, 1)
+	m.cut(3, 3)
+	check(m.waves.is_empty() and m._cut["waves"].size() == 1, "the wave in the gap goes, the one after it waits with the tail")
+	m.undo()
+	check(m.waves.size() == 2, "Esc after the cut: back")
 
 
 ## The start line dragged along the lap: only onto straights, which it

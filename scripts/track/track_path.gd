@@ -11,6 +11,10 @@ extends RefCounted
 ## profile coordinate: the distance along the lap without the loops (a loop
 ## keeps the height it starts at). A vertical wall down and one up again
 ## form a pit, a wall down alone a ski jump.
+## Waves (def "waves", [x, side, h]): at profile x one edge of the road
+## (side -1 left, 1 right in the direction of travel) is lifted by h (a
+## hollow: h < 0), fading out as a cosine over WAVE_REACH to both sides; the
+## other edge stays. Not on loops.
 
 const ROAD_WIDTH := 10.0
 const HALF_WIDTH := ROAD_WIDTH * 0.5
@@ -38,6 +42,7 @@ const DECK_MARGIN := 2.0
 const TUNNEL_HEIGHT := 6.0      # clear height above the road
 const TUNNEL_SIDE := 0.5        # extra width beyond the road on each side
 const TUNNEL_ROOF := 0.6        # roof thickness
+const WAVE_REACH := 20.0        # a wave fades out over this many metres each way
 
 var def: Dictionary
 var pieces: Array = []
@@ -294,6 +299,7 @@ func _sample() -> void:
 			step_t[lip] = clampf((x - px[lip]) / maxf(xj - px[lip], 1e-6), 0.0, 1.0)
 			step_before[lip] = float(spline[k][1])
 			step_after[lip] = float(spline[k + 1][1])
+	_apply_waves()
 	steep.resize(n)
 	for i in n:
 		var j := (i + 1) % n
@@ -357,6 +363,50 @@ func _apply_banking() -> void:
 		var bi := clampf(bank[i], -limit[i], limit[i])
 		var rf := right_flat[i]
 		right[i] = Vector3(rf.x * cos(bi), -sin(bi), rf.z * cos(bi))
+
+
+## Lift (m) of the left and right edge at profile x from the waves.
+static func wave_lift(waves: Array, x: float, length: float) -> Vector2:
+	var out := Vector2.ZERO
+	for w in waves:
+		var d := absf(x - float(w[0]))
+		if length > 0.0:
+			d = minf(d, length - d)      # the lap wraps at the start
+		if d >= WAVE_REACH:
+			continue
+		var lift := float(w[2]) * 0.5 * (1.0 + cos(PI * d / WAVE_REACH))
+		if int(w[1]) < 0:
+			out.x += lift
+		else:
+			out.y += lift
+	return out
+
+
+## The waves: each edge lifted on its own, so the centre goes up by half and
+## the road tilts (its width over the tilt kept, the edges stay above the
+## flat ones); walls in reach go up along.
+func _apply_waves() -> void:
+	var waves: Array = def.get("waves", [])
+	if waves.is_empty():
+		return
+	var lc := PackedFloat32Array()
+	lc.resize(n)
+	for i in n:
+		if loop_mask[i] == 1:
+			continue
+		var e := wave_lift(waves, px[i], profile_length)
+		if e == Vector2.ZERO:
+			continue
+		var hw := half_width[i]
+		var across := right[i] * hw * 2.0 + Vector3.UP * (e.y - e.x)
+		lc[i] = (e.x + e.y) * 0.5
+		center[i] += Vector3.UP * lc[i]
+		right[i] = across.normalized()
+		half_width[i] = across.length() * 0.5
+	for i in n:
+		if step[i] == 1:
+			step_before[i] += lc[i]
+			step_after[i] += lc[(i + 1) % n]
 
 
 ## Deck samples: the overhead part of loops, and sections with another part
