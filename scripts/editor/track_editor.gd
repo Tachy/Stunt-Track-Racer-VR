@@ -28,9 +28,8 @@ extends Control
 ## the lap and up / down); double click on it: the camera turns around it;
 ## double click on the road: a new point; right click: remove it; C kink at the
 ## point; Up/Down (Shift: x4) its height, Left/Right 1 m back / on along the
-## lap. The spline is kept within
-## MAX_SLOPE (100 %). Dragged on by force under (or over) a neighbour, a
-## point snaps there as a vertical wall: wall down + wall up = pit (floor on
+## lap. No slope limit: dragged at least 80 deg steep to a neighbour, a
+## point snaps under (or over) it as a vertical wall: wall down + wall up = pit (floor on
 ## the ground: the ground), wall down alone = ski jump. Dragged away to the
 ## side again it is a spline point. A click on the road marks its piece
 ## (B drawbridge) and leaves the camera where it is. The camera turns around
@@ -924,7 +923,8 @@ func _height_key(k: InputEventKey) -> bool:
 			if _h3d.marked.size() > 1:
 				model.move_points(_h3d.marked, 0.0, step if k.keycode == KEY_UP else -step)
 			else:
-				model.move_point(pt, float(q[0]), float(q[1]) + (step if k.keycode == KEY_UP else -step))
+				model.move_point(pt, float(q[0]), float(q[1]) + (step if k.keycode == KEY_UP else -step), true,
+					TrackEditorModel.WALL_SNAP, true)
 		KEY_LEFT, KEY_RIGHT:
 			var pt := _h3d.point
 			if pt < 0:
@@ -933,14 +933,13 @@ func _height_key(k: InputEventKey) -> bool:
 			if _h3d.marked.size() > 1:
 				model.move_points(_h3d.marked, 1.0 if k.keycode == KEY_RIGHT else -1.0, 0.0)
 			else:
-				model.move_point(pt, float(q[0]) + (1.0 if k.keycode == KEY_RIGHT else -1.0), float(q[1]))
+				model.move_point(pt, float(q[0]) + (1.0 if k.keycode == KEY_RIGHT else -1.0), float(q[1]), true,
+					TrackEditorModel.WALL_SNAP, true)
 		KEY_C:
 			if _h3d.point <= 0 or _h3d.point >= model.points().size() - 1:
 				_flash(Lang.t("SELECT A POINT FIRST"))
 				return true
-			if not model.toggle_corner(_h3d.point):
-				_flash(Lang.t("NOT POSSIBLE - TOO STEEP"))
-				return true
+			model.toggle_corner(_h3d.point)
 		KEY_B, KEY_N, KEY_G:
 			if _h3d.piece < 0:
 				_flash(Lang.t("SELECT A PIECE FIRST"))

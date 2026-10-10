@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_wall_point_roles", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -1331,8 +1331,7 @@ func test_editor_move_start() -> void:
 
 
 ## Several profile points moved together: distances and heights to each
-## other stay; not past the next point, the slope limit at the ends of the
-## group, a wall's other point goes along.
+## other stay; not past the next point, a wall's other point goes along.
 func test_editor_move_points() -> void:
 	var m := _editor_oval()
 	m.heights = [[100.0, 8.0, false, 0], [130.0, 12.0, false, 0], [160.0, 10.0, false, 0], [300.0, 10.0, false, 0]]
@@ -1350,12 +1349,13 @@ func test_editor_move_points() -> void:
 	check(got.x > 0.0 and float(pts[3][0]) <= 300.0 - TrackEditorModel.MIN_POINT_GAP + 0.01, "stops before the next point (%s)" % [pts])
 	check(near(float(pts[2][0]) - float(pts[1][0]), 30.0) and near(float(pts[3][0]) - float(pts[2][0]), 30.0), "distances stay at the stop")
 	m.undo_height()
-	# far up: only as steep as allowed at the ends of the group
+	# far up: no slope limit, only the height range
 	got = m.move_points([2, 3], 0.0, 45.0)
 	pts = m.points()
-	check(got.y > 0.0 and got.y < 45.0, "limited by the slope (%s)" % got)
-	check(TrackEditorModel._max_slope(pts, 0.0, float(pts[-1][0])) <= TrackEditorModel.MAX_SLOPE + 0.01, "spline within the slope limit")
-	check(near(float(pts[3][1]) - float(pts[2][1]), -2.0), "heights to each other stay at the limit")
+	check(got.y == 45.0, "as steep as it gets (%s)" % got)
+	got = m.move_points([2, 3], 0.0, 10.0)
+	check(got.y == 60.0 - 57.0, "up to MAX_HEIGHT (%s)" % got)
+	check(near(float(m.points()[3][1]) - float(m.points()[2][1]), -2.0), "heights to each other stay at the top")
 	# a wall: its other point goes along
 	m = _editor_oval()
 	m.heights = [[200.0, 15.0, false, 0], [200.0, 5.0, false, 1], [260.0, 5.0, false, 0]]
@@ -1584,31 +1584,34 @@ func test_editor_heights() -> void:
 	old["pieces"][2]["h"] = 14.0
 	var m_old := TrackEditorModel.from_dict(old)
 	check(m_old.heights.size() == 1 and near(m_old.heights[0][1], 14.0) and not m_old.pieces[2].has("h"), "old heights converted")
-	# slope limit: a point asked too high stops where the curve is 100 % steep
+	# no slope limit: a point goes as high as asked
 	m = _editor_oval()
 	i = m.add_point(30.0, 60.0)
-	p = TrackPath.new(m.to_def("t"))
-	var steepest := 0.0
-	for j in p.n - 1:
-		if p.loop_mask[j] == 0 and p.loop_mask[j + 1] == 0:
-			steepest = maxf(steepest, absf(p.center[j + 1].y - p.center[j].y) / maxf(p.px[j + 1] - p.px[j], 0.01))
-	check(m.points()[i][1] > m.base + 5.0 and m.points()[i][1] < 40.0, "point stopped by the slope limit (%.1f)" % m.points()[i][1])
-	check(steepest <= TrackEditorModel.MAX_SLOPE + 0.05, "spline at most 100 %% steep (%.3f)" % steepest)
-	m.move_point(i, 30.0, 60.0)
-	check(m.points()[i][1] < 40.0, "dragging up stops too")
+	check(near(m.points()[i][1], 60.0), "no slope limit when added (%.1f)" % m.points()[i][1])
+	m.move_point(i, 30.0, 45.0)
+	check(near(m.points()[i][1], 45.0), "nor when dragged")
+	# a kink next to a kink, even where the curve gets steep (Mega Ramp)
+	m = _editor_oval()
+	m.move_point(0, 0.0, 12.0)
+	m.heights = [[682.0, 12.0, true, 0], [734.0, 25.0, false, 0], [751.0, 13.0, false, 0], [793.0, 24.0, false, 0]]
+	m._tidy_heights()
+	check(m.toggle_corner(2) and m.toggle_corner(3) and m.points()[2][2] and m.points()[3][2], "kinks next to kinks")
 	# walls: a point pulled hard under its neighbour snaps there
 	m = _editor_oval()
 	m.move_point(0, 0.0, 9.0)
 	var count := 0
 	var ia := m.add_point(100.0, 11.0)
 	var ib := m.add_point(120.0, 11.0)
-	m.move_point(ib, 101.0, 6.0)
+	m.move_point(ib, 102.0, 6.0)
 	var pts := m.points()
-	check(near(pts[ib][0], 100.0) and near(pts[ib][1], 6.0) and pts[ib][3] == 1, "pulled under its neighbour: a wall down")
+	check(near(pts[ib][0], 102.0) and pts[ib][3] == 0, "68 deg to its neighbour: still a slope")
+	m.move_point(ib, 100.5, 6.0)
+	pts = m.points()
+	check(near(pts[ib][0], 100.0) and near(pts[ib][1], 6.0) and pts[ib][3] == 1, "84 deg under its neighbour: a wall down")
 	var ic := m.add_point(114.0, 6.0)
 	var id := m.add_point(130.0, 30.0)
-	check(m.points()[id][1] < 30.0, "a normal point stays within the slope")
-	m.move_point(id, 115.0, 10.0)
+	check(near(m.points()[id][1], 30.0), "a point as steep as asked")
+	m.move_point(id, 114.5, 10.0)
 	check(HeightSpline.is_wall(m.points(), ic), "pulled over its neighbour: a wall up")
 	p = TrackPath.new(m.to_def("t"))
 	var walls := 0
@@ -1639,12 +1642,32 @@ func test_editor_heights() -> void:
 	m.move_point(0, 0.0, 9.0)
 	ia = m.add_point(100.0, 11.0)
 	ib = m.add_point(110.0, 11.0)
-	m.move_point(ib, 101.0, 3.5)
-	check(near(m.points()[ib][1], 0.0), "lower wall point 3.5 m up snaps to the ground")
+	m.move_point(ib, 101.0, 2.0)
+	check(near(m.points()[ib][1], 0.0), "lower wall point 2 m up snaps to the ground")
+	m.move_point(ib, 100.0, 3.5)
+	check(near(m.points()[ib][1], TrackEditorModel.GROUND_SNAP), "3.5 m up: to 5 m (half of the snap is the border)")
+	m.move_point(ib, 100.0, -2.0)
+	check(near(m.points()[ib][1], 0.0), "2 m below snaps up to the ground")
 	m.move_point(ib, 100.0, -4.0)
-	check(near(m.points()[ib][1], 0.0), "4 m below snaps up to the ground")
+	check(near(m.points()[ib][1], -TrackEditorModel.GROUND_SNAP), "4 m below: to 5 m below")
 	m.move_point(ib, 100.0, 6.0)
 	check(near(m.points()[ib][1], 6.0), "6 m up stays")
+	# the cursor keys step out of the snap to its other border
+	m.move_point(ib, 100.0, 0.0)
+	m.move_point(ib, 100.0, 0.5, true, TrackEditorModel.WALL_SNAP, true)
+	check(near(m.points()[ib][1], TrackEditorModel.GROUND_SNAP), "key up from the ground: to 5 m")
+	m.move_point(ib, 100.0, 4.5, true, TrackEditorModel.WALL_SNAP, true)
+	check(near(m.points()[ib][1], 0.0), "key down from 5 m: to the ground")
+	m.move_point(ib, 100.0, -0.5, true, TrackEditorModel.WALL_SNAP, true)
+	check(near(m.points()[ib][1], -TrackEditorModel.GROUND_SNAP), "key down from the ground: to 5 m below")
+	# ... and a wall point off its wall: right beside it, and no snap back
+	m.move_point(ib, 100.0, 4.0)
+	var wx := float(m.points()[ib][0])
+	m.move_point(ib, wx + 1.0, float(m.points()[ib][1]), true, TrackEditorModel.WALL_SNAP, true)
+	check(m.points()[ib][3] == 0 and near(m.points()[ib][0], wx + TrackEditorModel.MIN_POINT_GAP), "key off the wall: 2 m beside it (%s)" % [m.points()[ib]])
+	m.move_point(ib, float(m.points()[ib][0]) - 1.0, float(m.points()[ib][1]), true, TrackEditorModel.WALL_SNAP, true)
+	check(m.points()[ib][3] == 0, "a key step back does not snap it into the wall again")
+	m.move_point(ib, 100.0, 0.0)
 	m.move_point(ib, 100.0, 0.0)
 	m.move_point(ia, 100.0, 4.0)
 	check(near(m.points()[ia][1], 4.0), "the top of a wall does not snap")
@@ -1707,7 +1730,7 @@ func test_editor_heights() -> void:
 	m.move_point(ib, 100.0, 0.0)
 	ic = m.add_point(116.0, 0.0)
 	id = m.add_point(130.0, 4.0)
-	m.move_point(id, 117.0, 5.0)
+	m.move_point(id, 116.5, 5.0)      # 84 deg over its neighbour: a wall up
 	m.add_point(500.0, 9.0)
 	var ie := m.add_point(520.0, 9.0)
 	m.move_point(ie, 500.0, 5.0)
@@ -1785,6 +1808,41 @@ func test_road_stripes() -> void:
 		check(ok_border, "%s: colour changes at every piece border (also at the start)" % id)
 		check(longest <= TrackNode.STRIPE_MAX + 1.5, "%s: stripes at most %d m (%.1f)" % [id, TrackNode.STRIPE_MAX, longest])
 		node.free()
+
+
+## The upper point of a wall takes the lower (yellow) one along; the lower
+## one only goes up and down, or off the wall - also when the upper one was
+## the snapped one (a wall up).
+func test_wall_point_roles() -> void:
+	var m := _editor_oval()
+	m.move_point(0, 0.0, 9.0)
+	m.add_point(100.0, 6.0)
+	var up := m.add_point(130.0, 30.0)
+	m.move_point(up, 100.0, 20.0)
+	var pts := m.points()
+	check(HeightSpline.is_wall(pts, 1) and near(pts[1][1], 6.0) and near(pts[2][1], 20.0), "a wall up (%s)" % [pts])
+	m.move_point(2, 110.0, 22.0)
+	pts = m.points()
+	check(near(pts[1][0], 110.0) and near(pts[2][0], 110.0) and near(pts[2][1], 22.0), "the upper point takes the yellow one along")
+	m.move_point(1, 113.0, 8.0)
+	pts = m.points()
+	check(near(pts[1][0], 110.0) and near(pts[2][0], 110.0) and near(pts[1][1], 8.0), "the yellow point: only up and down")
+	m.move_point(1, 110.0, 40.0)
+	check(near(m.points()[1][1], 21.0), "at least 1 m below the upper one")
+	m.move_point(2, 110.0, 5.0)
+	check(near(m.points()[2][1], 22.0), "the upper one at least 1 m above the yellow one")
+	m.move_point(1, 100.0, 8.0)
+	pts = m.points()
+	check(near(pts[1][0], 100.0) and near(pts[2][0], 110.0) and near(pts[2][1], 22.0) and int(pts[1][3]) == 0 and int(pts[2][3]) == 0
+		and not HeightSpline.is_wall(pts, 1), "the yellow one pulled off: the upper one stays, no wall (%s)" % [pts])
+	# a low wall: the ground snap does not lift the yellow point over the top
+	m = _editor_oval()
+	m.move_point(0, 0.0, 9.0)
+	m.add_point(100.0, 4.0)
+	var lw := m.add_point(110.0, 4.0)
+	m.move_point(lw, 100.0, 0.0)
+	m.move_point(lw, 100.0, 3.0)
+	check(near(m.points()[lw][1], 0.0), "under a 4 m top: the yellow point stays on the ground (%s)" % [m.points()[lw]])
 
 
 func test_custom_track_delete() -> void:

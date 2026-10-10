@@ -1022,13 +1022,15 @@ const HEIGHT_STEP := 0.5
 const MIN_HEIGHT := -100.0
 const MAX_HEIGHT := 60.0
 const MIN_POINT_GAP := 2.0      # profile points at least this far apart (m)
-## Steepest slope the spline may have (steeper: only vertical walls).
-const MAX_SLOPE := 1.0
-## Walls: a point dragged this far (m) past the slope limit snaps to a
-## neighbour within WALL_SNAP (m) of the mouse.
-const WALL_FORCE := 3.0
+## Walls: a point dragged at least 80 deg steep to a neighbour (and at least
+## 1 m above / below it) snaps right under / over it; dragged sideways till
+## it is under 78 deg (and at least WALL_SNAP m away) it is a spline point
+## again. (tan 80 / 78 deg: no constant expression.)
+const WALL_SLOPE := 5.6713       # tan(80 deg)
+const UNWALL_SLOPE := 4.7046     # tan(78 deg)
 const WALL_SNAP := 4.0
-## The lower point of a wall this close (m) to the ground snaps onto it.
+## The lower point of a wall this close (m) to the ground snaps onto it
+## (less than half of it away) or to GROUND_SNAP above / below it.
 const GROUND_SNAP := 5.0
 
 
@@ -1148,7 +1150,7 @@ func _tidy_heights() -> void:
 	heights = pts.slice(1, pts.size() - 1)
 
 
-# --- slope limit ---
+# --- steepness ---
 
 ## Steepest slope of the spline pts between x0 and x1 (1 m steps; walls,
 ## i.e. segments of no width, do not count).
@@ -1172,30 +1174,6 @@ static func _max_slope(pts: Array, x0: float, x1: float) -> float:
 	return m
 
 
-## Steepest slope near point i of pts (its segments and those of the
-## neighbours, whose tangents it changes; the lap wraps at the start).
-static func _slope_near(pts: Array, i: int) -> float:
-	var last := pts.size() - 1
-	var m := _max_slope(pts, float(pts[maxi(i - 2, 0)][0]), float(pts[mini(i + 2, last)][0]))
-	if i <= 2:
-		m = maxf(m, _max_slope(pts, float(pts[maxi(last - 2, 0)][0]), float(pts[last][0])))
-	if i >= last - 2:
-		m = maxf(m, _max_slope(pts, 0.0, float(pts[mini(2, last)][0])))
-	return m
-
-
-## pts with point i at (x, h) (start and end: both at h).
-static func _with_point(pts: Array, i: int, x: float, h: float) -> Array:
-	var out := pts.duplicate(true)
-	if i <= 0 or i >= out.size() - 1:
-		out[0][1] = h
-		out[-1][1] = h
-	else:
-		out[i][0] = x
-		out[i][1] = h
-	return out
-
-
 ## The other point of the wall point i stands in (-1 if none).
 static func _wall_partner(pts: Array, i: int) -> int:
 	if HeightSpline.is_wall(pts, i - 1):
@@ -1206,7 +1184,7 @@ static func _wall_partner(pts: Array, i: int) -> int:
 
 
 ## New free point; returns its index in points() (-1 if too close to
-## another). Too steep: it goes only as far up / down as the slope allows.
+## another).
 func add_point(x: float, h: float, record := true) -> int:
 	x = roundf(x)
 	h = snappedf(clampf(h, MIN_HEIGHT, MAX_HEIGHT), HEIGHT_STEP)
@@ -1217,10 +1195,6 @@ func add_point(x: float, h: float, record := true) -> int:
 	var i := 1
 	while float(pts[i][0]) < x:
 		i += 1
-	var on_curve := snappedf(HeightSpline.height(pts, x), HEIGHT_STEP)
-	pts.insert(i, [x, on_curve, false, 0])
-	var limit := maxf(MAX_SLOPE, _slope_near(pts, i))
-	h = _limit_move(pts, i, Vector2(x, on_curve), Vector2(x, h), limit).y
 	if record:
 		_snapshot()
 	heights.append([x, h, false, 0])
@@ -1228,107 +1202,83 @@ func add_point(x: float, h: float, record := true) -> int:
 	return i
 
 
-## Furthest point from a towards b (snapped) that keeps the slope near
-## point i of pts within limit.
-func _limit_move(pts: Array, i: int, a: Vector2, b: Vector2, limit: float) -> Vector2:
-	if _slope_near(_with_point(pts, i, b.x, b.y), i) <= limit + 1e-3:
-		return b
-	var lo := 0.0
-	var hi := 1.0
-	for it in 8:
-		var t := (lo + hi) * 0.5
-		var c := a.lerp(b, t)
-		if _slope_near(_with_point(pts, i, c.x, c.y), i) <= limit + 1e-3:
-			lo = t
-		else:
-			hi = t
-	var r := a.lerp(b, lo)
-	# a move straight up / down keeps x exactly (a wall point must stay on
-	# its wall, even at a fractional x from an older file)
-	var rx := a.x if is_equal_approx(a.x, b.x) else roundf(r.x)
-	var snapped := Vector2(rx, snappedf(r.y, HEIGHT_STEP))
-	# snapping must not cross the limit
-	if _slope_near(_with_point(pts, i, snapped.x, snapped.y), i) > limit + 1e-3:
-		snapped = Vector2(rx, snappedf(r.y, HEIGHT_STEP) - signf(b.y - a.y) * HEIGHT_STEP)
-		if _slope_near(_with_point(pts, i, snapped.x, snapped.y), i) > limit + 1e-3:
-			return a
-	return snapped
-
-
 ## Moves point i of points() towards (x, h) - the mouse:
 ## - start and end only change the start height (both together);
-## - a free point stays between its neighbours and stops where the spline
-##   would get steeper than MAX_SLOPE. Pulled on by force (WALL_FORCE past
-##   that) to within WALL_SNAP of a neighbour, it snaps below / above it:
-##   a vertical wall (jump, pit, ski jump);
-## - the snapped point of a wall moves only up and down; pulled WALL_SNAP
-##   away to its free side it is a spline point again;
-## - the other point of a wall takes the wall along sideways.
+## - a free point stays between its neighbours (as steep as it gets). Dragged
+##   at least 80 deg steep to a neighbour (WALL_SLOPE, by the mouse), it
+##   snaps below / above it: a vertical wall (jump, pit, ski jump);
+## - the lower (yellow) point of a wall moves only up and down (at least 1 m
+##   below the upper one); pulled away to its free side till it is under
+##   78 deg (and at least `snap` m) it is a spline point again - it never
+##   takes the upper point along;
+## - the upper point of a wall takes the wall along sideways; its height on
+##   its own (at least 1 m above the lower one).
 ## snap: WALL_SNAP, or more when the profile is drawn small (the editor
 ## passes a few pixels' worth).
-func move_point(i: int, x: float, h: float, record := true, snap := WALL_SNAP) -> void:
+## key: a step of the cursor keys - no snapping into a wall; a step off a
+## wall to its free side or into the ground snap goes on to the next place
+## possible (beside the wall, the other border of the snap).
+func move_point(i: int, x: float, h: float, record := true, snap := WALL_SNAP, key := false) -> void:
 	h = snappedf(clampf(h, MIN_HEIGHT, MAX_HEIGHT), HEIGHT_STEP)
 	var pts := points()
 	var last := pts.size() - 1
 	if i <= 0 or i >= last:
-		var b0 := _limit_move(pts, 0, Vector2(0, base), Vector2(0, h), maxf(MAX_SLOPE, _slope_near(pts, 0)))
-		if not is_equal_approx(b0.y, base):
+		if not is_equal_approx(h, base):
 			if record:
 				_snapshot()
-			base = b0.y
+			base = h
 		return
 	var q: Array = pts[i]
-	var limit := maxf(MAX_SLOPE, _slope_near(pts, i))
 	var a := Vector2(float(q[0]), float(q[1]))
 	var partner := _wall_partner(pts, i)
-	if partner >= 0 and int(q[3]) != 0:
+	if partner >= 0 and float(q[1]) < float(pts[partner][1]):
+		# the lower (yellow) point: up and down only, or off the wall
 		var free_side := 1.0 if partner < i else -1.0
 		var wx := float(pts[partner][0])
-		if (x - wx) * free_side > snap:
-			# pulled off the wall: a spline point again
+		var ph := float(pts[partner][1])
+		if (x - wx) * free_side > (0.01 if key else maxf(snap, absf(h - ph) / UNWALL_SLOPE)):
+			# pulled off the wall: a spline point again (and the upper one too)
 			var lo := wx + MIN_POINT_GAP if free_side > 0.0 else float(pts[i - 1][0]) + MIN_POINT_GAP
 			var hi := float(pts[i + 1][0]) - MIN_POINT_GAP if free_side > 0.0 else wx - MIN_POINT_GAP
 			if lo <= hi:      # no room beside the wall: it stays
-				_set_point(i, [clampf(roundf(x), lo, hi), h, q[2], 0], record)
+				var ox := wx + free_side * MIN_POINT_GAP if key else roundf(x)     # a key: right beside it
+				var hs := heights.duplicate(true)
+				hs[i - 1] = [clampf(ox, lo, hi), h, q[2], 0]
+				hs[partner - 1][3] = 0
+				_set_heights(hs, record)
 				return
-		# keep a wall at least 1 m high, on the side it is
-		var ph := float(pts[partner][1])
-		var sgn := signf(float(q[1]) - ph)
-		if (h - ph) * sgn < 1.0:
-			h = ph + sgn * 1.0
-		if h < ph:
-			h = _ground_snap(h)
-		var bw := _limit_move(pts, i, a, Vector2(a.x, h), limit)
-		if not a.is_equal_approx(bw):
-			_set_point(i, [float(q[0]), bw.y, q[2], q[3]], record)   # x not via Vector2 (32 bit)
+		# a wall at least 1 m high
+		h = minf(h, ph - 1.0)
+		h = _ground_step(a.y, h) if key else _ground_snap(h)
+		if h > ph - 1.0:
+			h = 0.0 if ph >= 1.0 else a.y     # (the snap must not lift it over the upper point: the ground)
+		if not is_equal_approx(h, a.y):
+			_set_point(i, [float(q[0]), h, q[2], q[3]], record)   # x not via Vector2 (32 bit)
 		return
 	if partner >= 0:
-		# the top / foot point of a wall: height on its own, the wall moves along
+		# the upper point: the wall moves along, height on its own
 		var left := mini(i, partner)
 		var right := maxi(i, partner)
 		var nx := clampf(roundf(x), float(pts[left - 1][0]) + MIN_POINT_GAP, float(pts[right + 1][0]) - MIN_POINT_GAP)
-		if h < float(pts[partner][1]):
-			h = _ground_snap(h)
-		var bh := _limit_move(pts, i, a, Vector2(a.x, h), limit).y
-		if is_equal_approx(nx, a.x) and is_equal_approx(bh, a.y):
+		h = maxf(h, float(pts[partner][1]) + 1.0)
+		if is_equal_approx(nx, a.x) and is_equal_approx(h, a.y):
 			return
 		var hs := heights.duplicate(true)
-		hs[i - 1] = [nx, bh, q[2], q[3]]
+		hs[i - 1] = [nx, h, q[2], q[3]]
 		hs[partner - 1][0] = nx
 		_set_heights(hs, record)
 		return
-	var xc := clampf(roundf(x), float(pts[i - 1][0]) + MIN_POINT_GAP, float(pts[i + 1][0]) - MIN_POINT_GAP)
-	var b := _limit_move(pts, i, a, Vector2(xc, h), limit)
-	# pulled on by force next to a neighbour: snap to a wall there
-	if Vector2(x, h).distance_to(b) > WALL_FORCE:
-		for nb in [i - 1, i + 1]:
-			if nb <= 0 or nb >= last or _wall_partner(pts, nb) >= 0:
-				continue
-			var n_pt: Array = pts[nb]
-			if absf(x - float(n_pt[0])) <= snap and absf(h - float(n_pt[1])) >= 1.0:
-				var hw := _ground_snap(h) if h < float(n_pt[1]) else h
-				_set_point(i, [float(n_pt[0]), hw, q[2], 1 if nb < i else -1], record)
-				return
+	# at least 80 deg steep to a neighbour (by the mouse): a wall there
+	for nb in [i - 1, i + 1] if not key else []:
+		if nb <= 0 or nb >= last or _wall_partner(pts, nb) >= 0:
+			continue
+		var n_pt: Array = pts[nb]
+		var rise := absf(h - float(n_pt[1]))
+		if rise >= 1.0 and rise >= absf(x - float(n_pt[0])) * WALL_SLOPE:
+			var hw := _ground_snap(h) if h < float(n_pt[1]) else h
+			_set_point(i, [float(n_pt[0]), hw, q[2], 1 if nb < i else -1], record)
+			return
+	var b := Vector2(clampf(roundf(x), float(pts[i - 1][0]) + MIN_POINT_GAP, float(pts[i + 1][0]) - MIN_POINT_GAP), h)
 	if not a.is_equal_approx(b):
 		_set_point(i, [b.x, b.y, q[2], q[3]], record)
 
@@ -1336,9 +1286,7 @@ func move_point(i: int, x: float, h: float, record := true, snap := WALL_SNAP) -
 ## Moves the free points sel (indices in points(); the other point of a wall
 ## goes along) together by (dx, dh): their distances and heights to each
 ## other stay. Not past a point that is not moved (MIN_POINT_GAP), within
-## MIN_HEIGHT..MAX_HEIGHT; where the spline at the ends of the moved runs
-## would get steeper than MAX_SLOPE they go only as far as it allows. No
-## snapping to walls. Returns the offset taken.
+## MIN_HEIGHT..MAX_HEIGHT. No snapping to walls. Returns the offset taken.
 func move_points(sel: Array, dx: float, dh: float, record := true) -> Vector2:
 	var pts := points()
 	var last := pts.size() - 1
@@ -1357,48 +1305,19 @@ func move_points(sel: Array, dx: float, dh: float, record := true) -> Vector2:
 	var hi := INF
 	var hmin := -INF
 	var hmax := INF
-	var ends := []          # first and last point of every run of moved points
 	for i in idx:
 		var x := float(pts[i][0])
 		if not s.has(i - 1):
 			lo = maxf(lo, float(pts[i - 1][0]) + MIN_POINT_GAP - x)
-			ends.append(i)
 		if not s.has(i + 1):
 			hi = minf(hi, float(pts[i + 1][0]) - MIN_POINT_GAP - x)
-			ends.append(i)
 		hmin = maxf(hmin, MIN_HEIGHT - float(pts[i][1]))
 		hmax = minf(hmax, MAX_HEIGHT - float(pts[i][1]))
 	var want := Vector2(clampf(roundf(dx), minf(ceilf(lo), 0.0), maxf(floorf(hi), 0.0)),
 		clampf(snappedf(dh, HEIGHT_STEP), minf(hmin, 0.0), maxf(hmax, 0.0)))
 	if want == Vector2.ZERO:
 		return want
-	var limit := MAX_SLOPE
-	for i in ends:
-		limit = maxf(limit, _slope_near(pts, i))
-	var ok := func(o: Vector2) -> bool:
-		var cand := pts.duplicate(true)
-		for i in idx:
-			cand[i][0] = float(cand[i][0]) + o.x
-			cand[i][1] = float(cand[i][1]) + o.y
-		for i in ends:
-			if _slope_near(cand, i) > limit + 1e-3:
-				return false
-		return true
 	var got := want
-	if not ok.call(want):
-		var t_lo := 0.0
-		var t_hi := 1.0
-		for it in 8:
-			var t := (t_lo + t_hi) * 0.5
-			if ok.call(want * t):
-				t_lo = t
-			else:
-				t_hi = t
-		# snapped towards no move, so as not to cross the limit
-		var r := want * t_lo
-		got = Vector2(signf(r.x) * floorf(absf(r.x)), signf(r.y) * floorf(absf(r.y) / HEIGHT_STEP) * HEIGHT_STEP)
-		if got == Vector2.ZERO or not ok.call(got):
-			return Vector2.ZERO
 	var hs := heights.duplicate(true)
 	for i in idx:
 		hs[i - 1][0] = float(hs[i - 1][0]) + got.x
@@ -1408,9 +1327,20 @@ func move_points(sel: Array, dx: float, dh: float, record := true) -> Vector2:
 	return got
 
 
-## Heights within GROUND_SNAP of the ground: on it.
+## Heights within GROUND_SNAP of the ground: the nearer border - on it
+## (less than half of GROUND_SNAP away) or GROUND_SNAP above / below it.
 static func _ground_snap(h: float) -> float:
-	return 0.0 if absf(h) < GROUND_SNAP else h
+	if absf(h) >= GROUND_SNAP:
+		return h
+	return 0.0 if absf(h) < GROUND_SNAP * 0.5 else signf(h) * GROUND_SNAP
+
+
+## A key step from `was` to h into the ground snap: on to its other border
+## (away from the ground: GROUND_SNAP; towards it: the ground).
+static func _ground_step(was: float, h: float) -> float:
+	if absf(h) >= GROUND_SNAP or is_zero_approx(h):
+		return h
+	return signf(h) * GROUND_SNAP if absf(h) > absf(was) else 0.0
 
 
 func _set_point(i: int, q: Array, record: bool) -> void:
@@ -1431,20 +1361,13 @@ func _set_heights(hs: Array, record: bool) -> bool:
 	return true
 
 
-## Removes free point i of points() (start and end stay); not if the curve
-## would get too steep without it (a point of a wall always goes; its
-## partner is a plain point then).
+## Removes free point i of points() (start and end stay; the other point of
+## a wall is a plain point then).
 func delete_point(i: int) -> bool:
 	if i <= 0 or i > heights.size():
 		return false
 	var pts := points()
 	var partner := _wall_partner(pts, i)
-	if partner < 0:
-		var limit := maxf(MAX_SLOPE, _slope_near(pts, i))
-		var without := pts.duplicate(true)
-		without.remove_at(i)
-		if _slope_near(without, mini(i, without.size() - 1)) > limit + 1e-3:
-			return false
 	_snapshot()
 	if partner >= 0:
 		heights[partner - 1][3] = 0
@@ -1453,16 +1376,9 @@ func delete_point(i: int) -> bool:
 	return true
 
 
-## Kink at free point i of points() instead of a smooth curve (not if that
-## makes the curve too steep).
+## Kink at free point i of points() instead of a smooth curve (or back).
 func toggle_corner(i: int) -> bool:
 	if i <= 0 or i > heights.size():
-		return false
-	var pts := points()
-	var limit := maxf(MAX_SLOPE, _slope_near(pts, i))
-	var other := pts.duplicate(true)
-	other[i][2] = not other[i][2]
-	if _slope_near(other, i) > limit + 1e-3:
 		return false
 	_snapshot()
 	heights[i - 1][2] = not heights[i - 1][2]
@@ -1497,7 +1413,7 @@ func plan_to_path(w: Vector2) -> Vector2:
 
 
 ## Problems of the built track: crossings closer than MIN_SEPARATION in
-## height ("crossing") and very steep road outside pits ("steep"), as
+## height ("crossing") and road steeper than 80 deg outside walls ("steep"), as
 ## [{pos: plan point, kind}].
 func problems(path: TrackPath) -> Array:
 	var out := []
@@ -1527,7 +1443,7 @@ func problems(path: TrackPath) -> Array:
 		var d := Vector2(path.center[j].x - path.center[i].x, path.center[j].z - path.center[i].z).length()
 		var rise := absf(path.center[j].y - path.center[i].y)
 		if path.road[i] == 1 and path.step[i] == 0 and path.loop_mask[i] == 0 and path.loop_mask[j] == 0 \
-				and rise > (MAX_SLOPE + 0.05) * maxf(d, 0.01):
+				and rise > WALL_SLOPE * maxf(d, 0.01):
 			_add_problem(out, path_to_plan(path.center[i]), "steep")
 	return out
 
