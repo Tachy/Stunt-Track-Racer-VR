@@ -23,6 +23,8 @@ const LAMP_COLOR := Color(1.0, 0.92, 0.72)
 ## The road colour changes at every piece border and, inside a piece, at
 ## least every STRIPE_MAX metres (the piece is cut into equal stripes).
 const STRIPE_MAX := 40.0
+## Road steeper than 70 deg is drawn black like a real wall (tan 70 deg).
+const WALL_LOOK_SLOPE := 2.7475
 ## The road surface is cut into this many strips across: a single quad over
 ## the whole width is folded along its diagonal where the road twists into or
 ## out of a banked curve - a bump of up to 6 cm every metre under the wheels.
@@ -53,6 +55,17 @@ func build(p: TrackPath, see_through := false) -> TrackNode:
 	return self
 
 
+## Whether the road from sample i to the next is steeper than 70 deg
+## (WALL_LOOK_SLOPE): it is drawn black like a real wall then (not loops,
+## not the vertical walls themselves).
+func _wall_steep(i: int) -> bool:
+	var j := (i + 1) % path.n
+	if path.loop_mask[i] == 1 or path.loop_mask[j] == 1 or path.step[i] == 1:
+		return false
+	var d := Vector2(path.center[j].x - path.center[i].x, path.center[j].z - path.center[i].z).length()
+	return absf(path.center[j].y - path.center[i].y) > WALL_LOOK_SLOPE * maxf(d, 0.01)
+
+
 ## Alternating stripes along the lap. An even number in all, so the colour
 ## also changes where the lap ends at the start (the longest piece gets one
 ## stripe more if needed).
@@ -81,6 +94,8 @@ func _stripes() -> void:
 func _road_color(i: int) -> Color:
 	if path.piece_of[i] == 0 and path.s_arr[i] < 3.0:
 		return Palette.START_LINE
+	if _wall_steep(i):
+		return Palette.JUMP_WALL
 	return Palette.ROAD_DARK if _stripe[i] == 0 else Palette.ROAD_LIGHT
 
 

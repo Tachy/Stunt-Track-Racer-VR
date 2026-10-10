@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_wall_point_roles", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_wall_point_roles", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -1808,6 +1808,34 @@ func test_road_stripes() -> void:
 		check(ok_border, "%s: colour changes at every piece border (also at the start)" % id)
 		check(longest <= TrackNode.STRIPE_MAX + 1.5, "%s: stripes at most %d m (%.1f)" % [id, TrackNode.STRIPE_MAX, longest])
 		node.free()
+
+
+## Road steeper than 70 deg is drawn black like a real wall.
+func test_steep_road_black() -> void:
+	var m := _editor_oval()
+	m.heights = [[100.0, 6.0, true, 0], [104.0, 20.0, true, 0], [140.0, 20.0, false, 0]]    # 74 deg up
+	m._tidy_heights()
+	var p := TrackPath.new(m.to_def("t"))
+	var node := TrackNode.new().build(p)
+	var black := 0
+	for i in range(p._index_at_x(100.0), p._index_at_x(104.0)):
+		if node._road_color(i) == Palette.JUMP_WALL:
+			black += 1
+	check(black >= 3, "the 74 deg ramp is black (%d samples)" % black)
+	check(node._road_color(p._index_at_x(120.0)) != Palette.JUMP_WALL and node._road_color(p._index_at_x(300.0)) != Palette.JUMP_WALL,
+		"the flat road is not")
+	node.free()
+	# 63 deg: still road coloured
+	m.heights = [[100.0, 6.0, true, 0], [107.0, 20.0, true, 0], [140.0, 20.0, false, 0]]
+	m._tidy_heights()
+	p = TrackPath.new(m.to_def("t"))
+	node = TrackNode.new().build(p)
+	black = 0
+	for i in p.n:
+		if node._road_color(i) == Palette.JUMP_WALL:
+			black += 1
+	check(black == 0, "63 deg: road (%d black)" % black)
+	node.free()
 
 
 ## The upper point of a wall takes the lower (yellow) one along; the lower
