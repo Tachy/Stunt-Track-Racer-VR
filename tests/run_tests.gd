@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_crane_before_black_walls", "test_jump_align", "test_parachute", "test_road_on_ground", "test_wall_point_roles", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_crane_before_black_walls", "test_jump_align", "test_parachute", "test_road_on_ground", "test_bank_hold", "test_wall_point_roles", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -1365,6 +1365,16 @@ func test_editor_move_points() -> void:
 	pts = m.points()
 	check(near(pts[1][0], 210.0) and near(pts[2][0], 210.0) and HeightSpline.is_wall(pts, 1), "the wall moves as a whole (%s)" % [pts])
 	check(m.move_points([0, pts.size() - 1], 10.0, 0.0) == Vector2.ZERO, "start and end are not moved")
+	# several marked points deleted at once (one undo step); a wall's other point stays as a plain one
+	m = _editor_oval()
+	m.heights = [[100.0, 8.0, false, 0], [130.0, 12.0, false, 0], [200.0, 15.0, false, 0], [200.0, 5.0, false, 1], [300.0, 9.0, false, 0]]
+	m._tidy_heights()
+	check(m.delete_points([1, 3, 0, 7]) and m.heights.size() == 3, "two marked points gone, start / end / out of range ignored (%s)" % [m.heights])
+	pts = m.points()
+	check(near(pts[1][0], 130.0) and near(pts[2][0], 200.0) and int(pts[2][3]) == 0 and not HeightSpline.is_wall(pts, 1),
+		"the wall's other point is a plain point now")
+	check(m.undo_height() and m.heights.size() == 5, "one Esc brings both back")
+	check(not m.delete_points([0]), "nothing to delete: false")
 
 
 ## The height surface of the 3D height editor: profile x <-> plan, mouse
@@ -1983,6 +1993,36 @@ func test_road_on_ground() -> void:
 		inside = inside or Geometry2D.is_point_in_polygon(c, h)
 	check(inside, "a hole in the ground under it")
 	check(p.ground_road[p._index_at_x(300.0)] == 0, "road up high: no hole")
+
+
+## Banking held on into a straight: full up to the point, then the usual
+## run-out; on the straight before a curve the same the other way; it goes
+## along when the lap is reversed.
+func test_bank_hold() -> void:
+	var m := _editor_oval()
+	var bank_at := func(path: TrackPath, x: float) -> float:
+		return rad_to_deg(asin(clampf(-path.right[path._index_at_x(x)].y, -1.0, 1.0)))
+	var x4 := m.piece_x(4)          # the long straight after the second curve (banked 30 deg)
+	var before: float = bank_at.call(TrackPath.new(m.to_def("t")), x4 + 25.0)
+	check(m.add_hold(x4 + 30.0) == [4, "out"] and near(float(m.pieces[4]["bank_out"]), 30.0), "hold point after the curve")
+	var p := TrackPath.new(m.to_def("t"))
+	check(absf(absf(bank_at.call(p, x4 + 25.0)) - 30.0) < 0.5 and absf(before) < 20.0,
+		"full banking up to the point (%.1f, was %.1f)" % [bank_at.call(p, x4 + 25.0), before])
+	check(absf(absf(bank_at.call(p, x4 + 50.0)) - 15.0) < 2.0, "half way down 20 m after it (%.1f)" % bank_at.call(p, x4 + 50.0))
+	check(absf(bank_at.call(p, x4 + 75.0)) < 0.5, "flat 40 m after it")
+	check(m.add_hold(x4 + 240.0) == [4, "in"] and near(float(m.pieces[4]["bank_in"]), 10.0), "near the curve after it: before that one")
+	p = TrackPath.new(m.to_def("t"))
+	check(absf(absf(bank_at.call(p, x4 + 242.0)) - 30.0) < 0.5, "full banking from the point on, before the curve")
+	m.move_hold(4, "out", x4 + 60.0)
+	check(near(float(m.pieces[4]["bank_out"]), 60.0) and near(m.hold_x(4, "out"), x4 + 60.0), "moved")
+	check(m.hold_marks().size() == 2, "two points shown")
+	check(m.delete_hold(4, "in") and not m.pieces[4].has("bank_in") and m.undo_height() and m.pieces[4].has("bank_in"), "deleted, Esc: back")
+	# reversed: the hold after the curve is one before it now
+	var n := m.pieces.size()
+	m.reverse()
+	var r: Dictionary = m.pieces[n - 1 - 4]
+	check(near(float(r.get("bank_in", -1.0)), 60.0) and near(float(r.get("bank_out", -1.0)), 10.0), "reversed: out and in swapped (%s)" % [r])
+	check(_closes(m), "the reversed lap closes")
 
 
 func test_custom_track_delete() -> void:

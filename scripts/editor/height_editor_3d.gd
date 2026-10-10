@@ -20,6 +20,10 @@ extends Node3D
 ##                "waves"); a click on its orange mark selects it and drags
 ##                it along the lap (its height: the cursor keys only), a
 ##                right click removes it
+##   U            on a straight next to a banked curve: the curve's banking
+##                is held on up to the point under the mouse, the run-out
+##                begins there (the nearer curve's side); its purple mark is
+##                selected and dragged like a wave's
 ##   wheel        camera distance
 ## The point logic is TrackEditorModel's (snapping to walls at 80 deg,
 ## undo). While a point is dragged the line follows at once, the road
@@ -35,6 +39,7 @@ signal selected
 const WALL_LINE := Color("#ffd400")     # vertical walls and their lower points
 const POINT_ON := Color("#4fd8ff")      # selected point
 const WAVE_MARK := Color("#ff8a3d")     # a wave on the edge of the road
+const HOLD_MARK := Color("#b46cff")     # where a held banking runs out
 const PIECE_ON := Color("#e0302a")      # selected piece (also in the plan)
 const PROBLEM_CROSSING := Color(1.0, 0.25, 0.2)
 const PROBLEM_STEEP := Color(1.0, 0.6, 0.1)
@@ -71,6 +76,9 @@ var marked: Array = []
 var _mark_anchor := -1
 var wave := -1                    # selected wave (index in model.waves)
 var _wave_drag := false           # the selected wave follows the mouse
+## Selected hold point of a held banking: [piece, side] ([]: none).
+var hold: Array = []
+var _hold_drag := false
 var piece := -1                   # selected piece
 ## Problems of the built track: [{pos: plan point, kind, at: path point}].
 var problems: Array = []
@@ -170,7 +178,7 @@ static func line_color(h: float) -> Color:
 
 
 func dragging() -> bool:
-	return _drag >= 0 or _wave_drag
+	return _drag >= 0 or _wave_drag or _hold_drag
 
 
 # --- building the track ------------------------------------------------------------
@@ -277,6 +285,7 @@ func point_pos(i: int) -> Vector3:
 func select_point(i: int, move_camera := false) -> void:
 	point = i
 	wave = -1
+	hold = []
 	marked = [i] if i >= 0 else []
 	_mark_anchor = i
 	if i >= 0:
@@ -297,6 +306,7 @@ func select_piece(k: int, move_camera := false) -> void:
 	point = -1
 	marked = []
 	wave = -1
+	hold = []
 	if move_camera and k >= 0 and k < path.pieces.size():
 		var pc: Dictionary = path.pieces[k]
 		_pivot = path.center[(int(pc["i0"]) + int(pc["i1"])) / 2]
@@ -315,9 +325,70 @@ func _piece_at_x(x: float) -> int:
 	return path.pieces.size() - 1
 
 
+## Selects the hold point [piece, side] (purple mark; []: none).
+func select_hold(h: Array) -> void:
+	hold = h
+	wave = -1
+	point = -1
+	marked = []
+	if not h.is_empty():
+		piece = h[0]
+	_line_dirty = true
+	_static_dirty = true
+	selected.emit()
+
+
+## 3D position of a hold mark ([piece, side, x]): on the middle of the road.
+func hold_pos(mark: Array) -> Vector3:
+	var i := path._index_at_x(float(mark[2]))
+	return path.center[i] + path.up[i] * LINE_LIFT
+
+
+## U: a hold point where the mouse is on the road; selected. False if the
+## mouse is not on a straight next to a banked curve.
+func add_hold_at_mouse() -> bool:
+	var hit: Variant = _road_hit(_mouse) if _mouse.x >= 0.0 else null
+	if hit == null:
+		return false
+	var h := model.add_hold(_x_of_hit(hit[0], hit[1]))
+	if h.is_empty():
+		return false
+	select_hold(h)
+	rebuild(true)
+	edited.emit()
+	return true
+
+
+## Hold mark under the screen position ([] if none): [piece, side].
+func _hold_at(pos: Vector2) -> Array:
+	var best: Array = []
+	var best_d := PICK_PX
+	for mk in model.hold_marks():
+		var sp: Variant = view.to_screen(hold_pos(mk))
+		if sp != null and (sp as Vector2).distance_to(pos) < best_d:
+			best_d = (sp as Vector2).distance_to(pos)
+			best = [mk[0], mk[1]]
+	return best
+
+
+## Dragging the selected hold point along its straight.
+func _hold_to(pos: Vector2) -> void:
+	if hold.is_empty():
+		return
+	var r := view.ray(pos)
+	var h: Variant = ribbon.hit(r[0], r[1], model.hold_x(hold[0], hold[1]))
+	if h == null:
+		return
+	model.move_hold(hold[0], hold[1], (h as Vector2).x, false)
+	rebuild(false)
+	_line_dirty = true
+	dragged.emit()
+
+
 ## Selects wave k (orange mark; -1: none).
 func select_wave(k: int) -> void:
 	wave = k
+	hold = []
 	point = -1
 	marked = []
 	if k >= 0:
@@ -503,6 +574,8 @@ func handle(event: InputEvent) -> bool:
 			_drag_to(mm.position)
 		elif _wave_drag:
 			_wave_to(mm.position)
+		elif _hold_drag:
+			_hold_to(mm.position)
 		elif _panning:
 			pan(mm.relative)
 		elif _right_down:
@@ -520,8 +593,9 @@ func handle(event: InputEvent) -> bool:
 		MOUSE_BUTTON_LEFT:
 			if mb.pressed:
 				_left_click(mb.position, mb.double_click, mb.shift_pressed, mb.ctrl_pressed)
-			elif _wave_drag:
+			elif _wave_drag or _hold_drag:
 				_wave_drag = false
+				_hold_drag = false
 				rebuild(true)
 				edited.emit()
 			elif _drag >= 0:
@@ -542,6 +616,11 @@ func handle(event: InputEvent) -> bool:
 					var wk := _wave_at(mb.position) if i < 0 else -1
 					if wk >= 0 and model.delete_wave(wk):
 						wave = -1
+						rebuild(true)
+						edited.emit()
+					var hk := _hold_at(mb.position) if i < 0 and wk < 0 else []
+					if not hk.is_empty() and model.delete_hold(hk[0], hk[1]):
+						hold = []
 						rebuild(true)
 						edited.emit()
 					if i >= 0 and model.delete_point(i):
@@ -571,6 +650,12 @@ func _left_click(pos: Vector2, double: bool, shift := false, ctrl := false) -> v
 			select_wave(wk)
 			model.snapshot_heights()
 			_wave_drag = true
+			return
+		var hk := _hold_at(pos)
+		if not hk.is_empty():
+			select_hold(hk)
+			model.snapshot_heights()
+			_hold_drag = true
 			return
 	if i >= 0:
 		if (shift or ctrl) and not double:
@@ -913,6 +998,11 @@ func _draw_points() -> void:
 		var wp := wave_pos(k)
 		var ws := POINT_PX * view.pixel_metres(wp)
 		_diamond(kit, wp, ws * 0.9, POINT_ON if k == wave else WAVE_MARK)
+	for mk in model.hold_marks():
+		var hp := hold_pos(mk)
+		var hs := POINT_PX * view.pixel_metres(hp)
+		var on: bool = not hold.is_empty() and hold[0] == mk[0] and hold[1] == mk[1]
+		_diamond(kit, hp, hs * 0.9, POINT_ON if on else HOLD_MARK)
 	_point_mesh.clear_surfaces()
 	kit.build(_point_mesh)
 

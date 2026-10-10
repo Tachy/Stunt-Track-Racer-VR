@@ -144,6 +144,10 @@ func _layout() -> void:
 		p["gap"] = bool(raw.get("gap", false))
 		p["bridge"] = bool(raw.get("bridge", false))
 		p["no_crane"] = bool(raw.get("no_crane", false))
+		# a straight next to a curve: its banking held on this far into it
+		# (out: from the curve before; in: up to the curve after), then the run-out
+		p["bank_out"] = float(raw.get("bank_out", 0.0))
+		p["bank_in"] = float(raw.get("bank_in", 0.0))
 		var length: float
 		if p["type"] == "S":
 			length = float(raw.get("l", 40.0))
@@ -341,7 +345,9 @@ func _index_at_x(x: float) -> int:
 
 ## Banking: a curve is banked over its whole length; the road twists in and
 ## out over BANK_RAMP metres of the neighbouring pieces (as on real banked
-## turns), so the car never meets a flat road while still cornering.
+## turns), so the car never meets a flat road while still cornering. A
+## straight after (before) the curve may hold its full banking on for
+## "bank_out" ("bank_in") metres first; the run-out begins there.
 const BANK_RAMP := 40.0
 
 func _apply_banking() -> void:
@@ -352,7 +358,8 @@ func _apply_banking() -> void:
 	bank.resize(n)
 	limit.resize(n)
 	var ramp := int(BANK_RAMP / STEP)
-	for p in pieces:
+	for pi_ in pieces.size():
+		var p: Dictionary = pieces[pi_]
 		var b: float = p["bank"]
 		if absf(b) < 1e-4:
 			continue
@@ -361,9 +368,22 @@ func _apply_banking() -> void:
 		for i in range(i0, i1):
 			bank[i] += b
 			limit[i] = maxf(limit[i], absf(b))
-		for k in range(1, ramp + 1):
-			var f := smoothstep(0.0, 1.0, 1.0 - float(k) / ramp)
-			for i in [(i0 - k + n) % n, (i1 - 1 + k) % n]:
+		# held on into the straight before / after it
+		var before: Dictionary = pieces[(pi_ - 1 + pieces.size()) % pieces.size()]
+		var after: Dictionary = pieces[(pi_ + 1) % pieces.size()]
+		var hold_in := 0
+		var hold_out := 0
+		if before["type"] == "S":
+			hold_in = int(round(minf(float(before["bank_in"]), float(before["length"])) / STEP))
+		if after["type"] == "S":
+			hold_out = int(round(minf(float(after["bank_out"]), float(after["length"])) / STEP))
+		for k in range(1, maxi(hold_in, hold_out) + ramp + 1):
+			for side in 2:
+				var hold := hold_in if side == 0 else hold_out
+				if k > hold + ramp:
+					continue
+				var f := 1.0 if k <= hold else smoothstep(0.0, 1.0, 1.0 - float(k - hold) / ramp)
+				var i := (i0 - k + n) % n if side == 0 else (i1 - 1 + k) % n
 				bank[i] += b * f
 				limit[i] = maxf(limit[i], absf(b))
 	for i in n:

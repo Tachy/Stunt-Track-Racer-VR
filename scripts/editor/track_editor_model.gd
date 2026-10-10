@@ -834,6 +834,13 @@ func move_start(k: int, o: float) -> bool:
 		b.erase("auto")
 		_next_group += 1
 		new0["l"] = o
+		# a held banking stays on its end of the straight
+		b.erase("bank_out")
+		new0.erase("bank_in")
+		if b.has("bank_in"):
+			b["bank_in"] = minf(float(b["bank_in"]), float(b["l"]))
+		if new0.has("bank_out"):
+			new0["bank_out"] = minf(float(new0["bank_out"]), o)
 		for e in bound + wbound:
 			if is_same(e[0], new0) and float(e[1]) >= o - 0.01:
 				e[0] = b
@@ -846,6 +853,9 @@ func move_start(k: int, o: float) -> bool:
 		var lp := float(prev["l"])
 		prev["l"] = lp + float(old0["l"])
 		prev.erase("auto")
+		prev.erase("bank_in")
+		if old0.has("bank_in"):
+			prev["bank_in"] = old0["bank_in"]
 		for e in bound + wbound:
 			if is_same(e[0], old0):
 				e[0] = prev
@@ -881,6 +891,15 @@ func reverse() -> bool:
 			p["t"] = "L" if p["t"] == "R" else "R"
 			if p.has("bank"):
 				p["bank"] = -float(p["bank"])
+		# banking held on after a curve: before it now (and the other way round)
+		var bo = p.get("bank_out")
+		var bi = p.get("bank_in")
+		p.erase("bank_out")
+		p.erase("bank_in")
+		if bo != null:
+			p["bank_in"] = bo
+		if bi != null:
+			p["bank_out"] = bi
 		out.append(p)
 	pieces = out
 	start_dir = -start_dir
@@ -1144,6 +1163,86 @@ func delete_wave(i: int) -> bool:
 	return true
 
 
+# --- banking held on into a straight ---
+
+static func _banked(p: Dictionary) -> bool:
+	return is_curve(p) and absf(float(p.get("bank", 0.0))) > 0.01
+
+
+## Piece at profile x (loops have no length there); -1 if none.
+func piece_at_x(x: float) -> int:
+	var x0 := 0.0
+	for k in pieces.size():
+		var l := profile_len(pieces[k])
+		if l > 0.0 and x < x0 + l:
+			return k
+		x0 += l
+	return -1
+
+
+## The points where a straight next to a banked curve lets the banking run
+## out: [piece, side, profile x] - side "out": held on from the curve before
+## it ("bank_out" m), "in": from this far before the curve after it.
+func hold_marks() -> Array:
+	var out := []
+	for k in pieces.size():
+		var p: Dictionary = pieces[k]
+		if p.get("t", "S") != "S":
+			continue
+		if p.has("bank_out"):
+			out.append([k, "out", piece_x(k) + float(p["bank_out"])])
+		if p.has("bank_in"):
+			out.append([k, "in", piece_x(k) + float(p["l"]) - float(p["bank_in"])])
+	return out
+
+
+## Profile x of the hold point of piece k on its side.
+func hold_x(k: int, side: String) -> float:
+	var p: Dictionary = pieces[k]
+	if side == "out":
+		return piece_x(k) + float(p.get("bank_out", 0.0))
+	return piece_x(k) + float(p["l"]) - float(p.get("bank_in", 0.0))
+
+
+## U: a hold point at profile x on a straight next to a banked curve (the
+## side of the nearer one); [piece, side], [] if there is no such straight.
+func add_hold(x: float) -> Array:
+	var k := piece_at_x(x)
+	if k < 0 or pieces[k].get("t", "S") != "S":
+		return []
+	var nn := pieces.size()
+	var can_out := _banked(pieces[(k - 1 + nn) % nn])
+	var can_in := _banked(pieces[(k + 1) % nn])
+	if not can_out and not can_in:
+		return []
+	var l := float(pieces[k]["l"])
+	var o := clampf(roundf(x - piece_x(k)), 0.0, l)
+	var side := "out" if can_out and (not can_in or o < l * 0.5) else "in"
+	_snapshot()
+	pieces[k]["bank_" + side] = o if side == "out" else l - o
+	return [k, side]
+
+
+## The hold point of piece k (side) to profile x (within the straight).
+func move_hold(k: int, side: String, x: float, record := true) -> void:
+	var l := float(pieces[k]["l"])
+	var o := clampf(roundf(x - piece_x(k)), 0.0, l)
+	var v := o if side == "out" else l - o
+	if is_equal_approx(v, float(pieces[k].get("bank_" + side, -1.0))):
+		return
+	if record:
+		_snapshot()
+	pieces[k]["bank_" + side] = v
+
+
+func delete_hold(k: int, side: String) -> bool:
+	if k < 0 or k >= pieces.size() or not pieces[k].has("bank_" + side):
+		return false
+	_snapshot()
+	pieces[k].erase("bank_" + side)
+	return true
+
+
 ## Keeps the free points sorted and inside the lap.
 func _tidy_heights() -> void:
 	var pts := points()
@@ -1372,6 +1471,30 @@ func delete_point(i: int) -> bool:
 	if partner >= 0:
 		heights[partner - 1][3] = 0
 	heights.remove_at(i - 1)
+	_tidy_heights()
+	return true
+
+
+## Removes the free points sel of points() together (start and end stay; the
+## other point of a wall left behind is a plain point then); one undo step.
+## False if none of them is a free point.
+func delete_points(sel: Array) -> bool:
+	var pts := points()
+	var idx := []
+	for i in sel:
+		if int(i) > 0 and int(i) <= heights.size() and not idx.has(int(i)):
+			idx.append(int(i))
+	if idx.is_empty():
+		return false
+	_snapshot()
+	for i in idx:
+		var partner := _wall_partner(pts, i)
+		if partner > 0 and partner <= heights.size() and not idx.has(partner):
+			heights[partner - 1][3] = 0
+	idx.sort()
+	idx.reverse()
+	for i in idx:
+		heights.remove_at(i - 1)
 	_tidy_heights()
 	return true
 

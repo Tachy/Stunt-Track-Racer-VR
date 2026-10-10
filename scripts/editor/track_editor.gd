@@ -461,7 +461,7 @@ func _update() -> void:
 		_nav.position = o + Vector2(10, 72)
 		_nav.size = Vector2(maxf(220.0, us.x * 0.28), maxf(160.0, us.y * 0.34))
 		_info.text = _height_info()
-		_status.text = Lang.t("CLICK = SELECT / DRAG POINT (SHIFT/CTRL: MORE)  DOUBLE CLICK = CAMERA TO POINT / NEW POINT ON ROAD  RIGHT CLICK = REMOVE  RIGHT MOUSE = TURN  MIDDLE MOUSE = MOVE  WHEEL = DISTANCE  C KINK  UP/DOWN HEIGHT  LEFT/RIGHT ALONG  W WAVE  B BRIDGE  ESC UNDO")
+		_status.text = Lang.t("CLICK = SELECT / DRAG POINT (SHIFT/CTRL: MORE)  DOUBLE CLICK = CAMERA TO POINT / NEW POINT ON ROAD  RIGHT CLICK / DEL = REMOVE  RIGHT MOUSE = TURN  MIDDLE MOUSE = MOVE  WHEEL = DISTANCE  C KINK  UP/DOWN HEIGHT  LEFT/RIGHT ALONG  W WAVE  U BANKING  B BRIDGE  ESC UNDO")
 		if model.official != "":
 			_status.text += "  " + Lang.t("N NO CRANE  G GAP")
 		queue_redraw()
@@ -906,11 +906,19 @@ func _height_key(k: InputEventKey) -> bool:
 				_flash(Lang.t("NOTHING TO UNDO"))
 				return true
 			_h3d.wave = -1
+			_h3d.hold = []
 			_h3d.select_point(mini(_h3d.point, model.points().size() - 1))
 		KEY_W:
 			if not _h3d.add_wave_at_mouse():
 				_flash(Lang.t("POINT AT THE ROAD FIRST"))
 				return true
+		KEY_U:
+			if not _h3d.add_hold_at_mouse():
+				_flash(Lang.t("POINT AT A STRAIGHT NEXT TO A BANKED CURVE"))
+				return true
+		KEY_LEFT, KEY_RIGHT when not _h3d.hold.is_empty():
+			var hx := model.hold_x(_h3d.hold[0], _h3d.hold[1])
+			model.move_hold(_h3d.hold[0], _h3d.hold[1], hx + (1.0 if k.keycode == KEY_RIGHT else -1.0) * (4.0 if k.shift_pressed else 1.0))
 		KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT when _h3d.wave >= 0 and _h3d.wave < model.waves.size():
 			var w: Array = model.waves[_h3d.wave]
 			var step := TrackEditorModel.WAVE_STEP if k.keycode in [KEY_UP, KEY_DOWN] else 1.0
@@ -938,6 +946,19 @@ func _height_key(k: InputEventKey) -> bool:
 			else:
 				model.move_point(pt, float(q[0]) + (1.0 if k.keycode == KEY_RIGHT else -1.0), float(q[1]), true,
 					TrackEditorModel.WALL_SNAP, true)
+		KEY_DELETE:
+			# all marked points at once (or the selected wave / hold point)
+			if not _h3d.hold.is_empty():
+				model.delete_hold(_h3d.hold[0], _h3d.hold[1])
+				_h3d.hold = []
+			elif _h3d.wave >= 0 and _h3d.wave < model.waves.size():
+				model.delete_wave(_h3d.wave)
+				_h3d.wave = -1
+			elif not model.delete_points(_h3d.marked if not _h3d.marked.is_empty() else [_h3d.point]):
+				_flash(Lang.t("SELECT A POINT FIRST"))
+				return true
+			else:
+				_h3d.select_point(-1)
 		KEY_C:
 			if _h3d.point <= 0 or _h3d.point >= model.points().size() - 1:
 				_flash(Lang.t("SELECT A POINT FIRST"))
@@ -971,7 +992,11 @@ func _height_info() -> String:
 		t += "  " + Lang.t("TOO STEEP %d") % ns
 	var pts := model.points()
 	var pt := _h3d.point
-	if _h3d.wave >= 0 and _h3d.wave < model.waves.size():
+	if not _h3d.hold.is_empty():
+		var hp: Dictionary = model.pieces[_h3d.hold[0]]
+		t += "   >  " + (Lang.t("BANKING HELD ON %d M AFTER THE CURVE") % roundi(float(hp.get("bank_out", 0.0))) if _h3d.hold[1] == "out"
+			else Lang.t("BANKING FROM %d M BEFORE THE CURVE") % roundi(float(hp.get("bank_in", 0.0))))
+	elif _h3d.wave >= 0 and _h3d.wave < model.waves.size():
 		var w: Array = model.waves[_h3d.wave]
 		t += "   >  " + Lang.t("WAVE AT %d M  HEIGHT %.1f M") % [roundi(float(w[0])), float(w[2])] + "  " \
 			+ Lang.t("RIGHT EDGE" if int(w[1]) > 0 else "LEFT EDGE")
