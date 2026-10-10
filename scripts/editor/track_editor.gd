@@ -286,7 +286,10 @@ func _gui_input(event: InputEvent) -> void:
 
 ## Esc and the shortcuts come before InputManager (which would leave).
 func _input(event: InputEvent) -> void:
-	if not (event is InputEventKey) or not event.pressed or event.echo:
+	# held down, only the cursor keys repeat (as real keys); Esc and the
+	# others act once per press
+	if not (event is InputEventKey) or not event.pressed \
+			or (event.echo and not (event.keycode in [KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN])):
 		return
 	if get_viewport().gui_get_focus_owner() == _name_edit and event.keycode != KEY_ESCAPE:
 		return
