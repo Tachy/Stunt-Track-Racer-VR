@@ -11,6 +11,10 @@ signal finished(result: Dictionary)
 
 const LAPS := 3
 const START_S := 8.0
+## Test drive from the editor with a point selected (request "start_x", its
+## profile x): the car starts this far before it (where the crane may put
+## it down, see TrackPath.recovery_s).
+const TEST_RUNUP := 200.0
 const START_LAT := 2.4
 const HOLD_HEIGHT := 1.5
 ## Two cars on cranes closer than this (m along the track) are set down side
@@ -163,8 +167,11 @@ func _ready() -> void:
 	var profile := AiProfile.compute(path, super_league)
 	var floors := AiProfile.floors(path, super_league)
 	var opp_index: int = req.get("opponent", -1)
+	var start_s := START_S
+	if req.has("start_x"):
+		start_s = path.recovery_s(path.s_arr[path._index_at_x(float(req["start_x"]))] - TEST_RUNUP)
 	var lat := 0.0
-	var start_lat := minf(START_LAT, path.half_width[path.index_at_s(START_S)] * 0.5)
+	var start_lat := minf(START_LAT, path.half_width[path.index_at_s(start_s)] * 0.5)
 	if opp_index >= 0 or online:
 		lat = -start_lat
 		if online:
@@ -202,9 +209,9 @@ func _ready() -> void:
 			opp_ai.lat = -lat      # its lane: where it is dropped, not beside the road
 			opp_ai.lat_target = -lat
 
-	_crane_lift(car, crane, START_S, lat, 1.0)
+	_crane_lift(car, crane, start_s, lat, 1.0)
 	_held_xf = car.global_transform
-	ptrack = CarTracker.new(path, car, START_S)
+	ptrack = CarTracker.new(path, car, start_s)
 	if autopilot:
 		_ap = AiDriver.new(ptrack, profile, floors, 0.95, [])
 		_ap.lat = lat

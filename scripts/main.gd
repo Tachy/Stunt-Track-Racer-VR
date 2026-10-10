@@ -66,6 +66,8 @@ func _ready() -> void:
 		var req := {"track": _args["track"], "opponent": int(_args.get("opponent", "-1")),
 			"league": false, "super": _args.has("super"), "holes": 0,
 			"pitch_assist": not _args.has("no-pitch-assist")}
+		if _args.has("start-x"):
+			req["start_x"] = float(_args["start-x"])      # debug: as a test drive from a point
 		_start_race(req)
 	else:
 		show_menu(_args.get("menu", "main"))

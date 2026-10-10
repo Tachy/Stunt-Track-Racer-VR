@@ -32,7 +32,7 @@ func _init(p: TrackPath, c: PlayerCar, start_s: float) -> void:
 	s = p.wrap_s(start_s)
 	progress = start_s
 	idx = p.index_at_s(start_s)
-	laps = LapTracker.new(p.pieces.size(), 0)
+	laps = LapTracker.new(p.pieces.size(), p.piece_of[idx])     # (a test drive may start mid-lap)
 
 
 func laps_done() -> int:

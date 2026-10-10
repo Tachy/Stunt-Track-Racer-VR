@@ -827,8 +827,11 @@ func _act_test() -> void:
 	_act_save()
 	# admin: the official track itself (saved just now); else the own file
 	var id := model.official if model.official != "" and admin else _file_id()
-	start_race.emit({"track": id, "opponent": -1, "league": false, "super": false, "holes": 0,
-		"from_editor": id})
+	var req := {"track": id, "opponent": -1, "league": false, "super": false, "holes": 0, "from_editor": id}
+	# a point selected (blue) in the height stage: the drive starts before it
+	if _mode == "height" and _h3d.point > 0 and _h3d.point < model.points().size() - 1:
+		req["start_x"] = float(model.points()[_h3d.point][0])
+	start_race.emit(req)
 
 
 # --- height stage ----------------------------------------------------------------------
