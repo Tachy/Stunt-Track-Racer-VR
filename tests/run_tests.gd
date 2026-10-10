@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -1174,6 +1174,43 @@ func test_editor_move_start() -> void:
 	check(m.heights.size() == 3 and near(float(m.heights[0][0]), 100.0) and near(float(m.heights[0][1]), h100) 		and near(m.base, float(old_pts[0][1])), "the old start point is the start again, the line before a point (%s)" % [m.heights])
 	m.undo()
 	check(m.start.distance_to(Vector2(0, -100)) < 0.01 and m.heights.size() == 3, "Esc undoes the start move")
+
+
+## Several profile points moved together: distances and heights to each
+## other stay; not past the next point, the slope limit at the ends of the
+## group, a wall's other point goes along.
+func test_editor_move_points() -> void:
+	var m := _editor_oval()
+	m.heights = [[100.0, 8.0, false, 0], [130.0, 12.0, false, 0], [160.0, 10.0, false, 0], [300.0, 10.0, false, 0]]
+	m._tidy_heights()
+	var got := m.move_points([1, 2, 3], 20.0, 2.0)
+	check(got == Vector2(20, 2), "moved by the offset (%s)" % got)
+	var pts := m.points()
+	check(near(pts[1][0], 120.0) and near(pts[2][0], 150.0) and near(pts[3][0], 180.0), "distances stay")
+	check(near(pts[1][1], 10.0) and near(pts[2][1], 14.0) and near(pts[3][1], 12.0), "heights to each other stay")
+	check(near(pts[4][0], 300.0) and near(pts[4][1], 10.0), "the point not moved stays")
+	check(m.undo_height() and near(m.points()[1][0], 100.0), "Esc: one step back")
+	# not past the next point
+	got = m.move_points([1, 2, 3], 500.0, 0.0)
+	pts = m.points()
+	check(got.x > 0.0 and float(pts[3][0]) <= 300.0 - TrackEditorModel.MIN_POINT_GAP + 0.01, "stops before the next point (%s)" % [pts])
+	check(near(float(pts[2][0]) - float(pts[1][0]), 30.0) and near(float(pts[3][0]) - float(pts[2][0]), 30.0), "distances stay at the stop")
+	m.undo_height()
+	# far up: only as steep as allowed at the ends of the group
+	got = m.move_points([2, 3], 0.0, 45.0)
+	pts = m.points()
+	check(got.y > 0.0 and got.y < 45.0, "limited by the slope (%s)" % got)
+	check(TrackEditorModel._max_slope(pts, 0.0, float(pts[-1][0])) <= TrackEditorModel.MAX_SLOPE + 0.01, "spline within the slope limit")
+	check(near(float(pts[3][1]) - float(pts[2][1]), -2.0), "heights to each other stay at the limit")
+	# a wall: its other point goes along
+	m = _editor_oval()
+	m.heights = [[200.0, 15.0, false, 0], [200.0, 5.0, false, 1], [260.0, 5.0, false, 0]]
+	m._tidy_heights()
+	check(HeightSpline.is_wall(m.points(), 1), "a wall")
+	m.move_points([1], 10.0, 0.0)
+	pts = m.points()
+	check(near(pts[1][0], 210.0) and near(pts[2][0], 210.0) and HeightSpline.is_wall(pts, 1), "the wall moves as a whole (%s)" % [pts])
+	check(m.move_points([0, pts.size() - 1], 10.0, 0.0) == Vector2.ZERO, "start and end are not moved")
 
 
 ## The height surface of the 3D height editor: profile x <-> plan, mouse

@@ -8,6 +8,10 @@ extends Node3D
 ##   left click   a point: select it (blue) and drag it (along the lap and up
 ##                / down, on the vertical surface over the plan -
 ##                HeightRibbon); the road: mark its piece. The camera stays.
+##   Shift+click  a point: marked too / no longer (blue); Ctrl+click: all
+##                points from the one marked last up to it. Dragging a
+##                marked point moves all marked ones together (their
+##                distances and heights to each other stay).
 ##   double click a point: the camera turns around it from now on;
 ##                the road: a new point there (not selected)
 ##   right click  a point: delete it; dragged: turn the camera
@@ -55,6 +59,10 @@ var view: EditorView
 var path: TrackPath
 var ribbon: HeightRibbon
 var point := -1                   # selected point (index in model.points())
+## All marked points (indices in model.points(), with `point`); more than one:
+## they move together. _mark_anchor: where Ctrl+click marks from.
+var marked: Array = []
+var _mark_anchor := -1
 var piece := -1                   # selected piece
 ## Problems of the built track: [{pos: plan point, kind, at: path point}].
 var problems: Array = []
@@ -74,6 +82,11 @@ var _mouse := Vector2(-1, -1)
 var _cursor_from := Transform3D()   # camera the depth was worked out for
 var _drag := -1
 var _drag_off := Vector2.ZERO     # point minus mouse on the surface (x, h)
+var _drag_px := Vector2.ZERO      # where the drag began (screen)
+var _drag_moved := false
+## A plain click on one of several marked points: without dragging it
+## selects that point alone on release.
+var _drag_single := false
 var _right_moved := 0.0           # mouse travel with the right button down (px)
 var _right_down := false
 var _turning := false
@@ -254,6 +267,8 @@ func point_pos(i: int) -> Vector3:
 ## turns around it from now on; else it stays where it is.
 func select_point(i: int, move_camera := false) -> void:
 	point = i
+	marked = [i] if i >= 0 else []
+	_mark_anchor = i
 	if i >= 0:
 		piece = _piece_at_x(float(model.points()[i][0]))
 		if move_camera:
@@ -270,6 +285,7 @@ func select_point(i: int, move_camera := false) -> void:
 func select_piece(k: int, move_camera := false) -> void:
 	piece = k
 	point = -1
+	marked = []
 	if move_camera and k >= 0 and k < path.pieces.size():
 		var pc: Dictionary = path.pieces[k]
 		_pivot = path.center[(int(pc["i0"]) + int(pc["i1"])) / 2]
@@ -286,6 +302,34 @@ func _piece_at_x(x: float) -> int:
 		if pc["type"] != "O" and x >= float(pc["x0"]) and x < float(pc["x0"]) + float(pc["length"]):
 			return k
 	return path.pieces.size() - 1
+
+
+## Shift+click (toggle) / Ctrl+click (span) on point i: marks it
+## too or no longer, or all points from the one marked last up to it. Not
+## the start and end of the lap.
+func mark_point(i: int, span: bool) -> void:
+	var last := model.points().size() - 1
+	if i <= 0 or i >= last:
+		return
+	marked = marked.filter(func(j): return j > 0 and j < last)
+	if span and _mark_anchor > 0 and _mark_anchor < last:
+		for j in range(mini(_mark_anchor, i), maxi(_mark_anchor, i) + 1):
+			if not marked.has(j):
+				marked.append(j)
+		point = i
+	elif marked.has(i):
+		marked.erase(i)
+		if point == i:
+			point = marked[-1] if not marked.is_empty() else -1
+	else:
+		marked.append(i)
+		point = i
+		_mark_anchor = i
+	if point >= 0:
+		piece = _piece_at_x(float(model.points()[point][0]))
+	_line_dirty = true
+	_static_dirty = true
+	selected.emit()
 
 
 ## What the camera turns around: _pivot (the point double-clicked last, or
@@ -383,8 +427,10 @@ func handle(event: InputEvent) -> bool:
 	match mb.button_index:
 		MOUSE_BUTTON_LEFT:
 			if mb.pressed:
-				_left_click(mb.position, mb.double_click)
+				_left_click(mb.position, mb.double_click, mb.shift_pressed, mb.ctrl_pressed)
 			elif _drag >= 0:
+				if _drag_single and not _drag_moved:
+					select_point(_drag)       # a click on one of several: that one alone
 				_drag = -1
 				_update_cursor()
 				rebuild(true)
@@ -399,6 +445,7 @@ func handle(event: InputEvent) -> bool:
 					var i := _point_at(mb.position)
 					if i >= 0 and model.delete_point(i):
 						point = -1
+						marked = []
 						_hover = -1
 						rebuild(true)
 						_line_dirty = true
@@ -413,11 +460,22 @@ func handle(event: InputEvent) -> bool:
 	return true
 
 
-func _left_click(pos: Vector2, double: bool) -> void:
+func _left_click(pos: Vector2, double: bool, shift := false, ctrl := false) -> void:
 	var i := _point_at(pos)
 	if i >= 0:
+		if (shift or ctrl) and not double:
+			mark_point(i, ctrl)
+			if marked.has(i):
+				model.snapshot_heights()
+				_begin_drag(i, pos)
+			return
 		if not double:
 			model.snapshot_heights()     # (the first click of a double click took one)
+		if marked.size() > 1 and marked.has(i) and not double:
+			point = i
+			_begin_drag(i, pos)
+			_drag_single = true
+			return
 		_start_drag(i, pos)
 		if double:
 			select_point(i, true)      # the camera turns around it now
@@ -432,6 +490,9 @@ func _left_click(pos: Vector2, double: bool) -> void:
 			# only added: a click on it selects it (and moves the camera)
 			if point >= j:
 				point += 1       # the selected point keeps its place
+			for n in marked.size():
+				if marked[n] >= j:
+					marked[n] += 1
 			_line_dirty = true
 			rebuild(true)
 			edited.emit()
@@ -441,7 +502,15 @@ func _left_click(pos: Vector2, double: bool) -> void:
 
 func _start_drag(i: int, pos: Vector2) -> void:
 	select_point(i)
+	_begin_drag(i, pos)
+
+
+## Point i (and the others marked with it) follows the mouse from now on.
+func _begin_drag(i: int, pos: Vector2) -> void:
 	_drag = i
+	_drag_px = pos
+	_drag_moved = false
+	_drag_single = false
 	_drag_off = Vector2.ZERO
 	var q: Array = model.points()[i]
 	var r := view.ray(pos)
@@ -484,6 +553,15 @@ func _drag_to(pos: Vector2) -> void:
 	if h == null:
 		return
 	var at: Vector2 = h + _drag_off
+	if pos.distance_to(_drag_px) >= CLICK_SLOP:
+		_drag_moved = true
+	if marked.size() > 1 and marked.has(_drag):
+		if _drag_moved:
+			model.move_points(marked, at.x - float(q[0]), at.y - float(q[1]), false)
+			_line_dirty = true
+			_dirty = true
+			dragged.emit()
+		return
 	# snapping to / off a wall: WALL_SNAP, or 10 pixels' worth far away
 	var snap := maxf(TrackEditorModel.WALL_SNAP, 10.0 * view.pixel_metres(point_pos(_drag)))
 	model.move_point(_drag, at.x, at.y, false, snap)
@@ -591,8 +669,13 @@ func _draw_line() -> void:
 	var last := nseg - 1
 	if _drag >= 0 and _seg_cache.size() == nseg:
 		# point i changes the tangents at i-1 .. i+1: segments i-2 .. i+1
-		first = maxi(0, _drag - 2)
-		last = mini(nseg - 1, _drag + 1)
+		var lo := _drag
+		var hi := _drag
+		if marked.size() > 1 and marked.has(_drag):
+			lo = marked.min()
+			hi = marked.max()
+		first = maxi(0, lo - 2)
+		last = mini(nseg - 1, hi + 1)
 	else:
 		_seg_cache.resize(nseg)
 	for k in range(first, last + 1):
@@ -708,7 +791,7 @@ func _draw_points() -> void:
 		if (HeightSpline.is_wall(pts, i - 1) and float(pts[i][1]) < float(pts[i - 1][1])) \
 				or (HeightSpline.is_wall(pts, i) and float(pts[i][1]) < float(pts[i + 1][1])):
 			col = WALL_LINE      # the lower point of a wall
-		if i == point or i == _drag:
+		if i == point or i == _drag or marked.has(i):
 			col = POINT_ON       # blue: selected only
 		if i == _hover:
 			s *= 1.4             # under the mouse: a bit bigger

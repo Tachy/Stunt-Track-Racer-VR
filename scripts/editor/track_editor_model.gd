@@ -1162,6 +1162,81 @@ func move_point(i: int, x: float, h: float, record := true, snap := WALL_SNAP) -
 		_set_point(i, [b.x, b.y, q[2], q[3]], record)
 
 
+## Moves the free points sel (indices in points(); the other point of a wall
+## goes along) together by (dx, dh): their distances and heights to each
+## other stay. Not past a point that is not moved (MIN_POINT_GAP), within
+## MIN_HEIGHT..MAX_HEIGHT; where the spline at the ends of the moved runs
+## would get steeper than MAX_SLOPE they go only as far as it allows. No
+## snapping to walls. Returns the offset taken.
+func move_points(sel: Array, dx: float, dh: float, record := true) -> Vector2:
+	var pts := points()
+	var last := pts.size() - 1
+	var s := {}
+	for i in sel:
+		if i > 0 and i < last:
+			s[i] = true
+			var pa := _wall_partner(pts, i)
+			if pa > 0 and pa < last:
+				s[pa] = true
+	if s.is_empty():
+		return Vector2.ZERO
+	var idx: Array = s.keys()
+	idx.sort()
+	var lo := -INF
+	var hi := INF
+	var hmin := -INF
+	var hmax := INF
+	var ends := []          # first and last point of every run of moved points
+	for i in idx:
+		var x := float(pts[i][0])
+		if not s.has(i - 1):
+			lo = maxf(lo, float(pts[i - 1][0]) + MIN_POINT_GAP - x)
+			ends.append(i)
+		if not s.has(i + 1):
+			hi = minf(hi, float(pts[i + 1][0]) - MIN_POINT_GAP - x)
+			ends.append(i)
+		hmin = maxf(hmin, MIN_HEIGHT - float(pts[i][1]))
+		hmax = minf(hmax, MAX_HEIGHT - float(pts[i][1]))
+	var want := Vector2(clampf(roundf(dx), minf(ceilf(lo), 0.0), maxf(floorf(hi), 0.0)),
+		clampf(snappedf(dh, HEIGHT_STEP), minf(hmin, 0.0), maxf(hmax, 0.0)))
+	if want == Vector2.ZERO:
+		return want
+	var limit := MAX_SLOPE
+	for i in ends:
+		limit = maxf(limit, _slope_near(pts, i))
+	var ok := func(o: Vector2) -> bool:
+		var cand := pts.duplicate(true)
+		for i in idx:
+			cand[i][0] = float(cand[i][0]) + o.x
+			cand[i][1] = float(cand[i][1]) + o.y
+		for i in ends:
+			if _slope_near(cand, i) > limit + 1e-3:
+				return false
+		return true
+	var got := want
+	if not ok.call(want):
+		var t_lo := 0.0
+		var t_hi := 1.0
+		for it in 8:
+			var t := (t_lo + t_hi) * 0.5
+			if ok.call(want * t):
+				t_lo = t
+			else:
+				t_hi = t
+		# snapped towards no move, so as not to cross the limit
+		var r := want * t_lo
+		got = Vector2(signf(r.x) * floorf(absf(r.x)), signf(r.y) * floorf(absf(r.y) / HEIGHT_STEP) * HEIGHT_STEP)
+		if got == Vector2.ZERO or not ok.call(got):
+			return Vector2.ZERO
+	var hs := heights.duplicate(true)
+	for i in idx:
+		hs[i - 1][0] = float(hs[i - 1][0]) + got.x
+		hs[i - 1][1] = float(hs[i - 1][1]) + got.y
+	if not _set_heights(hs, record):
+		return Vector2.ZERO
+	return got
+
+
 ## Heights within GROUND_SNAP of the ground: on it.
 static func _ground_snap(h: float) -> float:
 	return 0.0 if absf(h) < GROUND_SNAP else h

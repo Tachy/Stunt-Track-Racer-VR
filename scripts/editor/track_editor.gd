@@ -437,7 +437,7 @@ func _update() -> void:
 		_nav.position = o + Vector2(10, 72)
 		_nav.size = Vector2(maxf(220.0, us.x * 0.28), maxf(160.0, us.y * 0.34))
 		_info.text = _height_info()
-		_status.text = Lang.t("CLICK = SELECT / DRAG POINT  DOUBLE CLICK = CAMERA TO POINT / NEW POINT ON ROAD  RIGHT CLICK = REMOVE  RIGHT MOUSE = TURN  WHEEL = DISTANCE  C KINK  UP/DOWN HEIGHT  LEFT/RIGHT ALONG  B BRIDGE  ESC UNDO")
+		_status.text = Lang.t("CLICK = SELECT / DRAG POINT (SHIFT/CTRL: MORE)  DOUBLE CLICK = CAMERA TO POINT / NEW POINT ON ROAD  RIGHT CLICK = REMOVE  RIGHT MOUSE = TURN  WHEEL = DISTANCE  C KINK  UP/DOWN HEIGHT  LEFT/RIGHT ALONG  B BRIDGE  ESC UNDO")
 		if model.official != "":
 			_status.text += "  " + Lang.t("N NO CRANE  G GAP")
 		queue_redraw()
@@ -860,13 +860,19 @@ func _height_key(k: InputEventKey) -> bool:
 				return true
 			var q: Array = model.points()[pt]
 			var step := TrackEditorModel.HEIGHT_STEP * (4.0 if k.shift_pressed else 1.0)
-			model.move_point(pt, float(q[0]), float(q[1]) + (step if k.keycode == KEY_UP else -step))
+			if _h3d.marked.size() > 1:
+				model.move_points(_h3d.marked, 0.0, step if k.keycode == KEY_UP else -step)
+			else:
+				model.move_point(pt, float(q[0]), float(q[1]) + (step if k.keycode == KEY_UP else -step))
 		KEY_LEFT, KEY_RIGHT:
 			var pt := _h3d.point
 			if pt < 0:
 				return true
 			var q: Array = model.points()[pt]
-			model.move_point(pt, float(q[0]) + (1.0 if k.keycode == KEY_RIGHT else -1.0), float(q[1]))
+			if _h3d.marked.size() > 1:
+				model.move_points(_h3d.marked, 1.0 if k.keycode == KEY_RIGHT else -1.0, 0.0)
+			else:
+				model.move_point(pt, float(q[0]) + (1.0 if k.keycode == KEY_RIGHT else -1.0), float(q[1]))
 		KEY_C:
 			if _h3d.point <= 0 or _h3d.point >= model.points().size() - 1:
 				_flash(Lang.t("SELECT A POINT FIRST"))
@@ -906,6 +912,8 @@ func _height_info() -> String:
 		t += "   >  " + Lang.t("START HEIGHT %.1f M") % model.base
 	elif pt > 0:
 		t += "   >  " + Lang.t("POINT AT %d M  HEIGHT %.1f M") % [roundi(pts[pt][0]), float(pts[pt][1])]
+		if _h3d.marked.size() > 1:
+			t += "  " + Lang.t("%d POINTS MARKED") % _h3d.marked.size()
 		if pts[pt][2]:
 			t += "  " + Lang.t("CORNER")
 	elif _h3d.piece >= 0:
