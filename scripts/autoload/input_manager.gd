@@ -33,6 +33,7 @@ var brake_rest := -1.0
 var brake_full := 1.0
 var btn_boost := -1
 var btn_align := -1          # jump assist (JumpAlign); keyboard: E
+var btn_chute := -1          # parachute; keyboard: F
 var btn_accept := -1
 var btn_back := -1
 var btn_recenter := -1
@@ -198,7 +199,9 @@ func get_drive() -> Dictionary:
 	var brk := maxf(brake(), 1.0 if Input.is_key_pressed(KEY_DOWN) or Input.is_key_pressed(KEY_S) else 0.0)
 	var boost := button(btn_boost) or Input.is_key_pressed(KEY_SPACE)
 	var align := button(btn_align) or Input.is_key_pressed(KEY_E)
-	return {"steer": steer, "throttle": throttle, "brake": brk, "boost": boost, "direct": direct, "align": align}
+	var chute := button(btn_chute) or Input.is_key_pressed(KEY_F)
+	return {"steer": steer, "throttle": throttle, "brake": brk, "boost": boost, "direct": direct, "align": align,
+		"chute": chute}
 
 
 # --- per-frame ---------------------------------------------------------------
@@ -307,7 +310,7 @@ func save_mapping() -> void:
 	cfg.set_value("device", "name", Input.get_joy_name(device) if device >= 0 else "")
 	cfg.set_value("device", "calibrated", calibrated)
 	for key in ["steer_axis", "steer_min", "steer_max", "gas_axis", "gas_rest", "gas_full",
-			"brake_axis", "brake_rest", "brake_full", "btn_boost", "btn_align", "btn_accept", "btn_back", "btn_recenter"]:
+			"brake_axis", "brake_rest", "brake_full", "btn_boost", "btn_align", "btn_chute", "btn_accept", "btn_back", "btn_recenter"]:
 		cfg.set_value("map", key, get(key))
 	cfg.save(PATH)
 	device_name = Input.get_joy_name(device) if device >= 0 else ""

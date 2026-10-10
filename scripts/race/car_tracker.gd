@@ -89,7 +89,7 @@ func check_off(dt: float) -> bool:
 	if car.on_ground_plane or below and not falling:
 		off_timer += dt
 		fall_timer = 0.0
-	elif below:
+	elif below and not car.chute_attached:     # (a parachute: down slowly, no limit)
 		fall_timer += dt        # (off_timer keeps its count: bouncing)
 	else:
 		off_timer = 0.0

@@ -77,6 +77,12 @@ var message := ""
 ## Jump assist of the player (its button held in the last metres before a
 ## take-off: steering onto the road, then straight).
 var _align: JumpAlign
+## The player's parachute (its button in the air: fired; cut away after the
+## touchdown; again on the next flight).
+var _chute: Parachute
+var _chute_fired := false        # in this flight already
+var _chute_ground := 0.0         # s on the ground since
+const CHUTE_CUT_TIME := 0.3
 var opp_finished_first := false
 var result := {}
 var autopilot := false
@@ -166,6 +172,8 @@ func _ready() -> void:
 
 	crane = Crane.new()
 	add_child(crane)
+	_chute = Parachute.new(car)
+	add_child(_chute)
 
 	car.verbose = true
 	var profile := AiProfile.compute(path, super_league)
@@ -302,6 +310,27 @@ func _crane_step(c: PlayerCar, cr: Crane, dt: float) -> void:
 		c.global_transform = cr.car_xform()
 
 
+## The parachute: fired in the air with its button (once a flight), cut away
+## CHUTE_CUT_TIME after the touchdown, and when the race leaves "racing"
+## (crane, finish); its line pulls the car before the car's own step.
+func _chute_step(dt: float) -> void:
+	if car.grounded > 0 or car.freeze:
+		_chute_ground += dt
+		if _chute_ground > CHUTE_CUT_TIME:
+			_chute.cut()
+			_chute_fired = false
+	else:
+		_chute_ground = 0.0
+	if state != "racing":
+		_chute.cut()
+	elif not autopilot and not _chute_fired and car.grounded == 0 and not car.freeze \
+			and car.input.get("chute", false):
+		_chute.fire()
+		_chute_fired = true
+		Sfx.play("thump", -8.0, 1.6)
+	_chute.step(dt)
+
+
 ## The crane lets go: c falls with the velocity of its swing.
 func _crane_drop(c: PlayerCar, cr: Crane) -> void:
 	var v := cr.car_velocity(c.center_of_mass)
@@ -322,6 +351,7 @@ func _physics_process(dt: float) -> void:
 			path.forward[ptrack.idx], deg_to_rad(car.tuning.max_steer_deg))
 		if _align.mode != was:
 			message = {"align": Lang.t("ALIGN"), "straight": Lang.t("STRAIGHT ON")}.get(_align.mode, "")
+	_chute_step(dt)
 	if not online or state != "hold" or _lifting():
 		_crane_step(car, crane, dt)
 	if car.freeze:

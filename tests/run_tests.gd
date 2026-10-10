@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_crane_before_black_walls", "test_jump_align", "test_wall_point_roles", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_crane_before_black_walls", "test_jump_align", "test_parachute", "test_wall_point_roles", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -1923,6 +1923,40 @@ func test_jump_align() -> void:
 	ja.apply(drive, false, s_off - 15.0, car_fwd, road, lock)
 	out = ja.apply(drive, true, s_off - 10.0, car_fwd, road, lock)
 	check(ja.mode == "align", "pressed again: aligns again")
+
+
+## Parachute: a 900 kg car (a point mass here) fired off at 25 m/s; the
+## canopy needs its 50 m through the air, then the car sinks at about
+## 6.4 m/s; a slack line pulls nothing, a cut one neither.
+func test_parachute() -> void:
+	var m := 900.0
+	var dt := 1.0 / 120.0
+	var car_pos := Vector3(0, 200, 0)
+	var car_vel := Vector3(0, 0, -25.0)
+	var ps := ParachuteSim.new(car_pos, car_vel)
+	check(ps.step(dt, car_pos, car_vel) == Vector3.ZERO, "fired: the line is slack")
+	var pull_at_10 := -1.0
+	var max_pull := 0.0
+	var t := 0.0
+	var stable := true
+	while t < 30.0:
+		var f := ps.step(dt, car_pos, car_vel)
+		car_vel += (f / m + Vector3.DOWN * 9.81) * dt
+		car_pos += car_vel * dt
+		t += dt
+		max_pull = maxf(max_pull, f.length())
+		if pull_at_10 < 0.0 and ps.dist >= 10.0:
+			pull_at_10 = f.length()
+		stable = stable and is_finite(car_vel.length()) and car_vel.length() < 200.0
+	check(stable, "the simulation stays stable")
+	check(pull_at_10 < 0.2 * m * 9.81, "after 10 m hardly any pull (%.0f N)" % pull_at_10)
+	check(ps.opening() == 1.0, "fully open after 50 m")
+	check(near(-car_vel.y, ParachuteSim.terminal_speed(m), 0.3) and -car_vel.y < 7.0,
+		"sinks at %.2f m/s (%.2f expected), below the landing damage" % [-car_vel.y, ParachuteSim.terminal_speed(m)])
+	check(Vector2(car_vel.x, car_vel.z).length() < 1.0, "the forward speed is gone (%.2f)" % Vector2(car_vel.x, car_vel.z).length())
+	check(max_pull < 8.0 * m * 9.81, "opening shock below 8 g (%.1f g)" % (max_pull / (m * 9.81)))
+	ps.cut = true
+	check(ps.step(dt, car_pos, car_vel) == Vector3.ZERO, "cut: no pull")
 
 
 func test_custom_track_delete() -> void:

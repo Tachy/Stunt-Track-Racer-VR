@@ -78,6 +78,11 @@ var _expected_dv := Vector3.ZERO
 var _landing_cd := PackedFloat32Array([0, 0, 0, 0])
 var _skip_impact := 2
 var _impact_suppress := 0.0
+## A parachute hangs on the car (no flight pitch assist then) and the force
+## of its line this step (world, and where it pulls).
+var chute_attached := false
+var _ext_force := Vector3.ZERO
+var _ext_at := Vector3.ZERO
 var touchdown_normal := Vector3.UP
 
 
@@ -348,7 +353,7 @@ func _physics_process(dt: float) -> void:
 	slip_speed = slip_sum / 4.0
 	if grounded == 0:
 		airtime += dt
-		if pitch_assist and not off_road and not crane_drop:
+		if pitch_assist and not off_road and not crane_drop and not chute_attached:
 			_align_to_flight(b, dt)
 	else:
 		airtime = 0.0
@@ -357,9 +362,21 @@ func _physics_process(dt: float) -> void:
 	var drag_f := -linear_velocity * linear_velocity.length() * tuning.drag
 	apply_central_force(drag_f)
 	total += drag_f
+	# a parachute's line: one of our own forces, no impact
+	if _ext_force != Vector3.ZERO:
+		apply_force(_ext_force, _ext_at - global_position)
+		total += _ext_force
+		_ext_force = Vector3.ZERO
 
 	_expected_dv = (total / mass + Vector3.DOWN * 9.81 * gravity_scale) * dt
 	_prev_vel = linear_velocity
+
+
+## A force from outside this step (a parachute's line), pulling at the
+## world point at; counted as one of the car's own forces (no impact).
+func external_force(f: Vector3, at: Vector3) -> void:
+	_ext_force += f
+	_ext_at = at
 
 
 ## In the air the car pitches into its flight direction (tangent of the
