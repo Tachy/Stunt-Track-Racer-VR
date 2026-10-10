@@ -5,7 +5,7 @@ class_name AiProfile
 
 const VMAX := 62.0
 const VMAX_SUPER := 70.0
-const LAT_ACCEL := 9.0
+const LAT_ACCEL := 10.0
 ## deg/s of road twist the driver accepts (banking in/out of curves)
 const MAX_ROLL_RATE := 30.0
 const BRAKE := 9.0

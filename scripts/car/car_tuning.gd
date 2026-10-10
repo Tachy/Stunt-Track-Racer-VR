@@ -24,7 +24,7 @@ extends Resource
 @export var bump_stop_return := 0.25
 @export var anti_roll := 7000.0
 
-@export var grip := 1.35                 # friction coefficient
+@export var grip := 1.5                  # friction coefficient
 ## Lateral tyre force per rad of slip angle (real tyres: ~60-90 kN/rad). The
 ## wide rear tyres are stiffer, which keeps the car stable (understeer).
 @export var cornering_stiffness_front := 60000.0
