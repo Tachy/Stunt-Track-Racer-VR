@@ -495,6 +495,14 @@ func _info_text() -> String:
 	var desc := []
 	for p in _preview:
 		desc.append(_piece_text(p))
+	# the marked pieces, as while drawing (a longer stretch: how many, how long)
+	if desc.is_empty() and _marked.x >= 0 and _marked.y < model.pieces.size():
+		var ps := model.pieces.slice(_marked.x, _marked.y + 1)
+		if ps.size() <= 3:
+			for p in ps:
+				desc.append(_piece_text(p))
+		else:
+			desc.append(Lang.t("%d PIECES MARKED  %d M") % [ps.size(), roundi(TrackEditorModel._group_length(ps))])
 	if not desc.is_empty():
 		t += "   >  " + " + ".join(desc)
 	return t
