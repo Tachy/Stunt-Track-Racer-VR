@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_crane_before_black_walls", "test_jump_align", "test_parachute", "test_road_on_ground", "test_bank_hold", "test_crane_motor_sound", "test_wall_point_roles", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_crane_before_black_walls", "test_jump_align", "test_parachute", "test_road_on_ground", "test_bank_hold", "test_crane_motor_sound", "test_engine_start_stop", "test_wall_point_roles", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -2059,6 +2059,32 @@ func test_crane_motor_sound() -> void:
 	m.generate(1600)
 	check(rms.call(m.generate(1600)) < 1e-6, "muted: silent")
 	m.free()
+
+
+## The engine sound: off until started, the starter turns it over, then it
+## runs; stopped it dies away.
+func test_engine_start_stop() -> void:
+	var rms := func(x: PackedFloat32Array) -> float:
+		var e := 0.0
+		for v in x:
+			e += v * v
+		return sqrt(e / maxf(x.size(), 1))
+	var e := EngineSynth.new()
+	e.rpm = 0.3
+	e.load = 0.5
+	check(rms.call(e.generate(1600)) < 1e-6, "not started: silent")
+	e.running = true
+	e.generate(1600)
+	var crank: float = rms.call(e.generate(1600))
+	for i in 8:
+		e.generate(1600)
+	var run: float = rms.call(e.generate(1600))
+	check(crank > 0.01 and run > crank, "starter heard, then the engine runs (%.3f, %.3f)" % [crank, run])
+	e.running = false
+	for i in 30:
+		e.generate(1600)
+	check(rms.call(e.generate(1600)) < run * 0.05, "stopped: died away")
+	e.free()
 
 
 func test_custom_track_delete() -> void:

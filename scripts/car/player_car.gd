@@ -81,6 +81,9 @@ var _impact_suppress := 0.0
 ## A parachute hangs on the car (no flight pitch assist then) and the force
 ## of its line this step (world, and where it pulls).
 var chute_attached := false
+## The engine runs (started when the crane swings the car in over the road,
+## stopped when the parachute is fired): without it no drive, no boost.
+var engine_on := true
 var _ext_force := Vector3.ZERO
 var _ext_at := Vector3.ZERO
 var touchdown_normal := Vector3.UP
@@ -199,7 +202,7 @@ func _physics_process(dt: float) -> void:
 	_check_impact()
 
 	var ctl := input if controls_enabled and not damage.is_wrecked else {"steer": 0.0, "throttle": 0.0, "brake": 0.4, "boost": false}
-	var throttle: float = ctl["throttle"]
+	var throttle: float = ctl["throttle"] if engine_on else 0.0
 	var brk: float = ctl["brake"]
 
 	# steering, less lock at speed

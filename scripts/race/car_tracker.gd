@@ -20,6 +20,7 @@ var last_lap := -1.0
 var off_timer := 0.0
 var flip_timer := 0.0
 var stuck_timer := 0.0
+var dead_timer := 0.0       # engine off and standing
 var hang_timer := 0.0
 var left_s := -1.0          # where the car left the road (-1: still on it)
 const STUCK_TIME := 2.5
@@ -103,12 +104,17 @@ func check_off(dt: float) -> bool:
 		stuck_timer += dt
 	else:
 		stuck_timer = 0.0
+	# engine off (after a parachute landing) and come to a halt: the crane
+	if not car.engine_on and car.grounded > 0 and absf(car.speed) < 1.0:
+		dead_timer += dt
+	else:
+		dead_timer = 0.0
 	# wedged somewhere with no wheel on the ground and not moving
 	if car.grounded == 0 and car.linear_velocity.length() < 1.0:
 		hang_timer += dt
 	else:
 		hang_timer = 0.0
-	if off_timer > OFF_TRACK_TIME or flip_timer > FLIP_TIME or stuck_timer > STUCK_TIME or hang_timer > HANG_TIME 			or fall_timer > MAX_FALL_TIME:
+	if off_timer > OFF_TRACK_TIME or flip_timer > FLIP_TIME or stuck_timer > STUCK_TIME or dead_timer > STUCK_TIME or hang_timer > HANG_TIME 			or fall_timer > MAX_FALL_TIME:
 		off_timer = 0.0
 		fall_timer = 0.0
 		flip_timer = 0.0

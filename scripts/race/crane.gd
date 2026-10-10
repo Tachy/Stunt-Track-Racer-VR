@@ -328,6 +328,14 @@ func droppable() -> bool:
 	return _swung and cx > _road.x + CAR_HALF_WIDTH and cx < _road.y - CAR_HALF_WIDTH
 
 
+## The car hangs over the road (some of it at least): swung in from outside.
+func over_road() -> bool:
+	if _mode != "lift":
+		return false
+	var cx := (_target.affine_inverse() * _car_xf.origin).x
+	return cx > _road.x - CAR_HALF_WIDTH and cx < _road.y + CAR_HALF_WIDTH
+
+
 func lifting() -> bool:
 	return _mode == "lift"
 

@@ -83,6 +83,8 @@ var _chute: Parachute
 var _chute_fired := false        # in this flight already
 var _chute_ground := 0.0         # s on the ground since
 const CHUTE_CUT_TIME := 0.3
+## A car this far (m) below the road beside it has fallen off it.
+const FALL_BELOW := 1.5
 var opp_finished_first := false
 var result := {}
 var autopilot := false
@@ -167,6 +169,8 @@ func _ready() -> void:
 	car.add_child(dirt)
 	car.landed.connect(_on_landed)
 	car.impacted.connect(_on_impact)
+	car.landed.connect(func(_v: float) -> void: _stall_on_ground(car, ptrack))
+	car.impacted.connect(func(_v: float) -> void: _stall_on_ground(car, ptrack))
 	car.damage.wrecked.connect(_on_wrecked)
 	car.damage.hole_added.connect(func(): Sfx.play("crash", 0.0, 0.8))
 
@@ -209,6 +213,9 @@ func _ready() -> void:
 		opp_dirt = DirtSynth.new().setup(true, 0.0)
 		opp_car.add_child(opp_dirt)
 		opp_car.damage.wrecked.connect(_on_opponent_wrecked)
+		if not online:
+			opp_car.landed.connect(func(_v: float) -> void: _stall_on_ground(opp_car, opp_track))
+			opp_car.impacted.connect(func(_v: float) -> void: _stall_on_ground(opp_car, opp_track))
 		opp_crane = Crane.new()
 		add_child(opp_crane)
 		opp_track = CarTracker.new(path, opp_car, START_S)
@@ -289,6 +296,7 @@ func _crane_lift(c: PlayerCar, cr: Crane, s: float, lat: float, fallback_side: f
 	var f := _crane_frames(s, lat, side)
 	c.teleport(f[1])
 	c.hold(true)
+	c.engine_on = false      # started when the crane swings it in over the road
 	var hw := path.half_width[path.index_at_s(s)]
 	cr.start(f[0], f[1], c.mass, Vector2(-hw - lat, hw - lat), _crane_travel(s, f[0], side))
 
@@ -308,6 +316,8 @@ func _crane_step(c: PlayerCar, cr: Crane, dt: float) -> void:
 	if c.freeze and cr.lifting():
 		cr.step(dt)
 		c.global_transform = cr.car_xform()
+		if not c.engine_on and cr.over_road():
+			c.engine_on = true
 
 
 ## The parachute: fired in the air with its button (once a flight), cut away
@@ -327,6 +337,7 @@ func _chute_step(dt: float) -> void:
 			and car.input.get("chute", false):
 		_chute.fire()
 		_chute_fired = true
+		car.engine_on = false    # on again only when the crane swings the car in
 		Sfx.play("thump", -8.0, 1.6)
 	_chute.step(dt)
 
@@ -335,6 +346,7 @@ func _chute_step(dt: float) -> void:
 func _crane_drop(c: PlayerCar, cr: Crane) -> void:
 	var v := cr.car_velocity(c.center_of_mass)
 	c.hold(false)
+	c.engine_on = true
 	c.crane_drop = true
 	c.linear_velocity = v[0]
 	c.angular_velocity = v[1]
@@ -765,6 +777,28 @@ func _on_opponent_wrecked() -> void:
 		_flash(Lang.t("OPPONENT WRECKED!"))
 
 
+## A car comes down (or crashes) on the ground after a fall off the road,
+## or into a pit or a hole: its engine stalls (through the fall it ran on).
+## The crane starts it again when it swings the car in. (Sliding off the
+## road onto ground as high as the road is no fall.)
+func _stall_on_ground(c: PlayerCar, t: CarTracker) -> void:
+	if t == null or not c.engine_on or c.freeze or not _fallen(c, t):
+		return
+	c.engine_on = false
+	if PlayerCar.debug:
+		print("[Race] %s engine stalled on the ground at s=%.0f" % ["player" if c == car else "opponent", t.s])
+
+
+## Whether car c has fallen off: below the road beside it, or in a pit or a
+## hole.
+func _fallen(c: PlayerCar, t: CarTracker) -> bool:
+	var i := t.idx
+	if path.road[i] == 0 or path.ground_floor[i] == 1 or (path.pit_mask.size() == path.n and path.pit_mask[i] == 1):
+		return true
+	var lat := t.lateral()
+	return absf(lat) > path.half_width[i] + 0.5 and c.global_position.y - path.road_height(i, lat) < -FALL_BELOW
+
+
 func _on_landed(strength: float) -> void:
 	if strength > 4.0:
 		Sfx.play("thump", clampf(-14.0 + strength * 1.5, -14.0, 4.0), randf_range(0.9, 1.1))
@@ -851,6 +885,7 @@ func _process(delta: float) -> void:
 	engine.boost = car.boosting
 	engine.wind = clampf(car.linear_velocity.length() / 70.0, 0.0, 1.0) * 0.35
 	engine.muted = car.is_wrecked()
+	engine.running = car.engine_on
 	_update_dirt(dirt, car)
 	if opp_car:
 		var oin: Dictionary = opp_car.input
@@ -858,6 +893,7 @@ func _process(delta: float) -> void:
 		opp_engine.load = float(oin.get("throttle", 0.0))
 		opp_engine.boost = opp_car.boosting
 		opp_engine.muted = opp_car.is_wrecked()
+		opp_engine.running = opp_car.engine_on
 		_update_dirt(opp_dirt, opp_car)
 
 
