@@ -1,9 +1,9 @@
 class_name EngineSynth
 extends Node3D
-## Procedural engine buzz (pulse wave + sub rumble) plus wind noise,
-## reminiscent of the Amiga original. `running` starts the engine (the
+## Procedural engine buzz (pulse wave + sub rumble), reminiscent of the
+## Amiga original (the wind is WindSynth's). `running` starts the engine (the
 ## starter turns it over, it catches with a flare of revs) or stops it (it
-## runs down and dies); the wind goes on either way. Optionally positional (opponent):
+## runs down and dies). Optionally positional (opponent):
 ## then it reaches the listener through SoundPropagation (travel time,
 ## exact Doppler).
 
@@ -11,7 +11,6 @@ const RATE := 16000.0
 
 var rpm := 0.0       # 0..1
 var load := 0.0      # 0..1 throttle
-var wind := 0.0      # 0..1
 var boost := false
 var muted := false
 var running := false
@@ -32,7 +31,6 @@ var _playback: AudioStreamGeneratorPlayback
 var _phase := 0.0
 var _phase_sub := 0.0
 var _freq := 40.0
-var _lp := 0.0
 var _gain := 0.0
 var _propagation: SoundPropagation
 
@@ -109,7 +107,6 @@ func generate(frames: int) -> PackedFloat32Array:
 	var starter := 0.0 if muted or not cranking else 0.09
 	var f0 := _freq
 	var g0 := _gain
-	var w := clampf(wind, 0.0, 1.0) * (0.0 if muted else 1.0)
 	for i in frames:
 		var t := float(i) / frames
 		var f := lerpf(f0, target_f, t)
@@ -123,8 +120,7 @@ func generate(frames: int) -> PackedFloat32Array:
 			_phase_sub -= 1.0
 		var pulse := 1.0 if _phase < 0.32 else -1.0
 		var sub := sin(TAU * _phase_sub)
-		_lp += (randf() * 2.0 - 1.0 - _lp) * 0.08
-		out[i] = (pulse * 0.22 + sub * 0.28) * g + _lp * w * 0.9 + (_phase_starter * 2.0 - 1.0) * starter
+		out[i] = (pulse * 0.22 + sub * 0.28) * g + (_phase_starter * 2.0 - 1.0) * starter
 	_freq = target_f
 	_gain = target_gain
 	return out

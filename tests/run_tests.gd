@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_crane_before_black_walls", "test_jump_align", "test_parachute", "test_road_on_ground", "test_bank_hold", "test_crane_motor_sound", "test_engine_start_stop", "test_wall_point_roles", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_crane_before_black_walls", "test_jump_align", "test_parachute", "test_road_on_ground", "test_bank_hold", "test_crane_motor_sound", "test_engine_start_stop", "test_wind_noise", "test_wall_point_roles", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -2085,6 +2085,29 @@ func test_engine_start_stop() -> void:
 		e.generate(1600)
 	check(rms.call(e.generate(1600)) < run * 0.05, "stopped: died away")
 	e.free()
+
+
+## Wind: dipole flow noise, power ~ v^6 (+18 dB per doubled speed), its
+## frequencies ~ v (Strouhal); silent standing still.
+func test_wind_noise() -> void:
+	var rms := func(x: PackedFloat32Array) -> float:
+		var e := 0.0
+		for v in x:
+			e += v * v
+		return sqrt(e / maxf(x.size(), 1))
+	check(near(WindSynth.level(40.0) / WindSynth.level(20.0), 8.0), "amplitude ~ v^3")
+	check(near(WindSynth.shedding_hz(40.0, 0.03), 2.0 * WindSynth.shedding_hz(20.0, 0.03)), "tones ~ v")
+	var w := WindSynth.new()
+	check(rms.call(w.generate(2205)) == 0.0, "standing: silent")
+	var at := func(v: float) -> float:
+		w.speed = v
+		w.generate(22050)
+		return rms.call(w.generate(22050))
+	var r20: float = at.call(20.0)
+	var r40: float = at.call(40.0)
+	var db := 20.0 * log(r40 / r20) / log(10.0)
+	check(db > 14.0 and db < 22.0, "doubled speed: about +18 dB (%.1f dB)" % db)
+	w.free()
 
 
 func test_custom_track_delete() -> void:

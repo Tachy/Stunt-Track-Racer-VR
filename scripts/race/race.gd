@@ -38,6 +38,8 @@ var dashboard: Dashboard
 var banner: Panel3D
 var crane: Crane
 var engine: EngineSynth
+var wind: WindSynth
+var _wind_pos := Vector3.INF      # car position last frame (its speed through the air)
 var dirt: DirtSynth
 var ptrack: CarTracker
 
@@ -165,6 +167,8 @@ func _ready() -> void:
 	car_model.add_child(banner)
 	engine = EngineSynth.new().setup(false, -8.0)
 	car.add_child(engine)
+	wind = WindSynth.new().setup(-6.0)
+	car.add_child(wind)
 	dirt = DirtSynth.new().setup(false, -4.0)
 	car.add_child(dirt)
 	car.landed.connect(_on_landed)
@@ -855,6 +859,18 @@ func _update_tunnel_light() -> void:
 	_sun.light_energy = _sun_energy * (1.0 - (0.0 if Settings.shadows else 0.85) * f)
 
 
+## The wind: the car's speed through the still air, however it moves
+## (driving, flying, on the crane - also frozen on its hook), from how far
+## it got since the last frame; a teleport counts as standing.
+func _update_wind(delta: float) -> void:
+	var p := car.global_position
+	if _wind_pos != Vector3.INF and delta > 0.0:
+		var v := p.distance_to(_wind_pos) / delta
+		if v < PlayerCar.MAX_SANE_SPEED:
+			wind.speed = lerpf(wind.speed, v, minf(delta * 20.0, 1.0))
+	_wind_pos = p
+
+
 func _process(delta: float) -> void:
 	_update_tunnel_light()
 	_update_view()
@@ -883,7 +899,7 @@ func _process(delta: float) -> void:
 	engine.rpm = clampf(absf(car.speed) / tuning.top_speed, 0.0, 1.0) * 0.85 + float(car.input["throttle"]) * (0.35 if airborne or state == "hold" else 0.15)
 	engine.load = float(car.input["throttle"])
 	engine.boost = car.boosting
-	engine.wind = clampf(car.linear_velocity.length() / 70.0, 0.0, 1.0) * 0.35
+	_update_wind(delta)
 	engine.muted = car.is_wrecked()
 	engine.running = car.engine_on
 	_update_dirt(dirt, car)
