@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_crane_before_black_walls", "test_wall_point_roles", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_crane_before_black_walls", "test_jump_align", "test_wall_point_roles", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -1894,6 +1894,35 @@ func test_crane_before_black_walls() -> void:
 		check(ok, "off before / in the %s hole: put down 200 m before the drop" % ("wide" if wide else "narrow"))
 		var after := p.s_arr[p._index_at_x(x_up + 60.0)]
 		check(near(p.recovery_s(after), after, 0.5), "after the rise: right there")
+
+
+## Jump assist: only in the last 50 m before a take-off; the front wheels the
+## way the road goes, then (within 1 deg) straight as long as it is held.
+func test_jump_align() -> void:
+	var m := _editor_oval()
+	m.move_point(0, 0.0, 20.0)
+	m.heights = [[300.0, 20.0, true, 0], [304.0, 5.0, true, 0], [340.0, 5.0, true, 0], [344.0, 20.0, true, 0]]
+	m._tidy_heights()
+	var p := TrackPath.new(m.to_def("t"))
+	var ja := JumpAlign.new(p)
+	var s_off := p.s_arr[p._index_at_x(300.0)]
+	check(ja.in_zone(s_off - 30.0) and not ja.in_zone(s_off - 60.0) and not ja.in_zone(s_off + 5.0), "zone: the last 50 m before the take-off")
+	var road := Vector3(0, 0, -1)
+	var car_fwd := road.rotated(Vector3.UP, deg_to_rad(-20.0))      # turned 20 deg to the right
+	var lock := deg_to_rad(32.0)
+	var drive := {"steer": 0.7, "throttle": 1.0, "brake": 0.0, "boost": false, "direct": false}
+	check(ja.apply(drive, true, s_off - 60.0, car_fwd, road, lock)["steer"] == 0.7 and ja.mode == "", "outside the zone: no effect")
+	check(ja.apply(drive, false, s_off - 30.0, car_fwd, road, lock)["steer"] == 0.7, "not held: no effect")
+	var out := ja.apply(drive, true, s_off - 30.0, car_fwd, road, lock)
+	check(ja.mode == "align" and near(out["steer"], -20.0 / 32.0, 0.01) and out["direct"] and out["throttle"] == 1.0,
+		"turned right: wheels 20 deg to the left, the road's way (%.3f)" % out["steer"])
+	out = ja.apply(drive, true, s_off - 25.0, road.rotated(Vector3.UP, deg_to_rad(0.5)), road, lock)
+	check(ja.mode == "straight" and out["steer"] == 0.0, "within 1 deg: straight")
+	out = ja.apply(drive, true, s_off - 20.0, car_fwd, road, lock)
+	check(ja.mode == "straight" and out["steer"] == 0.0, "held: stays straight")
+	ja.apply(drive, false, s_off - 15.0, car_fwd, road, lock)
+	out = ja.apply(drive, true, s_off - 10.0, car_fwd, road, lock)
+	check(ja.mode == "align", "pressed again: aligns again")
 
 
 func test_custom_track_delete() -> void:

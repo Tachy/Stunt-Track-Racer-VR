@@ -430,13 +430,14 @@ const CAL_TEXT := {
 	"brake": "PRESS THE BRAKE PEDAL FULLY AND HOLD",
 	"brake_release": "RELEASE THE BRAKE PEDAL",
 	"btn_boost": "PRESS THE BUTTON FOR BOOST",
+	"btn_align": "PRESS THE BUTTON FOR THE JUMP ASSIST (ENTER = NONE)",
 	"btn_accept": "PRESS THE BUTTON FOR MENU OK (ENTER = NONE)",
 	"btn_back": "PRESS THE BUTTON FOR BACK/PAUSE (ENTER = NONE)",
 	"btn_recenter": "PRESS THE BUTTON FOR VR RECENTER (ENTER = NONE)",
 	"done": "DONE! CALIBRATION SAVED.",
 }
 const CAL_ORDER := ["wake", "rest", "left", "right", "center", "gas", "gas_release", "brake", "brake_release",
-	"btn_boost", "btn_accept", "btn_back", "btn_recenter", "done"]
+	"btn_boost", "btn_align", "btn_accept", "btn_back", "btn_recenter", "done"]
 
 
 func _screen_calibrate(sc: PixelScreen) -> void:
@@ -564,7 +565,7 @@ func _calibration_step(dt: float) -> void:
 				im.brake_rest = im.raw_axis(im.brake_axis)
 				_cal["released"] = true
 				_cal_next()
-		"btn_boost", "btn_accept", "btn_back", "btn_recenter":
+		"btn_boost", "btn_align", "btn_accept", "btn_back", "btn_recenter":
 			var b := im.pressed_button()
 			if not _cal.get("released", false):
 				if b < 0:
@@ -614,7 +615,7 @@ func _on_accept() -> void:
 			_cal["last"] = InputManager.snapshot_axes()
 			_cal_next()
 			_refresh()
-		elif step in ["btn_accept", "btn_back", "btn_recenter"]:
+		elif step in ["btn_align", "btn_accept", "btn_back", "btn_recenter"]:
 			InputManager.set(step, -1)
 			_cal["released"] = false
 			_cal_next()

@@ -74,6 +74,9 @@ var state := "hold"
 var state_time := 0.0
 var race_time := 0.0
 var message := ""
+## Jump assist of the player (its button held in the last metres before a
+## take-off: steering onto the road, then straight).
+var _align: JumpAlign
 var opp_finished_first := false
 var result := {}
 var autopilot := false
@@ -123,6 +126,7 @@ func _ready() -> void:
 	def = TrackLibrary.get_def(req["track"])
 	var super_league: bool = req.get("super", false)
 	path = TrackPath.new(def)
+	_align = JumpAlign.new(path)
 	track = TrackNode.new().build(path)
 	add_child(track)
 	EnvironmentBuilder.build(self, def["theme"], path.bounds(), path.ground_holes())
@@ -312,6 +316,12 @@ func _crane_drop(c: PlayerCar, cr: Crane) -> void:
 
 func _physics_process(dt: float) -> void:
 	car.input = _ap.compute(dt, opp_track) if autopilot else InputManager.get_drive()
+	if state == "racing" and not autopilot:
+		var was := _align.mode
+		car.input = _align.apply(car.input, car.input.get("align", false), ptrack.s, -car.global_transform.basis.z,
+			path.forward[ptrack.idx], deg_to_rad(car.tuning.max_steer_deg))
+		if _align.mode != was:
+			message = {"align": Lang.t("ALIGN"), "straight": Lang.t("STRAIGHT ON")}.get(_align.mode, "")
 	if not online or state != "hold" or _lifting():
 		_crane_step(car, crane, dt)
 	if car.freeze:
