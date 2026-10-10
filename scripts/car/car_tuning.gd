@@ -3,7 +3,7 @@ extends Resource
 ## All handling parameters in one place.
 
 @export var mass := 900.0
-@export var engine_force := 7600.0
+@export var engine_force := 9120.0
 @export var top_speed := 64.0           # m/s (~230 km/h)
 @export var boost_factor := 2.0
 @export var boost_top_speed := 74.0
