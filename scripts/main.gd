@@ -54,6 +54,8 @@ func _ready() -> void:
 		print("[Main] window %s, 3D render scale %.2f -> %s px" % [DisplayServer.window_get_size(), vp.scaling_3d_scale, Vector2(DisplayServer.window_get_size()) * vp.scaling_3d_scale])
 	if _args.has("vr-bench"):
 		add_child(VrBench.new())
+	if _args.has("fps-bench"):
+		add_child(FpsBench.new())     # debug: load test, VSync off
 	if _args.has("editor"):
 		var ed: String = _args["editor"]
 		# an official track by its id (admin), else an own one by its file name

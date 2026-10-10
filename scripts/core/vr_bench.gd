@@ -17,9 +17,15 @@ var _worst := 0.0
 
 func _ready() -> void:
 	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
+	# --vr-bench=WxH: both eyes at that size (e.g. another headset's)
+	var sizes: Array = EYE_SIZES
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--vr-bench=") and "x" in a:
+			var wh := a.get_slice("=", 1).split("x")
+			sizes = [Vector2i(int(wh[0]), int(wh[1])), Vector2i(int(wh[0]), int(wh[1]))]
 	for i in 2:
 		var vp := SubViewport.new()
-		vp.size = EYE_SIZES[i]
+		vp.size = sizes[i]
 		vp.msaa_3d = Viewport.MSAA_4X
 		vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 		add_child(vp)
@@ -32,7 +38,7 @@ func _ready() -> void:
 		RenderingServer.viewport_set_measure_render_time(vp.get_viewport_rid(), true)
 		_vps.append(vp)
 		_cams.append(cam)
-	print("[VRBench] rendering 2 eyes %s + %s, MSAA 4x" % [EYE_SIZES[0], EYE_SIZES[1]])
+	print("[VRBench] rendering 2 eyes %s + %s, MSAA 4x" % [sizes[0], sizes[1]])
 
 
 func _process(delta: float) -> void:
