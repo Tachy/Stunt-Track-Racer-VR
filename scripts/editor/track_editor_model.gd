@@ -374,15 +374,18 @@ func piece_at(w: Vector2) -> int:
 ## First and last piece a click on piece k marks: the piece with the
 ## automatic run-out placed along with it (not the rest of its placement
 ## group - the pieces closing a lap are one group, but each its own piece).
+## The run-out lies before its piece, in a reversed lap after it.
 func group_range(k: int) -> Vector2i:
 	var g = pieces[k].get("g", null)
 	var r := Vector2i(k, k)
 	if g == null:
 		return r
-	if pieces[k].get("auto", false) and k < pieces.size() - 1 and pieces[k + 1].get("g", null) == g:
-		r.y = k + 1
-	elif k > 0 and pieces[k - 1].get("auto", false) and pieces[k - 1].get("g", null) == g:
-		r.x = k - 1
+	var auto: bool = pieces[k].get("auto", false)
+	for nb in [k + 1, k - 1] if auto else [k - 1, k + 1]:
+		if nb >= 0 and nb < pieces.size() and pieces[nb].get("g", null) == g \
+				and (not auto or not pieces[nb].get("auto", false)) and (auto or pieces[nb].get("auto", false)):
+			r = Vector2i(mini(k, nb), maxi(k, nb))
+			break
 	return r
 
 
@@ -833,6 +836,34 @@ func move_start(k: int, o: float) -> bool:
 	start_dir = pose[1]
 	base = h_new
 	_place_heights(bound)
+	return true
+
+
+## Reverses the direction of the closed lap: the pieces backwards (left
+## curves turn right and bank the other way; a loop keeps its side), the
+## start line where it is, the height profile mirrored (the same heights at
+## the same places). Esc undoes it.
+func reverse() -> bool:
+	if not closed:
+		return false
+	_plan_snapshot()
+	var length := profile_length()
+	var out := []
+	for i in range(pieces.size() - 1, -1, -1):
+		var p: Dictionary = pieces[i]
+		if is_curve(p):
+			p["t"] = "L" if p["t"] == "R" else "R"
+			if p.has("bank"):
+				p["bank"] = -float(p["bank"])
+		out.append(p)
+	pieces = out
+	start_dir = -start_dir
+	var hs := []
+	for q in heights:
+		# a wall's points swap sides: the flag goes to the other one's side
+		hs.append([length - float(q[0]), q[1], q[2] if q.size() > 2 else false, -int(q[3]) if q.size() > 3 else 0])
+	heights = hs
+	_tidy_heights()
 	return true
 
 

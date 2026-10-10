@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -1169,6 +1169,69 @@ func test_editor_nudge() -> void:
 	m = _editor_oval()
 	var n := m.pieces.size()
 	check(m.nudge(0, 3, Vector2(-1, 0)).is_empty() and m.pieces.size() == n and m.start == Vector2.ZERO, "nothing fits: unchanged")
+
+
+## The direction of a closed lap reversed: the pieces backwards and
+## mirrored, the start line where it is, the heights at the same places.
+func test_editor_reverse() -> void:
+	var m := TrackEditorModel.new()
+	m.set_start(Vector2(0, 0))
+	m.place_first(Vector2(0, -150))
+	m.place(m.loop_group(1))
+	for p in [TrackEditorModel.straight(80), TrackEditorModel.curve("R", 90, 55), TrackEditorModel.straight(60),
+			TrackEditorModel.curve("L", 45, 75), TrackEditorModel.curve("R", 135, 55), TrackEditorModel.straight(200), TrackEditorModel.curve("R", 90, 55)]:
+		m.place(m.group_for(p))
+	m.place(m.closing_group(), true)
+	check(m.closed and _closes(m), "a lap with a loop and run-outs")
+	m.heights = [[100.0, 12.0, true, 0], [300.0, 20.0, false, 0], [300.0, 4.0, false, 1], [420.0, 9.0, false, 0]]
+	m._tidy_heights()
+	var before := m.to_dict("x")
+	var pts0 := m.points()
+	var length := m.profile_length()
+	var n := m.pieces.size()
+	var first: Dictionary = m.pieces[0].duplicate()
+	var last: Dictionary = m.pieces[n - 1].duplicate()
+	check(m.reverse(), "reversed")
+	check(_closes(m), "the reversed lap closes")
+	check(m.start == Vector2.ZERO and m.start_dir.distance_to(Vector2(0, 1)) < 1e-6, "the start line stays, the direction turns")
+	check(m.pieces[n - 1]["t"] == first["t"] and m.pieces[0].get("l", 0.0) == last.get("l", 0.0), "the pieces backwards")
+	var mirrored := true
+	for k in n:
+		var a: Dictionary = m.pieces[k]
+		var b: Dictionary = before["pieces"][n - 1 - k]
+		if TrackEditorModel.is_curve(b):
+			mirrored = mirrored and a["t"] != b["t"] and near(float(a["bank"]), -float(b["bank"]))
+		else:
+			mirrored = mirrored and a["t"] == b["t"]
+	check(mirrored, "curves turn the other way and bank the other way")
+	var pts := m.points()
+	var same := true
+	for x in [50.0, 100.0, 250.0, 299.0, 301.0, 420.0, 600.0]:
+		same = same and near(HeightSpline.height(pts, length - x), HeightSpline.height(pts0, x), 0.01)
+	check(same, "the same heights at the same places")
+	check(pts.size() == pts0.size() and HeightSpline.is_wall(pts, pts.size() - 4), "the wall stays a wall (%s)" % [pts])
+	var same_lap := func() -> bool:
+		var ok: bool = JSON.stringify(m.pieces) == JSON.stringify(before["pieces"]) and m.start_dir.is_equal_approx(Vector2(0, -1)) and m.heights.size() == before["heights"].size()
+		for i in mini(m.heights.size(), before["heights"].size()):
+			var a: Array = m.heights[i]
+			var b: Array = before["heights"][i]
+			ok = ok and near(float(a[0]), float(b[0])) and near(float(a[1]), float(b[1])) and a[2] == b[2] and int(a[3]) == int(b[3])
+		return ok
+	m.reverse()
+	check(same_lap.call(), "reversed twice: the lap as before")
+	m.reverse()
+	m.undo()
+	check(same_lap.call(), "Esc undoes the reversing")
+	check(not TrackEditorModel.new().reverse(), "not an open lap")
+	# a curve and its run-out are marked together the other way round too
+	var mr := TrackEditorModel.new()
+	mr.set_start(Vector2.ZERO)
+	mr.place_first(Vector2(0, -100))
+	mr.place(mr.group_for(TrackEditorModel.curve("R", 90, 55)))
+	mr.place(mr.group_for(TrackEditorModel.curve("L", 90, 55)))
+	mr.pieces.reverse()        # (as reverse() orders them)
+	check(mr.pieces[1].get("auto", false) and mr.group_range(0) == Vector2i(0, 1) and mr.group_range(1) == Vector2i(0, 1)
+		and mr.group_range(2) == Vector2i(2, 2), "run-out after its curve")
 
 
 ## The start line dragged along the lap: only onto straights, which it

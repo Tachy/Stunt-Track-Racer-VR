@@ -17,7 +17,8 @@ extends Control
 ## filled (green while dragging, red: no fit), on release for good; their
 ## height points go along. The cursor keys move them a grid step (or on to
 ## the nearest step that fits). The start line can be dragged along the
-## straights. Esc undoes either.
+## straights. R (or the button) reverses the direction of the lap, the start
+## line stays where it is. Esc undoes these.
 ##
 ## Heights (Tab / button, closed lap only): the track in 3D (HeightEditor3D)
 ## with a see-through ground and tunnels; the height along the lap (loops
@@ -195,6 +196,7 @@ func _build_bar() -> void:
 	bar.add_child(_name_edit)
 	for b in [["SAVE", _act_save], ["DELETE", _act_delete], ["RENAME", _act_rename]]:
 		bar.add_child(_bar_button(b[0], b[1]))
+	bar.add_child(_bar_button("REVERSE", _act_reverse))
 	_mode_btn = _bar_button("", _toggle_mode, MODE_BUTTON)
 	bar.add_child(_mode_btn)
 	bar.add_child(_bar_button("TEST DRIVE", _act_test))
@@ -309,6 +311,8 @@ func _input(event: InputEvent) -> void:
 		_nudge(k.keycode)
 		get_viewport().set_input_as_handled()
 		return
+	elif k.keycode == KEY_R and not k.ctrl_pressed and model.closed:
+		_act_reverse()
 	elif k.keycode == KEY_S and k.ctrl_pressed:
 		_act_save()
 	else:
@@ -480,7 +484,7 @@ func _update() -> void:
 		_status.text = Lang.t("CLICK THE END OF THE START STRAIGHT (ACROSS OR UP/DOWN)")
 	elif model.closed:
 		_status.text = Lang.t("LAP CLOSED - SAVE OR TEST DRIVE (ESC REOPENS)") + "   " \
-			+ Lang.t("CLICK = MARK (SHIFT: MORE)  DRAG / ARROWS = MOVE  RIGHT CLICK = DELETE MARKED")
+			+ Lang.t("CLICK = MARK (SHIFT: MORE)  DRAG / ARROWS = MOVE  RIGHT CLICK = DELETE MARKED  R = REVERSE")
 	elif model.has_gap():
 		_status.text = Lang.t("DRAW THE GAP TO THE YELLOW MARK  ESC = REMOVE LAST / UNDO THE DELETING")
 	else:
@@ -645,14 +649,18 @@ func _draw_piece(pos: Vector2, dir: Vector2, p: Dictionary, col: Color) -> void:
 		draw_circle(to_screen(pts[pts.size() / 2]), maxf(4.0, TrackPath.LOOP_RADIUS * zoom * 0.5), Color(col, 0.5))
 
 
+## The start: the line across the road and an arrow in the direction of travel.
 func _draw_start(at: Vector2, d: Vector2, col: Color) -> void:
 	var s := to_screen(at)
 	if d == Vector2.ZERO:
 		d = Vector2.UP
-	var n := d.rotated(PI * 0.5) * maxf(8.0, TrackPath.HALF_WIDTH * zoom)
+	var side := d.rotated(PI * 0.5)
+	var n := side * maxf(8.0, TrackPath.HALF_WIDTH * zoom)
 	draw_line(s - n, s + n, col, 3.0)
-	draw_line(s, s + d * maxf(24.0, 20.0 * zoom), col, 2.0)
-	draw_circle(s, 4.0, col)
+	var tip := s + d * maxf(40.0, 30.0 * zoom)
+	var head := maxf(13.0, 9.0 * zoom)
+	draw_line(s, tip - d * head * 0.5, col, 3.0)
+	draw_colored_polygon(PackedVector2Array([tip, tip - d * head + side * head * 0.6, tip - d * head - side * head * 0.6]), col)
 
 
 # --- actions ---------------------------------------------------------------------------
@@ -794,6 +802,19 @@ func _act_new() -> void:
 	model = TrackEditorModel.new()
 	_saved_id = ""
 	_set_mode("plan")
+	_update()
+
+
+## Reverses the direction of the closed lap (the start line stays; drag it
+## onto a straight if a curve follows it now).
+func _act_reverse() -> void:
+	if not model.closed:
+		_flash(Lang.t("CLOSE THE LAP FIRST"))
+		return
+	_set_mode("plan")
+	model.reverse()
+	_marked = Vector2i(-1, -1)
+	_mark_anchor = -1
 	_update()
 
 
