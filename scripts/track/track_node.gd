@@ -22,7 +22,7 @@ const LIGHT_SPACING := 24         # samples (m) between real lights
 const LAMP_COLOR := Color(1.0, 0.92, 0.72)
 ## The road colour changes at every piece border and, inside a piece, at
 ## least every STRIPE_MAX metres (the piece is cut into equal stripes).
-const STRIPE_MAX := 30.0
+const STRIPE_MAX := 40.0
 ## The road surface is cut into this many strips across: a single quad over
 ## the whole width is folded along its diagonal where the road twists into or
 ## out of a banked curve - a bump of up to 6 cm every metre under the wheels.
