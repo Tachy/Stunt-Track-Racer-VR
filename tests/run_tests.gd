@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_crane_before_black_walls", "test_jump_align", "test_parachute", "test_wall_point_roles", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_crane_before_black_walls", "test_jump_align", "test_parachute", "test_road_on_ground", "test_wall_point_roles", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -1957,6 +1957,32 @@ func test_parachute() -> void:
 	check(max_pull < 8.0 * m * 9.81, "opening shock below 8 g (%.1f g)" % (max_pull / (m * 9.81)))
 	ps.cut = true
 	check(ps.step(dt, car_pos, car_vel) == Vector3.ZERO, "cut: no pull")
+
+
+## Road down on the ground: the ground is left open under it (no flicker);
+## between two wall feet on the ground (a pit, also a wide one) the ground
+## is the floor and no road is drawn.
+func test_road_on_ground() -> void:
+	# a wall down to the ground and, 150 m on, a wall up from the ground
+	var m := _editor_oval()
+	m.move_point(0, 0.0, 20.0)
+	m.heights = [[100.0, 20.0, false, 0], [100.0, 0.0, false, 1], [250.0, 0.0, false, -1], [250.0, 20.0, false, 0]]
+	m._tidy_heights()
+	var p := TrackPath.new(m.to_def("t"))
+	var i := p._index_at_x(170.0)
+	check(p.ground_floor[i] == 1, "between two wall feet on the ground (150 m apart): the ground")
+	# the far wall going up from 2 m: road on the ground, the ground open under it
+	m.heights = [[100.0, 20.0, false, 0], [100.0, 0.0, false, 1], [200.0, 0.0, true, 0], [250.0, 2.0, false, -1], [250.0, 20.0, false, 0]]
+	m._tidy_heights()
+	p = TrackPath.new(m.to_def("t"))
+	i = p._index_at_x(150.0)
+	check(p.ground_floor[i] == 0 and p.ground_road[i] == 1 and p.cut[i] == 0, "road on the ground: drawn, the ground open")
+	var c := Vector2(p.center[i].x, p.center[i].z)
+	var inside := false
+	for h in p.ground_holes():
+		inside = inside or Geometry2D.is_point_in_polygon(c, h)
+	check(inside, "a hole in the ground under it")
+	check(p.ground_road[p._index_at_x(300.0)] == 0, "road up high: no hole")
 
 
 func test_custom_track_delete() -> void:

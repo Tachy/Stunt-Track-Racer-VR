@@ -98,6 +98,10 @@ var deck := PackedByteArray()
 ## 1 = covered tunnel / 1 = open cut (road below ground, no roof)
 var tunnel := PackedByteArray()
 var cut := PackedByteArray()
+## 1 = road down on the ground (within GROUND_ROAD of it, not a cut): the
+## ground is left open under it (no flicker of the two surfaces).
+var ground_road := PackedByteArray()
+const GROUND_ROAD := 0.25
 ## Distance (m) from a tunnel sample to the nearest portal, 0 outside.
 var tunnel_depth := PackedFloat32Array()
 ## 1 = pit floor on the ground (y = 0): no road there, the ground is the floor.
@@ -491,6 +495,8 @@ func _detect_tunnels() -> void:
 	tunnel.fill(0)
 	cut.resize(n)
 	cut.fill(0)
+	ground_road.resize(n)
+	ground_road.fill(0)
 	for i in n:
 		if road[i] == 0 or loop_mask[i] == 1 or ground_floor[i] == 1:
 			continue
@@ -500,6 +506,8 @@ func _detect_tunnels() -> void:
 			tunnel[i] = 1
 		elif minf(c[0].y, c[1].y) < 0.0:
 			cut[i] = 1
+		elif minf(c[0].y, c[1].y) < GROUND_ROAD:
+			ground_road[i] = 1
 	tunnel_depth.resize(n)
 	tunnel_depth.fill(0.0)
 	for i in n:
@@ -521,24 +529,26 @@ static func to_ground(c: Vector3, u: Vector3) -> Vector3:
 	return g
 
 
-## Openings in the ground over the open cuts, as plan-view polygons (x, z):
-## each runs along both retaining walls, from the sample before the cut to
-## the one after it (the tunnel portal, or the road back above ground).
+## Openings in the ground over the open cuts and under road down on the
+## ground (ground_road), as plan-view polygons (x, z): each runs along both
+## edges, from the sample before to the one after it (the tunnel portal, or
+## the road back above ground).
 func ground_holes() -> Array:
 	var holes := []
+	var open := func(k: int) -> bool: return cut[k] == 1 or ground_road[k] == 1
 	var start := 0
-	while start < n and cut[start] == 1:
+	while start < n and open.call(start):
 		start += 1
 	if start >= n:
 		return holes
 	var i := 0
 	while i < n:
 		var k := (start + i) % n
-		if cut[k] == 0:
+		if not open.call(k):
 			i += 1
 			continue
 		var run := [(k - 1 + n) % n]
-		while i < n and cut[(start + i) % n] == 1:
+		while i < n and open.call((start + i) % n):
 			run.append((start + i) % n)
 			i += 1
 		run.append((start + i) % n)
@@ -647,7 +657,9 @@ func _vertical_pit(lip: int, top: int) -> void:
 ## Pits and ski jumps from the walls of the spline: a wall down followed by
 ## a wall up (within PIT_MAX) is a pit that lands on top of the far wall; a
 ## wall down alone a ski jump (landing 15 m on, for the AI). lip = last
-## sample before the wall.
+## sample before the wall. Between a wall down and the next wall up with
+## both feet on the ground the floor is the ground (ground_floor), however
+## far apart they are.
 const PIT_MAX := 80.0
 
 func _spline_pits() -> void:
@@ -656,7 +668,9 @@ func _spline_pits() -> void:
 	var walls := []    # [x, down]
 	for k in range(1, spline.size() - 2):
 		if HeightSpline.is_wall(spline, k):
-			walls.append([float(spline[k][0]), float(spline[k + 1][1]) < float(spline[k][1])])
+			# [x, down, height of its foot]
+			walls.append([float(spline[k][0]), float(spline[k + 1][1]) < float(spline[k][1]),
+				minf(float(spline[k][1]), float(spline[k + 1][1]))])
 	var w := 0
 	while w < walls.size():
 		if not walls[w][1]:
@@ -674,6 +688,10 @@ func _spline_pits() -> void:
 			w += 2
 		else:
 			ramps.append([lip, _index_at_x(walls[w][0] + 15.0)])
+			# the next wall up, both walls' feet on the ground: the ground
+			# between them (however far apart)
+			if w + 1 < walls.size() and not walls[w + 1][1] and absf(float(walls[w][2])) < 0.05 					and absf(float(walls[w + 1][2])) < 0.05:
+				_floor_ranges.append([(lip + 1) % n, _index_at_x(walls[w + 1][0])])
 			w += 1
 	for pt in pits:
 		var k: int = pt[0]
