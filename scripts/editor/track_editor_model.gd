@@ -371,17 +371,18 @@ func piece_at(w: Vector2) -> int:
 	return best
 
 
-## First and last piece of the placement group of piece k (a curve with its
-## run-out: what one click placed).
+## First and last piece a click on piece k marks: the piece with the
+## automatic run-out placed along with it (not the rest of its placement
+## group - the pieces closing a lap are one group, but each its own piece).
 func group_range(k: int) -> Vector2i:
 	var g = pieces[k].get("g", null)
 	var r := Vector2i(k, k)
 	if g == null:
 		return r
-	while r.x > 0 and pieces[r.x - 1].get("g", null) == g:
-		r.x -= 1
-	while r.y < pieces.size() - 1 and pieces[r.y + 1].get("g", null) == g:
-		r.y += 1
+	if pieces[k].get("auto", false) and k < pieces.size() - 1 and pieces[k + 1].get("g", null) == g:
+		r.y = k + 1
+	elif k > 0 and pieces[k - 1].get("auto", false) and pieces[k - 1].get("g", null) == g:
+		r.x = k - 1
 	return r
 
 

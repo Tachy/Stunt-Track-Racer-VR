@@ -1051,6 +1051,16 @@ func test_editor_cut() -> void:
 	var n := m.pieces.size()
 	check(m.piece_at(Vector2(2, -100)) == 0 and m.piece_at(Vector2(200, 200)) == -1, "piece under the mouse")
 	check(not m.cut(0, n - 1), "not the whole lap")
+	# a click marks one piece (with its run-out), not all the closing pieces
+	check(m.pieces[6].get("g") == m.pieces[7].get("g") and m.group_range(6) == Vector2i(6, 6) and m.group_range(7) == Vector2i(7, 7),
+		"the closing pieces one by one")
+	var mr := TrackEditorModel.new()
+	mr.set_start(Vector2.ZERO)
+	mr.place_first(Vector2(0, -100))
+	mr.place(mr.group_for(TrackEditorModel.curve("R", 90, 55)))
+	mr.place(mr.group_for(TrackEditorModel.curve("L", 90, 55)))
+	check(mr.pieces[2].get("auto", false) and mr.group_range(3) == Vector2i(2, 3) and mr.group_range(2) == Vector2i(2, 3),
+		"a curve with its run-out")
 	m.add_point(m.piece_x(2) * 0.5, 10.0)                # before the gap
 	m.add_point(m.piece_x(5) + 20.0, 14.0)               # after it
 	var after_x := float(m.heights[1][0]) - m.piece_x(4)
