@@ -15,6 +15,7 @@ extends Node3D
 ##   double click a point: the camera turns around it from now on;
 ##                the road: a new point there (not selected)
 ##   right click  a point: delete it; dragged: turn the camera
+##   middle mouse dragged: moves the camera and the point it turns around
 ##   wheel        camera distance
 ## The point logic is TrackEditorModel's (snapping to walls, slope limit,
 ## undo). While a point is dragged the line follows at once, the road
@@ -90,6 +91,7 @@ var _drag_single := false
 var _right_moved := 0.0           # mouse travel with the right button down (px)
 var _right_down := false
 var _turning := false
+var _panning := false             # middle mouse button down
 
 # camera
 var _yaw := 0.7
@@ -370,6 +372,19 @@ func turn(relative: Vector2) -> void:
 	_pitch = clampf(_pitch + relative.y * 0.01, PITCH_MIN, PITCH_MAX)
 
 
+## Middle mouse: the camera and the point it turns around move across the
+## view (the look-at point follows the mouse). From the whole track on, the
+## camera keeps its distance.
+func pan(relative: Vector2) -> void:
+	var b := Basis.looking_at(_c - eye() if (_c - eye()).length_squared() > 1e-6 else Vector3.FORWARD, Vector3.UP)
+	var d := (-b.x * relative.x + b.y * relative.y) * view.pixel_metres(_c)
+	if _pivot == null and _zoom_dist <= 0.0:
+		_zoom_dist = _target_d
+	_pivot = (_pivot if _pivot != null else _target_c) + d
+	_c += d
+	_retarget()
+
+
 ## Wheel: factor < 1 closer, > 1 farther.
 func zoom(factor: float) -> void:
 	_zoom_dist = clampf((_auto_dist() if _zoom_dist <= 0.0 else _zoom_dist) * factor, 8.0, 5000.0)
@@ -413,6 +428,8 @@ func handle(event: InputEvent) -> bool:
 		_mouse = mm.position
 		if _drag >= 0:
 			_drag_to(mm.position)
+		elif _panning:
+			pan(mm.relative)
 		elif _right_down:
 			# by the mouse's own travel: in VR the pointer stays put meanwhile
 			_right_moved += mm.relative.length()
@@ -452,6 +469,8 @@ func handle(event: InputEvent) -> bool:
 						edited.emit()
 				_right_down = false
 				_turning = false
+		MOUSE_BUTTON_MIDDLE:
+			_panning = mb.pressed
 		MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN:
 			if mb.pressed:
 				zoom(0.87 if mb.button_index == MOUSE_BUTTON_WHEEL_UP else 1.15)

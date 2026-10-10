@@ -455,7 +455,7 @@ func _update() -> void:
 		_nav.position = o + Vector2(10, 72)
 		_nav.size = Vector2(maxf(220.0, us.x * 0.28), maxf(160.0, us.y * 0.34))
 		_info.text = _height_info()
-		_status.text = Lang.t("CLICK = SELECT / DRAG POINT (SHIFT/CTRL: MORE)  DOUBLE CLICK = CAMERA TO POINT / NEW POINT ON ROAD  RIGHT CLICK = REMOVE  RIGHT MOUSE = TURN  WHEEL = DISTANCE  C KINK  UP/DOWN HEIGHT  LEFT/RIGHT ALONG  B BRIDGE  ESC UNDO")
+		_status.text = Lang.t("CLICK = SELECT / DRAG POINT (SHIFT/CTRL: MORE)  DOUBLE CLICK = CAMERA TO POINT / NEW POINT ON ROAD  RIGHT CLICK = REMOVE  RIGHT MOUSE = TURN  MIDDLE MOUSE = MOVE  WHEEL = DISTANCE  C KINK  UP/DOWN HEIGHT  LEFT/RIGHT ALONG  B BRIDGE  ESC UNDO")
 		if model.official != "":
 			_status.text += "  " + Lang.t("N NO CRANE  G GAP")
 		queue_redraw()
