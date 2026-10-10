@@ -26,6 +26,9 @@ const CLOSE_RADIUS := 60.0
 ## metres apart. The editor scales it with the zoom.
 const RADIUS_STICK := 10.0
 const DEFAULT_BASE := 6.0
+## Cursor keys move marked pieces by GRID; with no fit there, up to this many
+## steps on.
+const NUDGE_STEPS := 20
 
 var start := Vector2.ZERO
 var has_start := false
@@ -703,6 +706,20 @@ func move_block(first: int, last: int, offset: Vector2) -> bool:
 	_next_group += 2
 	_place_heights(bound)
 	return true
+
+
+## Cursor keys: moves pieces first..last one GRID step in direction dir, or
+## (no fit there) to the nearest step further on that fits, at most
+## NUDGE_STEPS away. The moved() result (with "offset"), {} if none fits.
+func nudge(first: int, last: int, dir: Vector2) -> Dictionary:
+	for n in range(1, NUDGE_STEPS + 1):
+		var off := dir * GRID * n
+		var r := moved(first, last, off)
+		if not r.is_empty():
+			move_block(first, last, off)
+			r["offset"] = off
+			return r
+	return {}
 
 
 ## Whether the start line may stand on piece k, o metres into it: on a plain

@@ -15,7 +15,8 @@ extends Control
 ## (yellow mark) like a lap onto its start; Esc right after the cut undoes it.
 ## The marked pieces can be dragged: the gaps before and after them are
 ## filled (green while dragging, red: no fit), on release for good; their
-## height points go along. The start line can be dragged along the
+## height points go along. The cursor keys move them a grid step (or on to
+## the nearest step that fits). The start line can be dragged along the
 ## straights. Esc undoes either.
 ##
 ## Heights (Tab / button, closed lap only): the track in 3D (HeightEditor3D)
@@ -304,6 +305,10 @@ func _input(event: InputEvent) -> void:
 		model.redo()
 	elif k.keycode == KEY_O and model.start_dir != Vector2.ZERO and not model.closed:
 		model.place(model.loop_group(-1 if k.shift_pressed else 1))
+	elif k.keycode in [KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN] and model.closed and _marked.x >= 0 and _drag == "":
+		_nudge(k.keycode)
+		get_viewport().set_input_as_handled()
+		return
 	elif k.keycode == KEY_S and k.ctrl_pressed:
 		_act_save()
 	else:
@@ -343,6 +348,19 @@ func _mark(w: Vector2, shift: bool) -> void:
 	else:
 		_marked = r
 		_mark_anchor = k
+
+
+## Cursor keys: the marked pieces a grid step that way, or on to the
+## nearest step that fits (TrackEditorModel.nudge()).
+func _nudge(key: int) -> void:
+	var dir: Vector2 = {KEY_LEFT: Vector2.LEFT, KEY_RIGHT: Vector2.RIGHT, KEY_UP: Vector2.UP, KEY_DOWN: Vector2.DOWN}[key]
+	var r := model.nudge(_marked.x, _marked.y, dir)
+	if not r.is_empty():
+		_marked = r["block"]
+		_mark_anchor = _marked.x
+	_update()
+	if r.is_empty():
+		_flash(Lang.t("NOT POSSIBLE - THE GAPS CANNOT BE FILLED"))
 
 
 ## Right click: the marked pieces go, a gap is left to draw anew.
@@ -462,7 +480,7 @@ func _update() -> void:
 		_status.text = Lang.t("CLICK THE END OF THE START STRAIGHT (ACROSS OR UP/DOWN)")
 	elif model.closed:
 		_status.text = Lang.t("LAP CLOSED - SAVE OR TEST DRIVE (ESC REOPENS)") + "   " \
-			+ Lang.t("CLICK = MARK (SHIFT: MORE)  DRAG = MOVE  RIGHT CLICK = DELETE MARKED")
+			+ Lang.t("CLICK = MARK (SHIFT: MORE)  DRAG / ARROWS = MOVE  RIGHT CLICK = DELETE MARKED")
 	elif model.has_gap():
 		_status.text = Lang.t("DRAW THE GAP TO THE YELLOW MARK  ESC = REMOVE LAST / UNDO THE DELETING")
 	else:

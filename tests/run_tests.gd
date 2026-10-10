@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -1138,6 +1138,27 @@ func test_editor_move() -> void:
 	var after: Dictionary = m.pieces[4]
 	check(after["t"] == "S" and near(float(after["l"]), 210.0), "the straight after it is shorter (%s)" % [after])
 	check(m.heights.size() == 1 and near(float(m.heights[0][0]), m.piece_x(5) - to_end), "its point keeps its distance to the end")
+
+
+## Cursor keys: the marked pieces one grid step on, or to the nearest step
+## further on that fits.
+func test_editor_nudge() -> void:
+	var m := _editor_oval()
+	var r := m.nudge(1, 3, Vector2(0, 1))
+	check(not r.is_empty() and r["offset"] == Vector2(0, TrackEditorModel.GRID) and _closes(m), "one step down")
+	check(r["block"] == Vector2i(1, 3), "the moved pieces (%s)" % [r["block"]])
+	m = _editor_oval()
+	var p3: Vector2 = m.poses()[3][0]
+	r = m.nudge(3, 3, Vector2(1, 0))
+	var off: Vector2 = r.get("offset", Vector2.ZERO)
+	check(not r.is_empty() and off.x > TrackEditorModel.GRID and is_zero_approx(fmod(off.x, TrackEditorModel.GRID)) and off.y == 0.0,
+		"too small a step: on to the next one that fits (%s)" % off)
+	var bk: Vector2i = r["block"]
+	check(_closes(m) and m.poses()[bk.x][0].distance_to(p3 + off) < 0.05, "moved there")
+	# sideways off the start with nothing ahead to bend in: no step fits
+	m = _editor_oval()
+	var n := m.pieces.size()
+	check(m.nudge(0, 3, Vector2(-1, 0)).is_empty() and m.pieces.size() == n and m.start == Vector2.ZERO, "nothing fits: unchanged")
 
 
 ## The start line dragged along the lap: only onto straights, which it
