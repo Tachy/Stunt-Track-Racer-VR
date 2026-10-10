@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_crane_before_black_walls", "test_jump_align", "test_parachute", "test_road_on_ground", "test_bank_hold", "test_crane_motor_sound", "test_engine_start_stop", "test_wind_noise", "test_wall_point_roles", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_crane_before_black_walls", "test_jump_align", "test_parachute", "test_road_on_ground", "test_bank_hold", "test_crane_motor_sound", "test_engine_start_stop", "test_wind_noise", "test_speed_signs", "test_wall_point_roles", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -2108,6 +2108,26 @@ func test_wind_noise() -> void:
 	var db := 20.0 * log(r40 / r20) / log(10.0)
 	check(db > 14.0 and db < 22.0, "doubled speed: about +18 dB (%.1f dB)" % db)
 	w.free()
+
+
+## Advisory speed signs: 150 m before the first jump of a combination, the
+## AI's take-off speed rounded to 10 km/h / 5 mph; every figure drawn.
+func test_speed_signs() -> void:
+	var p := TrackPath.new(TrackLibrary.get_def("the_tower"))
+	var sp := SpeedSigns.spots(p)
+	check(sp.size() == 1, "the tower: one sign (%d)" % sp.size())
+	var g: Array = AiProfile.jumps(p)[0]
+	check(sp.size() == 1 and absf(p.delta_s(p.s_arr[g[0]], p.s_arr[sp[0][0]]) + SpeedSigns.SIGN_DIST) < 2.0, "150 m before the take-off")
+	check(SpeedSigns.shown(32.8, true) == 120 and SpeedSigns.shown(32.8, false) == 75, "rounded: 120 km/h, 75 mph")
+	var m := TrackPath.new(TrackLibrary.get_def("mega_ramp"))
+	check(SpeedSigns.spots(m).size() == AiProfile.jumps(m).size() - 1, "mega ramp: the pit right after the first has none")
+	var ok := true
+	for d in 10:
+		ok = ok and not SpeedSigns.figure_lines(d).is_empty()
+	check(ok, "figures 0-9")
+	var kit := MeshKit.new()
+	SpeedSigns.plate(kit, Vector3.ZERO, Vector3.RIGHT, Vector3.UP, Vector3.BACK, 120)
+	check(kit.verts.size() > 300, "plate built")
 
 
 func test_custom_track_delete() -> void:

@@ -139,6 +139,7 @@ func _ready() -> void:
 	_align = JumpAlign.new(path)
 	track = TrackNode.new().build(path)
 	add_child(track)
+	add_child(SpeedSigns.new().build(path, Settings.speed_kmh))
 	EnvironmentBuilder.build(self, def["theme"], path.bounds(), path.ground_holes())
 	_sun = get_tree().get_first_node_in_group("sun")
 	_world_env = (get_node("WorldEnvironment") as WorldEnvironment).environment
