@@ -66,7 +66,7 @@ const LINK_LEN := 0.13
 const LINK_W := 0.07
 const LINK_WIRE := 0.018
 const PARTICLE_STEP := 0.2
-const MAX_CHAIN := 40.0           # longest main chain drawn (m)
+const MAX_CHAIN := 210.0          # longest main chain drawn (m): roads up to 200 m high
 const ITERATIONS := 12
 const DAMPING := 0.995            # per physics step: air drag / friction in the links
 

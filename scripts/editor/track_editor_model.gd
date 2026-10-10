@@ -1020,7 +1020,7 @@ const MIN_SEPARATION := 7.0     # crossing roads at least this far apart in heig
 const HEIGHT_STEP := 0.5
 ## Height range of the profile points: tunnels down to 100 m below the ground.
 const MIN_HEIGHT := -100.0
-const MAX_HEIGHT := 60.0
+const MAX_HEIGHT := 200.0
 const MIN_POINT_GAP := 2.0      # profile points at least this far apart (m)
 ## Walls: a point dragged at least 80 deg steep to a neighbour (and at least
 ## 1 m above / below it) snaps right under / over it; dragged sideways till

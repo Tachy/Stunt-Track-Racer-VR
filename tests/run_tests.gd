@@ -1353,8 +1353,8 @@ func test_editor_move_points() -> void:
 	got = m.move_points([2, 3], 0.0, 45.0)
 	pts = m.points()
 	check(got.y == 45.0, "as steep as it gets (%s)" % got)
-	got = m.move_points([2, 3], 0.0, 10.0)
-	check(got.y == 60.0 - 57.0, "up to MAX_HEIGHT (%s)" % got)
+	got = m.move_points([2, 3], 0.0, 500.0)
+	check(got.y == TrackEditorModel.MAX_HEIGHT - 57.0, "up to MAX_HEIGHT (%s)" % got)
 	check(near(float(m.points()[3][1]) - float(m.points()[2][1]), -2.0), "heights to each other stay at the top")
 	# a wall: its other point goes along
 	m = _editor_oval()
