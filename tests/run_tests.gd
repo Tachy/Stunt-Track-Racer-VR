@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_crane_before_black_walls", "test_jump_align", "test_parachute", "test_road_on_ground", "test_bank_hold", "test_wall_point_roles", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_crane_before_black_walls", "test_jump_align", "test_parachute", "test_road_on_ground", "test_bank_hold", "test_crane_motor_sound", "test_wall_point_roles", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -2023,6 +2023,42 @@ func test_bank_hold() -> void:
 	var r: Dictionary = m.pieces[n - 1 - 4]
 	check(near(float(r.get("bank_in", -1.0)), 60.0) and near(float(r.get("bank_out", -1.0)), 10.0), "reversed: out and in swapped (%s)" % [r])
 	check(_closes(m), "the reversed lap closes")
+
+
+## Crane drives: silent while standing, heard while the chain or the trolley
+## runs; the tone climbs with the speed without a limit (Shepard-Risset).
+func test_crane_motor_sound() -> void:
+	var rms := func(x: PackedFloat32Array) -> float:
+		var e := 0.0
+		for v in x:
+			e += v * v
+		return sqrt(e / maxf(x.size(), 1))
+	var m := CraneMotorSynth.new()
+	check(rms.call(m.generate(1600)) < 1e-6, "standing: silent")
+	m.hoist = 1.0
+	m.generate(1600)
+	var slow := m.generate(1600)
+	m.hoist = 20.0
+	m.generate(1600)
+	var fast := m.generate(1600)
+	check(rms.call(slow) > 0.02 and rms.call(fast) > rms.call(slow), "chain running: heard, louder when faster (%.3f, %.3f)" % [rms.call(slow), rms.call(fast)])
+	check(CraneMotorSynth.pitch_of(CraneMotorSynth.HOIST, 200.0) > CraneMotorSynth.pitch_of(CraneMotorSynth.HOIST, 20.0) + 3.0,
+		"the tone climbs on without a limit")
+	# Shepard stack: the loudness of the partials is the same whatever the pitch
+	var sum_at := func(p: float) -> float:
+		var e := 0.0
+		for k in range(-10, 10):
+			e += CraneMotorSynth.bell(p - k)
+		return e
+	check(absf(sum_at.call(0.1) - sum_at.call(0.6)) < 1e-4 and absf(sum_at.call(3.3) - sum_at.call(0.3)) < 1e-4, "endless glissando: even loudness")
+	m.hoist = 0.0
+	m.trolley = 1.5
+	m.generate(1600)
+	check(rms.call(m.generate(1600)) > 0.02, "trolley running: heard")
+	m.muted = true
+	m.generate(1600)
+	check(rms.call(m.generate(1600)) < 1e-6, "muted: silent")
+	m.free()
 
 
 func test_custom_track_delete() -> void:

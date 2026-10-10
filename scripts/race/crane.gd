@@ -104,6 +104,9 @@ var _hook: MeshInstance3D
 var _chains: Array = []           # [main chain, 4 slings]: {n, end, pts, prev, seg}
 var _links: MultiMeshInstance3D
 static var _link_mesh: ArrayMesh
+var _motor: CraneMotorSynth       # the hoist's and the trolley's electric drives
+var _last_pos := Vector2.ZERO     # _pos one physics step ago (for the drives' speed)
+var _rate := Vector2.ZERO         # trolley and chain speed (m/s), smoothed
 
 
 func _init() -> void:
@@ -118,6 +121,9 @@ func _init() -> void:
 	for x in [-0.4, 0.4]:
 		kit.cylinder(Vector3(x, 0.55, 0), Vector3(0, 0, 1), 0.12, 1.2, 10, Palette.CHAIN)
 	_trolley.add_child(kit.build_instance())
+	_motor = CraneMotorSynth.new().setup(-4.0)
+	_motor.position = Vector3(0, 0.3, 0)
+	_trolley.add_child(_motor)
 	kit = MeshKit.new()
 	kit.box(Vector3.ZERO, Vector3(0.45, 0.4, 0.3), Palette.CRANE)
 	_hook = kit.build_instance()
@@ -507,6 +513,8 @@ func _pin_chains() -> void:
 
 func _physics_process(dt: float) -> void:
 	if not visible:
+		_motor.muted = true
+		_last_pos = _pos
 		return
 	if _mode == "free":
 		# the trolley runs back off the road, the chains swing along
@@ -524,6 +532,22 @@ func _physics_process(dt: float) -> void:
 	elif _mode == "lift":
 		_pin_chains()
 	_draw_links()
+	_drive_sound(dt)
+
+
+## The drives sound as fast as trolley and chain move now (whatever moves
+## them: the lift plan, the way back, an online car's pose).
+func _drive_sound(dt: float) -> void:
+	var d := _pos - _last_pos
+	_last_pos = _pos
+	if d.length() > 2.0 or dt <= 0.0:
+		d = Vector2.ZERO       # set up anew, not moved
+	# straight from the motion (a touch of smoothing for an online car's
+	# jittery poses)
+	_rate = _rate.lerp(d / maxf(dt, 1e-4), 0.5 if _mode == "lift" or _mode == "free" else 0.15)
+	_motor.muted = false
+	_motor.trolley = absf(_rate.x)
+	_motor.hoist = absf(_rate.y)
 
 
 ## Verlet step: gravity and damping, then the link lengths. The main chain
