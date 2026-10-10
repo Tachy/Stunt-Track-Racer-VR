@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -1093,6 +1093,87 @@ func test_editor_cut() -> void:
 	check(m2.has_gap() and not m2.closed and m2.tail.size() == m.tail.size(), "save/load with a gap")
 	m2.place(m2.closing_group(), true)
 	check(m2.closed and _closes(m2), "a loaded gap closes")
+
+
+## A marked stretch dragged in the plan: the gaps before and after it are
+## filled, the straights next to it solved anew; profile points go along.
+func test_editor_move() -> void:
+	var m := _editor_oval()
+	var n := m.pieces.size()
+	var curve: Dictionary = m.pieces[3]          # the second curve: east -> south
+	var p3: Vector2 = m.poses()[3][0]
+	m.add_point(m.piece_x(3) + 20.0, 12.0)
+	m.add_point(m.piece_x(1) + 10.0, 8.0)        # on the first curve: stays
+	var x_first := float(m.heights[0][0])
+	var into := float(m.heights[1][0]) - m.piece_x(3)     # (points are put on whole metres)
+	# sideways too little for an S-bend of catalogue curves: no move
+	check(m.moved(3, 3, Vector2(2, 0)).is_empty() and not m.move_block(3, 3, Vector2(2, 0)), "too small a shift cannot be filled")
+	check(m.pieces.size() == n and m.heights.size() == 2, "nothing changed")
+	# further on along the straight before it: an S-bend down the long one after it
+	check(m.move_block(3, 3, Vector2(60, 0)), "moved")
+	check(_closes(m), "the moved lap closes")
+	var k := -1
+	for i in m.pieces.size():
+		if is_same(m.pieces[i], curve):
+			k = i
+	check(k >= 0 and m.poses()[k][0].distance_to(p3 + Vector2(60, 0)) < 0.05, "the stretch is where it was dragged to")
+	check(m.heights.size() == 2 and near(float(m.heights[0][0]), x_first), "the point before stays")
+	check(near(float(m.heights[1][0]), m.piece_x(k) + into) and near(float(m.heights[1][1]), 12.0),
+		"the point on the stretch goes along (%s)" % [m.heights])
+	check(m.pieces[k - 1]["t"] == "S" and near(float(m.pieces[k - 1]["l"]), 120.0), "the straight before is longer")
+	# Esc: back
+	m.undo()
+	check(m.closed and m.pieces.size() == n and m.poses()[3][0].distance_to(p3) < 0.01 and near(float(m.heights[1][0]), m.piece_x(3) + into), "Esc undoes the move")
+	# with the start straight: the start line goes along
+	var r := m.moved(0, 3, Vector2(0, -40))
+	check(not r.is_empty() and (r["start"] as Vector2).distance_to(m.start + Vector2(0, -40)) < 0.05, "the start moves with its straight")
+	check(m.move_block(0, 3, Vector2(0, -40)) and _closes(m), "moved with the start")
+	# a point on a straight replaced by the gap stays at its place on the new
+	# one; the start straight before the stretch: the start stays
+	m = _editor_oval()
+	m.add_point(m.piece_x(4) + 200.0, 9.0)       # 50 m before the end of the long straight
+	var to_end := m.piece_x(5) - float(m.heights[0][0])
+	check(m.move_block(1, 3, Vector2(0, 40)) and _closes(m), "moved down")
+	check(m.start.distance_to(Vector2.ZERO) < 0.01 and near(float(m.pieces[0]["l"]), 210.0), "the start straight is shorter, the start stays")
+	var after: Dictionary = m.pieces[4]
+	check(after["t"] == "S" and near(float(after["l"]), 210.0), "the straight after it is shorter (%s)" % [after])
+	check(m.heights.size() == 1 and near(float(m.heights[0][0]), m.piece_x(5) - to_end), "its point keeps its distance to the end")
+
+
+## The start line dragged along the lap: only onto straights, which it
+## splits; the straights it split before are one again; the height profile
+## keeps its shape.
+func test_editor_move_start() -> void:
+	var m := _editor_oval()
+	var n := m.pieces.size()
+	var length := m.total_length()
+	m.add_point(150.0, 14.0)
+	m.add_point(400.0, 3.0)
+	var old_pts := m.points()
+	var lp := m.profile_length()
+	var h100 := HeightSpline.height(old_pts, 100.0)
+	check(m.start_spot(Vector2(0, -100)) == [0, 100.0], "spot on the start straight")
+	check(m.start_spot(Vector2(0, -3)) == [0, 0.0], "near its start: its start")
+	check(m.start_spot(Vector2(0, -245)) == [0, 240.0], "near its end: the last 10 m stay")
+	check(m.start_spot(Vector2(300, 300)).is_empty(), "not beside the road")
+	var c: Array = m.poses()[1]
+	check(m.start_spot((c[0] as Vector2) + Vector2(20, -20)).is_empty() or m.start_spot((c[0] as Vector2) + Vector2(20, -20))[0] != 1, "not on a curve")
+	check(not m.move_start(1, 0.0), "not onto a curve")
+	check(m.move_start(0, 100.0), "moved")
+	check(m.start.distance_to(Vector2(0, -100)) < 0.01 and m.start_dir.distance_to(Vector2(0, -1)) < 0.01, "start pose")
+	check(_closes(m) and near(m.total_length(), length, 0.05), "the same lap")
+	check(m.pieces[0]["t"] == "S" and near(float(m.pieces[0]["l"]), 150.0), "the straight split at the line")
+	check(near(m.base, h100), "start height = the height there before")
+	check(near(HeightSpline.height(m.points(), 50.0), 14.0) and near(HeightSpline.height(m.points(), 300.0), 3.0), "points stay on the road")
+	check(near(HeightSpline.height(m.points(), lp - 100.0), old_pts[0][1]), "the old start is a point at the old start height")
+	# back: the two halves are one straight again
+	var back := m.start_spot(Vector2(0, 0))
+	check(m.move_start(back[0], back[1]), "moved back")
+	check(m.pieces.size() == n and m.start.distance_to(Vector2.ZERO) < 0.01 and near(float(m.pieces[0]["l"]), 250.0), "joined again (%d pieces)" % m.pieces.size())
+	check(_closes(m), "still closed")
+	check(m.heights.size() == 3 and near(float(m.heights[0][0]), 100.0) and near(float(m.heights[0][1]), h100) 		and near(m.base, float(old_pts[0][1])), "the old start point is the start again, the line before a point (%s)" % [m.heights])
+	m.undo()
+	check(m.start.distance_to(Vector2(0, -100)) < 0.01 and m.heights.size() == 3, "Esc undoes the start move")
 
 
 ## The height surface of the 3D height editor: profile x <-> plan, mouse

@@ -57,6 +57,9 @@ var tail: Array = []
 var tail_pos := Vector2.ZERO
 var tail_dir := Vector2.ZERO
 var _cut: Dictionary = {}
+## Undo snapshots of moved stretches and start lines (move_block(),
+## move_start()): [start, start_dir, pieces, base, heights, next group].
+var _plan_undo: Array = []
 
 
 # --- geometry (mirrors TrackPath._layout) ------------------------------------------
@@ -199,6 +202,7 @@ func set_start(p: Vector2) -> void:
 	pieces.clear()
 	closed = false
 	_redo.clear()
+	_plan_undo.clear()
 
 
 ## Before the first straight: direction (axis only) and length from the mouse.
@@ -268,6 +272,7 @@ func place(group: Array, closes := false) -> void:
 		pieces.append(q)
 	_next_group += 1
 	_redo.clear()
+	_plan_undo.clear()
 	if closes:
 		if not _cut.is_empty():
 			_join()
@@ -291,6 +296,17 @@ func loop_group(side: int) -> Array:
 ## Removes the last placement group (Esc). Back to "no direction" / "no
 ## start" when nothing is left.
 func undo() -> void:
+	if not _plan_undo.is_empty():
+		# a moved stretch / start line back where it was
+		var u: Array = _plan_undo.pop_back()
+		start = u[0]
+		start_dir = u[1]
+		pieces = u[2]
+		base = u[3]
+		heights = u[4]
+		_next_group = u[5]
+		_height_undo.clear()
+		return
 	if _cut.has("pieces") and pieces.size() <= int(_cut["size"]):
 		# nothing drawn into the gap (any more): the lap as before the cut
 		pieces = _cut["pieces"]
@@ -401,6 +417,7 @@ func cut(first: int, last: int) -> bool:
 	heights = head_h
 	closed = false
 	_redo.clear()
+	_plan_undo.clear()
 	return true
 
 
@@ -433,18 +450,28 @@ func closing_group() -> Array:
 	if closed or (pieces.size() < 2 and _cut.is_empty()):
 		return []
 	var e := end_pose()
-	var p0: Vector2 = e[0]
-	var d0: Vector2 = e[1]
 	var tg := close_target()
-	var target: Vector2 = tg[0]
-	var need := d0.angle_to(tg[1])
+	var g = _bridge(e[0], e[1], last_piece(), tg[0], tg[1], tail[0] if has_gap() else {})
+	return g if g != null else []
+
+
+## Pieces from the pose (p0, d0) after piece `last` exactly onto the pose
+## (target, tdir) before piece `next` (empty: none): one straight, or one or
+## two catalogue curves with straights before, between and after them (the
+## shortest solution). first_min: least length of a straight at the start
+## (0: none needed). [] if the poses already meet, null if nothing fits.
+func _bridge(p0: Vector2, d0: Vector2, last: Dictionary, target: Vector2, tdir: Vector2,
+		next: Dictionary, first_min := 0.0) -> Variant:
+	var need := d0.angle_to(tdir)
 	var best := []
 	var best_len := INF
-	# already in line with the target: one straight
-	if absf(need) < 1e-3:
+	# already in line with the target: one straight (or nothing)
+	if absf(need) < 1e-3 and absf(d0.cross(target - p0)) < 0.05:
 		var along := (target - p0).dot(d0)
-		if along > 1.0 and absf(d0.cross(target - p0)) < 0.05:
-			return [straight(along)]
+		if absf(along) < 0.05 and first_min <= 0.0 and transition_length(last, next) <= 0.0:
+			return []
+		if along >= maxf(first_min, 0.05) - 0.01:
+			return [straight(snappedf(along, 0.01))]
 	var curves := []
 	for t in ["L", "R"]:
 		for a in ANGLES:
@@ -452,16 +479,16 @@ func closing_group() -> Array:
 				curves.append(curve(t, a, r))
 	for c1 in curves:
 		if _turn_matches(_turn(c1), need):
-			_try_close([c1], p0, d0, best, best_len)
+			_try_close([c1], p0, d0, last, target, next, first_min, best, best_len)
 			if not best.is_empty():
 				best_len = _group_length(best)
 	for c1 in curves:
 		for c2 in curves:
 			if _turn_matches(_turn(c1) + _turn(c2), need):
-				_try_close([c1, c2], p0, d0, best, best_len)
+				_try_close([c1, c2], p0, d0, last, target, next, first_min, best, best_len)
 				if not best.is_empty():
 					best_len = _group_length(best)
-	return best
+	return best if not best.is_empty() else null
 
 
 static func _turn(c: Dictionary) -> float:
@@ -481,15 +508,16 @@ static func _group_length(g: Array) -> float:
 
 ## Curves cs with straight slots before / between / after them: every slot
 ## has its minimum (run-out rules); two slots get solved extra length so the
-## chain ends on the start. Writes the shortest solution into best.
-func _try_close(cs: Array, p0: Vector2, d0: Vector2, best: Array, best_len: float) -> void:
+## chain ends on the target. Writes the shortest solution into best.
+func _try_close(cs: Array, p0: Vector2, d0: Vector2, last: Dictionary, target: Vector2, next: Dictionary,
+		first_min: float, best: Array, best_len: float) -> void:
 	var slots := cs.size() + 1
 	var mins := []
-	mins.append(transition_length(last_piece(), cs[0]))
+	mins.append(maxf(transition_length(last, cs[0]), first_min))
 	for k in range(1, cs.size()):
 		mins.append(transition_length(cs[k - 1], cs[k]))
-	# onto a gap's anchor: the run-out into the first piece of the tail
-	mins.append(transition_length(cs[-1], tail[0]) if has_gap() else 0.0)
+	# the run-out into the piece after the target (a gap's tail, a moved stretch)
+	mins.append(transition_length(cs[-1], next) if not next.is_empty() else 0.0)
 	# direction of every slot and the end point with all slots at their minimum
 	var dirs := []
 	var pos := p0
@@ -501,7 +529,7 @@ func _try_close(cs: Array, p0: Vector2, d0: Vector2, best: Array, best_len: floa
 			var adv := advance(pos, dir, cs[k])
 			pos = adv[0]
 			dir = adv[1]
-	var gap: Vector2 = close_target()[0] - pos
+	var gap: Vector2 = target - pos
 	for i in slots:
 		for j in range(i + 1, slots):
 			var u: Vector2 = dirs[i]
@@ -537,6 +565,296 @@ func _try_close(cs: Array, p0: Vector2, d0: Vector2, best: Array, best_len: floa
 func near_target(mouse: Vector2) -> bool:
 	return has_start and (not pieces.is_empty() or not _cut.is_empty()) \
 		and mouse.distance_to(close_target()[0]) < CLOSE_RADIUS
+
+
+# --- moving a stretch and the start line -------------------------------------------------
+
+## Pose [pos, dir] at the start of every piece, and at the end of the last.
+func poses() -> Array:
+	var out := []
+	var pos := start
+	var dir := start_dir
+	for p in pieces:
+		out.append([pos, dir])
+		var e := advance(pos, dir, p)
+		pos = e[0]
+		dir = e[1]
+	out.append([pos, dir])
+	return out
+
+
+## A plain straight (no drawbridge, gap or crane mark): may be lengthened,
+## shortened, split or joined.
+static func _plain_straight(p: Dictionary) -> bool:
+	return p.get("t", "S") == "S" and not p.get("bridge", false) and not p.get("gap", false) \
+		and not p.get("no_crane", false)
+
+
+## The closed lap with pieces first..last moved by `offset` (plan, the
+## pieces keep their direction), the gaps before and after them filled like
+## a closing gap (closing_group()). A plain straight next to the stretch is
+## solved anew with the gap (longer, shorter or gone) - not the one the
+## start line stands on; the one before it only so that a straight stays at
+## the start. {} if a gap cannot be filled, else
+##   start, start_dir, pieces  the new lap (the moved pieces are the same
+##                             dictionaries, the new ones new),
+##   fill                      indices of the new pieces,
+##   block                     first and last index of the moved pieces
+##                             (x < 0: they run across the start),
+##   remap                     [old straight, new straight or {}, from its end]
+##                             for the profile points of the replaced straights.
+func moved(first: int, last: int, offset: Vector2) -> Dictionary:
+	var n := pieces.size()
+	if not closed or first < 0 or last >= n or first > last or last - first + 1 >= n:
+		return {}
+	var ps := poses()
+	var before := (first - 1 + n) % n
+	var after := (last + 1) % n
+	var outside := n - (last - first + 1)
+	var take_b := after != 0 and _plain_straight(pieces[after]) and outside > 1
+	var take_a := _plain_straight(pieces[before]) and outside - (1 if take_b else 0) > 1
+	# the fixed part: f0 .. f1 (cyclic)
+	var f0 := (after + 1) % n if take_b else after
+	var f1 := (before - 1 + n) % n if take_a else before
+	var fixed := []
+	var k := f0
+	while true:
+		fixed.append(pieces[k])
+		if k == f1:
+			break
+		k = (k + 1) % n
+	var f1_end: Array = ps[f1 + 1]
+	var blk_start: Vector2 = ps[first][0] + offset
+	var blk_end: Vector2 = ps[last + 1][0] + offset
+	var first_min := MIN_STRAIGHT if take_a and before == 0 else 0.0
+	var gap_a = _bridge(f1_end[0], f1_end[1], pieces[f1], blk_start, ps[first][1], pieces[first], first_min)
+	if gap_a == null:
+		return {}
+	var gap_b = _bridge(blk_end, ps[last + 1][1], pieces[last], ps[f0][0], ps[f0][1], pieces[f0])
+	if gap_b == null:
+		return {}
+	# own copies (a solution may hold one curve twice)
+	gap_a = gap_a.map(func(p): return p.duplicate())
+	gap_b = gap_b.map(func(p): return p.duplicate())
+	var block := pieces.slice(first, last + 1)
+	var seq: Array = fixed + gap_a + block + gap_b
+	var fill := {}
+	for i in gap_a.size():
+		fill[fixed.size() + i] = true
+		gap_a[i]["g"] = _next_group
+	for i in gap_b.size():
+		fill[fixed.size() + gap_a.size() + block.size() + i] = true
+		gap_b[i]["g"] = _next_group + 1
+	# the start line: on the start straight, or (taken into the gap) on the
+	# straight that begins the gap now
+	var s0 := -1
+	for i in seq.size():
+		if is_same(seq[i], pieces[0]):
+			s0 = i
+	if s0 < 0:
+		s0 = fixed.size()
+	# the pose at the start of every piece of seq, from the fixed part's start
+	var pos: Vector2 = ps[f0][0]
+	var dir: Vector2 = ps[f0][1]
+	for i in s0:
+		var e := advance(pos, dir, seq[i])
+		pos = e[0]
+		dir = e[1]
+	var out: Array = seq.slice(s0) + seq.slice(0, s0)
+	var new_fill := []
+	for i in fill:
+		new_fill.append((int(i) - s0 + seq.size()) % seq.size())
+	var b0: int = (fixed.size() + gap_a.size() - s0 + seq.size()) % seq.size()
+	var b1: int = b0 + block.size() - 1
+	var remap := []
+	if take_a:
+		remap.append([pieces[before], gap_a[0] if not gap_a.is_empty() and gap_a[0]["t"] == "S" else {}, false])
+	if take_b:
+		remap.append([pieces[after], gap_b[-1] if not gap_b.is_empty() and gap_b[-1]["t"] == "S" else {}, true])
+	return {"start": pos, "start_dir": dir, "pieces": out, "fill": new_fill,
+		"block": Vector2i(b0, b1) if b1 < out.size() else Vector2i(-1, -1), "remap": remap}
+
+
+## Moves pieces first..last by offset (moved()); their profile points go
+## along, those of a replaced straight stay where they are on the new one (as
+## far as it is long). False if a gap cannot be filled.
+func move_block(first: int, last: int, offset: Vector2) -> bool:
+	var r := moved(first, last, offset)
+	if r.is_empty():
+		return false
+	_plan_snapshot()
+	var bound := _bind_heights()
+	for b in bound:
+		for m in r["remap"]:
+			if not is_same(b[0], m[0]):
+				continue
+			var nw: Dictionary = m[1]
+			if nw.is_empty():
+				b[0] = null
+				continue
+			var off := float(b[1])
+			if m[2]:      # the straight after the stretch: its end stays put
+				off = float(nw["l"]) - (float(m[0]["l"]) - off)
+			b[0] = nw if off >= 0.5 and off <= float(nw["l"]) - 0.5 else null
+			b[1] = off
+	start = r["start"]
+	start_dir = r["start_dir"]
+	pieces = r["pieces"]
+	_next_group += 2
+	_place_heights(bound)
+	return true
+
+
+## Whether the start line may stand on piece k, o metres into it: on a plain
+## straight, with at least MIN_STRAIGHT of it before (or none: its start)
+## and after the line.
+func _start_ok(k: int, o: float) -> bool:
+	if k < 0 or k >= pieces.size() or not _plain_straight(pieces[k]):
+		return false
+	var l := float(pieces[k]["l"])
+	if o < 0.01:
+		return l >= MIN_STRAIGHT - 0.01
+	return o >= MIN_STRAIGHT - 0.01 and o <= l - MIN_STRAIGHT + 0.01
+
+
+## Where the start line would go for the plan point w: [piece, metres into
+## it] on the nearest straight (whole metres; near an end: the end), [] if
+## there is none at w.
+func start_spot(w: Vector2) -> Array:
+	var ps := poses()
+	var best := []
+	var best_d := TrackPath.ROAD_WIDTH
+	for k in pieces.size():
+		var p: Dictionary = pieces[k]
+		if p.get("t", "S") != "S":
+			continue
+		var pos: Vector2 = ps[k][0]
+		var dir: Vector2 = ps[k][1]
+		var l := float(p["l"])
+		var along := (w - pos).dot(dir)
+		var d := absf(dir.cross(w - pos))
+		if along < 0.0 or along > l or d >= best_d:
+			continue
+		var o := roundf(along)
+		var spot := [k, o]
+		if o < MIN_STRAIGHT:
+			spot = [k, 0.0] if o < MIN_STRAIGHT * 0.5 else [k, MIN_STRAIGHT]
+		elif o > l - MIN_STRAIGHT:
+			spot = [(k + 1) % pieces.size(), 0.0] if o > l - MIN_STRAIGHT * 0.5 else [k, floorf(l - MIN_STRAIGHT)]
+		if _start_ok(spot[0], spot[1]):
+			best = spot
+			best_d = d
+	return best
+
+
+## Plan pose [pos, dir] of a start_spot().
+func spot_pose(spot: Array) -> Array:
+	var pd: Array = poses()[spot[0]]
+	return [pd[0] + pd[1] * float(spot[1]), pd[1]]
+
+
+## Moves the start line to piece k, o metres into it (start_spot()): the
+## straight there is split in two at the line, the two straights the line
+## split before are one again. The height profile keeps its shape: the start
+## height becomes the height there, the old start a free point (a plain point
+## right at the new start becomes the start). False if not allowed there (or
+## too near a profile point).
+func move_start(k: int, o: float) -> bool:
+	if not closed or not _start_ok(k, o) or (k == 0 and o < 0.01):
+		return false
+	var x_new := piece_x(k) + o
+	var pts := points()
+	var h_new := HeightSpline.height(pts, x_new)
+	var on := -1
+	for i in range(1, pts.size() - 1):
+		var dx := absf(float(pts[i][0]) - x_new)
+		if dx < 0.5 and not pts[i][2] and _wall_partner(pts, i) < 0:
+			on = i - 1
+			h_new = float(pts[i][1])
+		elif dx < MIN_POINT_GAP:
+			return false
+	var pose := spot_pose([k, o])
+	_plan_snapshot()
+	if on >= 0:
+		heights.remove_at(on)
+	var bound := _bind_heights()
+	var old0: Dictionary = pieces[0]
+	bound.append([old0, 0.0, base, false, 0])
+	var seq := pieces.duplicate()
+	var new0: Dictionary = pieces[k]
+	if o >= 0.01:
+		var b: Dictionary = new0.duplicate()
+		b["l"] = float(new0["l"]) - o
+		b["g"] = _next_group
+		b.erase("auto")
+		_next_group += 1
+		new0["l"] = o
+		for e in bound:
+			if is_same(e[0], new0) and float(e[1]) >= o - 0.01:
+				e[0] = b
+				e[1] = float(e[1]) - o
+		seq.insert(k + 1, b)
+		new0 = b
+	# the straight the old line split goes back together with the one before
+	var prev: Dictionary = seq[-1]
+	if _plain_straight(prev) and _plain_straight(old0) and not is_same(prev, old0):
+		var lp := float(prev["l"])
+		prev["l"] = lp + float(old0["l"])
+		prev.erase("auto")
+		for e in bound:
+			if is_same(e[0], old0):
+				e[0] = prev
+				e[1] = float(e[1]) + lp
+		seq.remove_at(0)
+	var i0 := 0
+	for i in seq.size():
+		if is_same(seq[i], new0):
+			i0 = i
+	pieces = seq.slice(i0) + seq.slice(0, i0)
+	start = pose[0]
+	start_dir = pose[1]
+	base = h_new
+	_place_heights(bound)
+	return true
+
+
+func _plan_snapshot() -> void:
+	_plan_undo.append([start, start_dir, pieces.duplicate(true), base, heights.duplicate(true), _next_group])
+	_redo.clear()
+	_height_undo.clear()     # its snapshots hold the lap as it was
+
+
+## The free profile points bound to their pieces: [piece, metres into it,
+## h, corner, wall]. A point on the border of two pieces belongs to the
+## later one (both points of a wall to one piece).
+func _bind_heights() -> Array:
+	var out := []
+	for q in heights:
+		var x := float(q[0])
+		var x0 := 0.0
+		for p in pieces:
+			var l := profile_len(p)
+			if l > 0.0 and x < x0 + l - 0.01:
+				out.append([p, x - x0, float(q[1]), bool(q[2]) if q.size() > 2 else false, int(q[3]) if q.size() > 3 else 0])
+				break
+			x0 += l
+	return out
+
+
+## Profile points from _bind_heights() at their pieces' places now (those of
+## pieces no longer in the lap, or bound to null, go).
+func _place_heights(bound: Array) -> void:
+	heights = []
+	for b in bound:
+		if not (b[0] is Dictionary):
+			continue
+		var x0 := 0.0
+		for p in pieces:
+			if is_same(p, b[0]):
+				heights.append([x0 + float(b[1]), b[2], b[3], b[4]])
+				break
+			x0 += profile_len(p)
+	_tidy_heights()
 
 
 # --- checks ----------------------------------------------------------------------------

@@ -13,6 +13,10 @@ extends Control
 ## Shift+click a stretch of them; a right click (without dragging) deletes
 ## the marked ones. The gap is drawn as usual and closed onto its anchor
 ## (yellow mark) like a lap onto its start; Esc right after the cut undoes it.
+## The marked pieces can be dragged: the gaps before and after them are
+## filled (green while dragging, red: no fit), on release for good; their
+## height points go along. The start line can be dragged along the
+## straights. Esc undoes either.
 ##
 ## Heights (Tab / button, closed lap only): the track in 3D (HeightEditor3D)
 ## with a see-through ground and tunnels; the height along the lap (loops
@@ -68,6 +72,17 @@ var _crossings := PackedVector2Array()
 var _marked := Vector2i(-1, -1)
 var _mark_anchor := -1
 var _right_moved := 0.0         # mouse travel with the right button down (px)
+## Dragging with the left button in a closed lap: "block" (the marked
+## pieces), "start" (the start line) or ""; where it began, whether the mouse
+## has moved yet, and the lap it would give (TrackEditorModel.moved(), {}:
+## no fit) / the start spot ([] none).
+var _drag := ""
+var _drag_from := Vector2.ZERO
+var _drag_px := Vector2.ZERO
+var _drag_moved := false
+var _drag_offset := Vector2.ZERO
+var _drag_lap: Dictionary = {}
+var _drag_spot: Array = []
 
 # height stage
 var _mode := "plan"              # plan, height
@@ -238,13 +253,16 @@ func _gui_input(event: InputEvent) -> void:
 			view_center -= mm.relative / zoom
 			_right_moved += mm.relative.length()
 		_mouse_world = to_world(mm.position)
+		if _drag != "":
+			_drag_motion(mm.position)
 		_update()
 	elif event is InputEventMouseButton and event.pressed:
 		var mb := event as InputEventMouseButton
 		match mb.button_index:
 			MOUSE_BUTTON_LEFT:
 				grab_focus()
-				_click(to_world(mb.position), mb.shift_pressed)
+				if not _drag_begin(mb.position, mb.shift_pressed):
+					_click(to_world(mb.position), mb.shift_pressed)
 			MOUSE_BUTTON_RIGHT:
 				_panning = true
 				_right_moved = 0.0
@@ -253,6 +271,8 @@ func _gui_input(event: InputEvent) -> void:
 				zoom = clampf(zoom * (1.15 if mb.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 1.15), 0.08, 12.0)
 				view_center += before - to_world(mb.position)
 				_update()
+	elif event is InputEventMouseButton and not event.pressed and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+		_drag_end()
 	elif event is InputEventMouseButton and not event.pressed and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_RIGHT:
 		_panning = false
 		if _right_moved < CLICK_SLOP:     # by the mouse's travel (in VR the pointer stays put)
@@ -337,6 +357,72 @@ func _delete_marked() -> void:
 		_flash(Lang.t("NOT POSSIBLE - THE WHOLE LAP"))
 
 
+## Left button down in a closed lap: on the start line it starts dragging
+## that, on a marked piece the marked ones. False if neither.
+func _drag_begin(px: Vector2, shift: bool) -> bool:
+	if _mode != "plan" or not model.closed or shift:
+		return false
+	var w := to_world(px)
+	if px.distance_to(to_screen(model.start)) < maxf(10.0, TrackPath.HALF_WIDTH * zoom):
+		_drag = "start"
+	elif _marked.x >= 0:
+		var k := model.piece_at(w)
+		if k < _marked.x or k > _marked.y:
+			return false
+		_drag = "block"
+	else:
+		return false
+	_drag_from = w
+	_drag_px = px
+	_drag_moved = false
+	_drag_offset = Vector2.ZERO
+	_drag_lap = {}
+	_drag_spot = []
+	return true
+
+
+func _drag_motion(px: Vector2) -> void:
+	if not _drag_moved and px.distance_to(_drag_px) < CLICK_SLOP:
+		return
+	_drag_moved = true
+	var w := to_world(px)
+	if _drag == "start":
+		_drag_spot = model.start_spot(w)
+		return
+	var off := (w - _drag_from).round()     # whole metres
+	if off != _drag_offset:
+		_drag_offset = off
+		_drag_lap = model.moved(_marked.x, _marked.y, off) if off != Vector2.ZERO else {}
+
+
+## Left button up: the drag is done for good (a click without moving marks
+## as usual).
+func _drag_end() -> void:
+	if _drag == "":
+		return
+	var what := _drag
+	_drag = ""
+	if not _drag_moved:
+		_click(_drag_from)
+		return
+	if what == "start":
+		if not _drag_spot.is_empty() and not (_drag_spot[0] == 0 and float(_drag_spot[1]) < 0.01) \
+				and not model.move_start(_drag_spot[0], _drag_spot[1]):
+			_update()
+			_flash(Lang.t("NOT POSSIBLE - TOO NEAR A HEIGHT POINT"))
+			return
+	elif _drag_offset != Vector2.ZERO:
+		if _drag_lap.is_empty():
+			_update()
+			_flash(Lang.t("NOT POSSIBLE - THE GAPS CANNOT BE FILLED"))
+			return
+		var block: Vector2i = _drag_lap["block"]
+		model.move_block(_marked.x, _marked.y, _drag_offset)
+		_marked = block
+		_mark_anchor = block.x
+	_update()
+
+
 # --- state -> picture -----------------------------------------------------------------
 
 func _update() -> void:
@@ -376,7 +462,7 @@ func _update() -> void:
 		_status.text = Lang.t("CLICK THE END OF THE START STRAIGHT (ACROSS OR UP/DOWN)")
 	elif model.closed:
 		_status.text = Lang.t("LAP CLOSED - SAVE OR TEST DRIVE (ESC REOPENS)") + "   " \
-			+ Lang.t("CLICK = MARK (SHIFT: MORE)  RIGHT CLICK = DELETE MARKED")
+			+ Lang.t("CLICK = MARK (SHIFT: MORE)  DRAG = MOVE  RIGHT CLICK = DELETE MARKED")
 	elif model.has_gap():
 		_status.text = Lang.t("DRAW THE GAP TO THE YELLOW MARK  ESC = REMOVE LAST / UNDO THE DELETING")
 	else:
@@ -414,6 +500,9 @@ func _draw() -> void:
 		return      # the 3D view shows through
 	draw_rect(Rect2(Vector2.ZERO, size), BG)
 	_draw_grid()
+	if _drag == "block" and _drag_moved and not _drag_lap.is_empty():
+		_draw_moved()
+		return
 	var pos := model.start
 	var dir := model.start_dir
 	var k := 0
@@ -452,10 +541,54 @@ func _draw() -> void:
 			var e2 := TrackEditorModel.advance(gpos, gdir, p)
 			gpos = e2[0]
 			gdir = e2[1]
-	for c in _crossings:
-		draw_arc(to_screen(c), maxf(10.0, TrackPath.ROAD_WIDTH * zoom), 0.0, TAU, 24, CROSSING, 3.0)
+	if _drag == "block" and _drag_moved and _drag_offset != Vector2.ZERO:
+		# no fit: the marked pieces where the mouse is, in red
+		var bp: Array = model.poses()[_marked.x]
+		var bpos: Vector2 = bp[0] + _drag_offset
+		var bdir: Vector2 = bp[1]
+		for i in range(_marked.x, _marked.y + 1):
+			_draw_piece(bpos, bdir, model.pieces[i], Color(CROSSING, 0.6))
+			var e4 := TrackEditorModel.advance(bpos, bdir, model.pieces[i])
+			bpos = e4[0]
+			bdir = e4[1]
+	elif _drag == "" or not _drag_moved:
+		for c in _crossings:
+			draw_arc(to_screen(c), maxf(10.0, TrackPath.ROAD_WIDTH * zoom), 0.0, TAU, 24, CROSSING, 3.0)
 	if model.has_start:
-		_draw_start()
+		_draw_start(model.start, model.start_dir, Color.WHITE)
+	if _drag == "start" and _drag_moved and not _drag_spot.is_empty():
+		var sp := model.spot_pose(_drag_spot)
+		_draw_start(sp[0], sp[1], GHOST_CLOSE)
+
+
+## The lap as dragging the marked pieces would leave it: the filled gaps in
+## green, the dragged pieces marked.
+func _draw_moved() -> void:
+	var lap := _drag_lap
+	var block: Vector2i = lap["block"]
+	var pos: Vector2 = lap["start"]
+	var dir: Vector2 = lap["start_dir"]
+	var ps: Array = lap["pieces"]
+	for k in ps.size():
+		var p: Dictionary = ps[k]
+		var col := ROAD_AUTO if p.get("auto", false) else (ROAD_A if k % 2 == 0 else ROAD_B)
+		if (lap["fill"] as Array).has(k):
+			col = GHOST_CLOSE
+		elif (block.x >= 0 and k >= block.x and k <= block.y) or (block.x < 0 and _in_block(p)):
+			col = MARKED
+		_draw_piece(pos, dir, p, col)
+		var e := TrackEditorModel.advance(pos, dir, p)
+		pos = e[0]
+		dir = e[1]
+	_draw_start(lap["start"], lap["start_dir"], Color.WHITE)
+
+
+## Whether piece dictionary p is one of the marked (dragged) pieces.
+func _in_block(p: Dictionary) -> bool:
+	for i in range(_marked.x, _marked.y + 1):
+		if is_same(model.pieces[i], p):
+			return true
+	return false
 
 
 func _draw_grid() -> void:
@@ -486,13 +619,14 @@ func _draw_piece(pos: Vector2, dir: Vector2, p: Dictionary, col: Color) -> void:
 		draw_circle(to_screen(pts[pts.size() / 2]), maxf(4.0, TrackPath.LOOP_RADIUS * zoom * 0.5), Color(col, 0.5))
 
 
-func _draw_start() -> void:
-	var s := to_screen(model.start)
-	var d := model.start_dir if model.start_dir != Vector2.ZERO else Vector2.UP
+func _draw_start(at: Vector2, d: Vector2, col: Color) -> void:
+	var s := to_screen(at)
+	if d == Vector2.ZERO:
+		d = Vector2.UP
 	var n := d.rotated(PI * 0.5) * maxf(8.0, TrackPath.HALF_WIDTH * zoom)
-	draw_line(s - n, s + n, Color.WHITE, 3.0)
-	draw_line(s, s + d * maxf(24.0, 20.0 * zoom), Color.WHITE, 2.0)
-	draw_circle(s, 4.0, Color.WHITE)
+	draw_line(s - n, s + n, col, 3.0)
+	draw_line(s, s + d * maxf(24.0, 20.0 * zoom), col, 2.0)
+	draw_circle(s, 4.0, col)
 
 
 # --- actions ---------------------------------------------------------------------------
