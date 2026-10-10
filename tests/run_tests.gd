@@ -321,9 +321,9 @@ func test_ai_profile() -> void:
 		for x in v:
 			vmin = minf(vmin, x)
 		check(ok and vmin >= 12.0, "%s ai profile (min %.1f)" % [id, vmin])
-		for g in p.gaps():
-			var js := AiProfile.jump_speed(p, g[0], g[1])
-			check(js < AiProfile.VMAX, "%s gap jumpable at %.1f m/s" % [id, js])
+		for g in AiProfile.jumps(p):
+			var js := AiProfile.plan_jump(p, g[0], g[1], AiProfile.VMAX).x
+			check(js < AiProfile.VMAX and AiProfile.touchdown_speed(p, g[0], g[1], js) < INF, "%s jump %d planned at %.1f m/s" % [id, g[0], js])
 
 
 # --- custom track, loops, underpass ------------------------------------------------------

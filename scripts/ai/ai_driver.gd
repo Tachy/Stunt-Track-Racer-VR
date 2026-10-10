@@ -19,6 +19,10 @@ var tracker: CarTracker
 var path: TrackPath
 var profile: PackedFloat32Array
 var floors: PackedFloat32Array
+var jumps: Array             # AiProfile.jumps()
+var laps_total := 3
+## Boost units a lap's jump run-ups need (kept back from the straights).
+var jump_boost := 0
 var skill := 0.9
 var flags: Array = []
 var finished := false
@@ -32,6 +36,11 @@ const LANE_DAMP := 0.035      # rad per (m/s) of sideways drift
 const COMMIT_AHEAD := 70      # samples: before loops/jumps keep to the centre
 const COMMIT_SIDE_LAT := 2.0  # m: side by side in a loop/jump, each on its half
 const LOOP_LOOK := 5.0        # m: pure pursuit look-ahead inside a loop
+const FLOOR_LOOK := 1.0       # s: how far ahead the speed floors count
+const BOOST_FROM := 36.0      # m/s: jump floors above it are boosted to
+const RAMP_BOOST_SLOPE := 0.25  # sin of the climb from which a jump ramp is boosted up
+const JUMP_BOOST_UNITS := 8     # boost units kept back per such jump and lap
+const RAMP_BOOST_OVER := 0.7    # m/s: up a jump ramp the car lags behind, boost a bit past the floor
 
 
 func _init(t: CarTracker, prof: PackedFloat32Array, flo: PackedFloat32Array, driver_skill: float, driver_flags: Array) -> void:
@@ -42,6 +51,14 @@ func _init(t: CarTracker, prof: PackedFloat32Array, flo: PackedFloat32Array, dri
 	floors = flo
 	skill = driver_skill
 	flags = driver_flags
+	jumps = AiProfile.jumps(path)
+	for g in jumps:
+		var i0: int = g[0]
+		for k in 80:
+			var j := (i0 - k + path.n) % path.n
+			if floors[j] > BOOST_FROM or path.forward[j].y > RAMP_BOOST_SLOPE:
+				jump_boost += JUMP_BOOST_UNITS
+				break
 	lat = t.lateral()
 	lat_target = lat
 
@@ -68,7 +85,14 @@ func compute(dt: float, other: CarTracker) -> Dictionary:
 			target = minf(target, maxf(cap, 5.0))
 	if finished:
 		target *= 0.7
-	target = maxf(target, floors[look_i])
+	# jump run-ups: be at the floor early rather than late (the car lags
+	# behind its target, and on the ramp it can hardly gain any more)
+	var floor_v := maxf(floors[look_i], floors[path.index_at_s(s + maxf(v, 0.0) * FLOOR_LOOK)])
+	target = maxf(target, floor_v)
+	# above BOOST_FROM the engine alone hardly gains any more, nor on a
+	# steep ramp: a jump that needs more takes the boost
+	var fw := path.forward[tracker.idx]
+	var run_up_boost := floor_v > v + (-RAMP_BOOST_OVER if fw.y > RAMP_BOOST_SLOPE else 0.5) and (floor_v > BOOST_FROM or fw.y > RAMP_BOOST_SLOPE)
 
 	_choose_lane(gap, other_lat, other != null)
 	if _committed(look_i):
@@ -106,9 +130,16 @@ func compute(dt: float, other: CarTracker) -> Dictionary:
 
 	var err := target - v
 	var throttle := clampf(0.4 + err * 0.3, 0.0, 1.0) if err > -0.5 else 0.0
+	if run_up_boost:
+		throttle = 1.0     # (the boost scales with the throttle)
 	var brk := clampf((-err - 1.0) * 0.25, 0.0, 1.0)
 	return {"steer": steer, "throttle": throttle, "brake": brk,
-		"boost": err > 5.0 and car.boost_units > 0, "direct": true}
+		"boost": (err > 5.0 and car.boost_units > _boost_reserve() or run_up_boost) and car.boost_units > 0, "direct": true}
+
+
+## Boost units the jumps of the laps still to go need.
+func _boost_reserve() -> int:
+	return jump_boost * maxi(laps_total - tracker.laps_done(), 1)
 
 
 func _choose_lane(gap: float, other_lat: float, has_other: bool) -> void:
@@ -136,7 +167,7 @@ func _committed(i: int) -> bool:
 		var j := (i + k) % path.n
 		if path.loop_mask[j] == 1 or floors[j] > 0.0 and path.road[j] == 0:
 			return true
-	for g in path.gaps():
+	for g in jumps:
 		var d := (int(g[0]) - i + path.n) % path.n
 		if d < COMMIT_AHEAD:
 			return true
