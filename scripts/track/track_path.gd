@@ -43,6 +43,9 @@ const TUNNEL_HEIGHT := 6.0      # clear height above the road
 const TUNNEL_SIDE := 0.5        # extra width beyond the road on each side
 const TUNNEL_ROOF := 0.6        # roof thickness
 const WAVE_REACH := 20.0        # a wave fades out over this many metres each way
+## Road steeper than 70 deg (tan 70 deg) counts as a wall: drawn black, and
+## the crane keeps JUMP_RUNUP away from it as from a jump.
+const WALL_STEEP_SLOPE := 2.7475
 
 var def: Dictionary
 var pieces: Array = []
@@ -833,12 +836,13 @@ func surface_height(s: float, t: float, lat := 0.0) -> float:
 
 
 ## Where the crane puts a car back that left the road at s: right there, but
-## at least JUMP_RUNUP before a jump ahead (or one it was on), before a tunnel,
+## at least JUMP_RUNUP before a jump or a black wall (steeper than 70 deg) ahead
+## (or one it was on), before a tunnel,
 ## and never on a loop, a gap, a drawbridge, a deck, under another road or on
 ## a piece marked "no crane". Open cuts are fine: the crane lowers the car in.
 func recovery_s(s: float) -> float:
 	var r := wrap_s(s)
-	var jumps := gaps()
+	var jumps := crane_jumps()
 	for _guard in 64:
 		var nr := _recovery_back(r, jumps)
 		if is_equal_approx(nr, r):
@@ -875,7 +879,7 @@ func _crane_spot(i: int) -> bool:
 		return false
 	if road[i] != 1 or tunnel[i] == 1 or loop_mask[i] == 1 or deck[i] == 1 or bridge_zone[i] == 1:
 		return false
-	if (pit_mask.size() == n and pit_mask[i] == 1) or (step.size() == n and step[i] == 1):
+	if (pit_mask.size() == n and pit_mask[i] == 1) or (step.size() == n and step[i] == 1) or wall_steep(i):
 		return false
 	return not _covered(i)
 
@@ -890,6 +894,51 @@ func _covered(i: int) -> bool:
 			if Vector2(center[j].x - c.x, center[j].z - c.z).length() < reach + half_width[j]:
 				return true
 	return false
+
+
+## Whether the road from sample i to the next is steeper than 70 deg
+## (WALL_STEEP_SLOPE): a wall (not loops, not the vertical walls themselves).
+func wall_steep(i: int) -> bool:
+	var j := (i + 1) % n
+	if loop_mask[i] == 1 or loop_mask[j] == 1 or step[i] == 1:
+		return false
+	var d := Vector2(center[j].x - center[i].x, center[j].z - center[i].z).length()
+	return absf(center[j].y - center[i].y) > WALL_STEEP_SLOPE * maxf(d, 0.01)
+
+
+## The walls - black (wall_steep) and vertical ones - as jumps for the
+## crane, [take-off, landing] sample pairs: a wall down together with the
+## wall up after it (its landing side: the hole between is part of the
+## jump), else a wall on its own.
+func wall_jumps() -> Array:
+	var runs := []          # [first sample, sample after it, down]
+	var i := 0
+	while i < n:
+		if wall_steep(i) or step[i] == 1:
+			var j := i
+			while j + 1 < n and (wall_steep(j + 1) or step[j + 1] == 1):
+				j += 1
+			var after := (j + 1) % n
+			runs.append([i, after, center[after].y < center[i].y])
+			i = j + 1
+		else:
+			i += 1
+	var out := []
+	var k := 0
+	while k < runs.size():
+		if runs[k][2] and k + 1 < runs.size() and not runs[k + 1][2]:
+			out.append([runs[k][0], runs[k + 1][1]])
+			k += 2
+		else:
+			out.append([runs[k][0], runs[k][1]])
+			k += 1
+	return out
+
+
+## Everything the crane keeps JUMP_RUNUP away from (and never sets down
+## on): the gaps, pits and ski jumps, and the walls.
+func crane_jumps() -> Array:
+	return gaps() + wall_jumps()
 
 
 ## Returns [takeoff_index, landing_index] pairs for every gap.

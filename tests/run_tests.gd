@@ -15,7 +15,7 @@ func _init() -> void:
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_wall_point_roles", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_crane_before_black_walls", "test_wall_point_roles", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -150,7 +150,7 @@ func test_recovery() -> void:
 	var cuts := 0
 	for id in TrackLibrary.TRACKS:
 		var p := TrackPath.new(TrackLibrary.get_def(id))
-		var jumps := p.gaps()
+		var jumps := p.crane_jumps()
 		var bad := ""
 		var runup := true
 		var exact := true
@@ -1871,6 +1871,29 @@ func test_wall_point_roles() -> void:
 	m.move_point(lw, 100.0, 0.0)
 	m.move_point(lw, 100.0, 3.0)
 	check(near(m.points()[lw][1], 0.0), "under a 4 m top: the yellow point stays on the ground (%s)" % [m.points()[lw]])
+
+
+## A hole between a black drop and a black rise (steeper than 70 deg): one
+## jump - the crane puts the car down JUMP_RUNUP before the drop (the
+## take-off), never in the hole or on a wall, however wide the hole is.
+func test_crane_before_black_walls() -> void:
+	for wide in [false, true]:
+		var x_up := 540.0 if wide else 340.0
+		var m := _editor_oval()
+		m.move_point(0, 0.0, 20.0)
+		m.heights = [[300.0, 20.0, true, 0], [304.0, 5.0, true, 0], [x_up, 5.0, true, 0], [x_up + 4.0, 20.0, true, 0]]
+		m._tidy_heights()
+		var p := TrackPath.new(m.to_def("t"))
+		var walls := p.wall_jumps()
+		check(walls.size() == 1, "drop and rise: one jump (%s)" % [walls])
+		var s_drop := p.s_arr[p._index_at_x(300.0)]
+		var ok := true
+		for x in [290.0, 302.0, 320.0, x_up - 10.0, x_up + 2.0]:
+			var rs := p.recovery_s(p.s_arr[p._index_at_x(x)])
+			ok = ok and fposmod(s_drop - rs, p.total_length) >= TrackPath.JUMP_RUNUP - 0.5 and not p.wall_steep(p.index_at_s(rs))
+		check(ok, "off before / in the %s hole: put down 200 m before the drop" % ("wide" if wide else "narrow"))
+		var after := p.s_arr[p._index_at_x(x_up + 60.0)]
+		check(near(p.recovery_s(after), after, 0.5), "after the rise: right there")
 
 
 func test_custom_track_delete() -> void:
