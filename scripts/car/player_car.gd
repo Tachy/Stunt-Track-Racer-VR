@@ -171,6 +171,11 @@ func hold(on: bool) -> void:
 	freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
 	freeze = on
 	_skip_impact = 3
+	# on the crane: drawn at its exact pose each step, as the chains, the
+	# hook and the view are (interpolated it would trail them and shake)
+	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF if on else Node.PHYSICS_INTERPOLATION_MODE_INHERIT
+	if not on:
+		reset_physics_interpolation()
 	if not on:
 		# dropped from rest: a held (kinematic) car that was moved picks up
 		# the implied velocity of the move, which must not carry over

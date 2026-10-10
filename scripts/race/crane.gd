@@ -382,6 +382,9 @@ func step(dt: float) -> void:
 		_omega = 0.0 if absf(_omega) <= dw else _omega - signf(_omega) * dw
 		_phi += _omega * dt
 	_update_car()
+	# chains to the car's new pose in the same step (not one behind)
+	_pin_chains()
+	_draw_links()
 	# the trolley pulls away: the car hangs back (towards where it came
 	# from), then swings through below the trolley (the rest position)
 	if _phi * _side > deg_to_rad(0.5):
@@ -537,9 +540,8 @@ func _physics_process(dt: float) -> void:
 		var x := up.cross(fwd).normalized()
 		if x.length() > 0.5:
 			_hook.global_transform = Transform3D(Basis(x, up, x.cross(up)), hook + up * 0.15)
-	elif _mode == "lift":
-		_pin_chains()
-	_draw_links()
+	if _mode != "lift":
+		_draw_links()       # (lifting: drawn by step(), with the car)
 	_drive_sound(dt)
 
 
