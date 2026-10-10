@@ -40,7 +40,7 @@ var crane: Crane
 var engine: EngineSynth
 var wind: WindSynth
 var _wind_pos := Vector3.INF      # car position last frame (its speed through the air)
-var dirt: DirtSynth
+var squeal: TyreSquealSynth
 var ptrack: CarTracker
 
 # opponent: identical physics, AI driver
@@ -50,7 +50,7 @@ var opp_track: CarTracker
 var opp_ai: AiDriver
 var opp_crane: Crane
 var opp_engine: EngineSynth
-var opp_dirt: DirtSynth
+var opp_squeal: TyreSquealSynth
 var opp_driver := {}
 var opp_state := "held"       # held, racing, falling, craned, finished, wrecked
 var opp_state_time := 0.0
@@ -170,8 +170,8 @@ func _ready() -> void:
 	car.add_child(engine)
 	wind = WindSynth.new().setup(-6.0)
 	car.add_child(wind)
-	dirt = DirtSynth.new().setup(false, -4.0)
-	car.add_child(dirt)
+	squeal = TyreSquealSynth.new().setup(false, -8.0)
+	car.add_child(squeal)
 	car.landed.connect(_on_landed)
 	car.impacted.connect(_on_impact)
 	car.landed.connect(func(_v: float) -> void: _stall_on_ground(car, ptrack))
@@ -215,8 +215,8 @@ func _ready() -> void:
 		opp_car.add_child(opp_model)
 		opp_engine = EngineSynth.new().setup(true, -2.0)
 		opp_car.add_child(opp_engine)
-		opp_dirt = DirtSynth.new().setup(true, 0.0)
-		opp_car.add_child(opp_dirt)
+		opp_squeal = TyreSquealSynth.new().setup(true, -2.0)
+		opp_car.add_child(opp_squeal)
 		opp_car.damage.wrecked.connect(_on_opponent_wrecked)
 		if not online:
 			opp_car.landed.connect(func(_v: float) -> void: _stall_on_ground(opp_car, opp_track))
@@ -903,7 +903,7 @@ func _process(delta: float) -> void:
 	_update_wind(delta)
 	engine.muted = car.is_wrecked()
 	engine.running = car.engine_on
-	_update_dirt(dirt, car)
+	_update_squeal(squeal, car)
 	if opp_car:
 		var oin: Dictionary = opp_car.input
 		opp_engine.rpm = clampf(absf(opp_car.speed) / opp_car.tuning.top_speed, 0.0, 1.0) * 0.85 + float(oin.get("throttle", 0.0)) * 0.15
@@ -911,13 +911,13 @@ func _process(delta: float) -> void:
 		opp_engine.boost = opp_car.boosting
 		opp_engine.muted = opp_car.is_wrecked()
 		opp_engine.running = opp_car.engine_on
-		_update_dirt(opp_dirt, opp_car)
+		_update_squeal(opp_squeal, opp_car)
 
 
-## Sliding tyres on dirt: silent below 0.3 m/s sliding, full at ~6 m/s.
-func _update_dirt(d: DirtSynth, c: PlayerCar) -> void:
-	d.slide = clampf((c.slip_speed - 0.3) / 6.0, 0.0, 1.0)
-	d.speed = c.linear_velocity.length()
+## Sliding tyres squeal, each wheel by its own sliding speed and load.
+func _update_squeal(d: TyreSquealSynth, c: PlayerCar) -> void:
+	d.slide = c.wheel_slide
+	d.load = c.wheel_load
 	d.muted = c.freeze or not c.visible
 
 

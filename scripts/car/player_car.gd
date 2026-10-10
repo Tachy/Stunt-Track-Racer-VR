@@ -69,8 +69,12 @@ var wheel_omega := PackedFloat32Array([0, 0, 0, 0])
 ## Distance rolled by the left front wheel (debug check: equals distance driven).
 var rolled_distance := 0.0
 ## How hard the tyres slide (m/s, mean over the 4 wheels): sliding speed of
-## each wheel that is asked for more than its grip. Drives the dirt sound.
+## each wheel that is asked for more than its grip.
 var slip_speed := 0.0
+## Per wheel: its sliding speed (m/s) and the load on it (N, 0 in the air) -
+## what drives its squeal.
+var wheel_slide := PackedFloat32Array([0, 0, 0, 0])
+var wheel_load := PackedFloat32Array([0, 0, 0, 0])
 
 var _boost_timer := 0.0
 var _prev_vel := Vector3.ZERO
@@ -271,6 +275,8 @@ func _physics_process(dt: float) -> void:
 		if hit.is_empty():
 			wheel_comp[w] = 0.0
 			wheel_contact[w] = false
+			wheel_slide[w] = 0.0
+			wheel_load[w] = 0.0
 			_place_wheel_box(w, 0.0)
 			var om := wheel_omega[w] * maxf(0.0, 1.0 - 0.4 * dt)
 			if w >= 2:
@@ -324,12 +330,15 @@ func _physics_process(dt: float) -> void:
 			f_long += drive / rear_contacts
 		if brk > 0.0:
 			f_long -= clampf(v_long * 2.0, -1.0, 1.0) * tuning.brake_force * brk * 0.25
+		wheel_slide[w] = 0.0
 		if limit > 0.0:
-			# beyond the grip the knobs scrub over the ground (sound only)
+			# beyond the grip the tyre slides over the road (sound only)
 			var sat := Vector2(f_long, f_lat).length() / limit
 			var lat_slide := absf(v_lat) * smoothstep(0.85, 1.25, sat)
 			var long_slide := absf(v_long) * clampf(1.0 - limit / maxf(absf(f_long), 1.0), 0.0, 1.0) * 0.5
-			slip_sum += sqrt(lat_slide * lat_slide + long_slide * long_slide)
+			wheel_slide[w] = sqrt(lat_slide * lat_slide + long_slide * long_slide)
+			slip_sum += wheel_slide[w]
+		wheel_load[w] = load
 		if tuning.traction_control and limit > 0.0:
 			var lat_share := minf(absf(f_lat) / limit, 1.0)
 			var avail := limit * sqrt(1.0 - TC_LATERAL_RESERVE * lat_share * lat_share)

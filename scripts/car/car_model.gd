@@ -11,16 +11,19 @@ const WHEEL_POS := [Vector3(-1.1, 0.0, -1.75), Vector3(1.1, 0.0, -1.75),
 		Vector3(-1.1, 0.0, 1.15), Vector3(1.1, 0.0, 1.15)]
 const WHEEL_R := [0.42, 0.42, 0.48, 0.48]
 const WHEEL_W := [0.30, 0.30, 0.44, 0.44]
-## Tyre spikes (visual only): edge of the square base, height above the
-## tyre, spacing around the tyre and across its width.
 ## Visual roundness of tyre and rim (the physics wheel is an exact circle:
 ## a ray of length WHEEL_R).
 const TYRE_SEGMENTS := 48
 const RIM_SEGMENTS := 32
-const SPIKE_SIZE := 0.05
-const SPIKE_HEIGHT := 0.035
-const SPIKE_PITCH := 0.15
-const SPIKE_ROW_PITCH := 0.14
+## Road tyre tread (visual only - the physics wheel is the bare tyre): block
+## height, pitch around the tyre, groove width; the blocks of the inner
+## rows slant towards the middle (a directional V), the shoulder blocks are
+## cut straight across.
+const TREAD_DEPTH := 0.012
+const TREAD_PITCH := 0.085
+const TREAD_GROOVE := 0.014
+const TREAD_SLANT := 0.55          # circumferential offset per lateral metre (V)
+const TREAD := Color("#2b2b2b")    # worn rubber of the block tops
 ## Mount height above the road at rest (rest length - static sag + radius).
 const RIDE_HEIGHT := 0.80
 
@@ -306,6 +309,48 @@ static func _place(mi: MeshInstance3D, a: Vector3, b: Vector3) -> void:
 	mi.transform = Transform3D(Basis.looking_at(d / length, up) * Basis.from_scale(Vector3(t, t, length)), a)
 
 
+## Tread of a road tyre of radius r and width w (axis along x): four rows of
+## blocks between three circumferential grooves - the two inner rows
+## slanted into a V, the shoulders cut straight across - on the tyre's
+## surface.
+func _tread(kit: MeshKit, r: float, w: float) -> void:
+	var base := r * cos(PI / TYRE_SEGMENTS) - 0.002   # just inside the tyre's flats
+	var top := r + TREAD_DEPTH
+	var n := int(round(TAU * r / TREAD_PITCH))
+	var g := TREAD_GROOVE
+	var h := w * 0.5
+	# rows across the width: [x0, x1, slant, block share of the pitch]
+	var rows := [[-h, -0.26 * w - g * 0.5, 0.0, 0.78], [-0.26 * w + g * 0.5, -g * 0.5, 1.0, 0.82],
+		[g * 0.5, 0.26 * w - g * 0.5, -1.0, 0.82], [0.26 * w + g * 0.5, h, 0.0, 0.78]]
+	for row in rows:
+		var x0: float = row[0]
+		var x1: float = row[1]
+		var slant: float = float(row[2]) * TREAD_SLANT / r     # radians per metre across
+		var share: float = row[3]
+		for k in n:
+			var a0 := TAU * float(k) / n
+			var a1 := a0 + TAU / n * share
+			# offset of the edges with x (V): the inner edge leads
+			var d0 := slant * absf(x0)
+			var d1 := slant * absf(x1)
+			_block(kit, [[x0, a0 + d0], [x1, a0 + d1], [x1, a1 + d1], [x0, a1 + d0]], base, top)
+
+
+## One tread block: corners [x, angle] on the tyre, from radius r0 up to r1.
+static func _block(kit: MeshKit, c: Array, r0: float, r1: float) -> void:
+	var lo := []
+	var hi := []
+	for p in c:
+		var x: float = p[0]
+		var a: float = p[1]
+		lo.append(Vector3(x, cos(a) * r0, sin(a) * r0))
+		hi.append(Vector3(x, cos(a) * r1, sin(a) * r1))
+	kit.quad(hi[0], hi[1], hi[2], hi[3], TREAD)
+	for i in 4:
+		var j := (i + 1) % 4
+		kit.quad(lo[i], lo[j], hi[j], hi[i], Palette.TYRE)
+
+
 func _build_wheels() -> void:
 	for w in 4:
 		var pos: Vector3 = WHEEL_POS[w]
@@ -322,19 +367,7 @@ func _build_wheels() -> void:
 		var side := signf(pos.x)
 		kit.cylinder(Vector3(side * (width * 0.5 + 0.005), 0, 0), Vector3.RIGHT, r * 0.6, 0.02, RIM_SEGMENTS, Palette.HUB)
 		kit.cylinder(Vector3(side * (width * 0.5 + 0.02), 0, 0), Vector3.RIGHT, r * 0.18, 0.04, 6, Palette.HUB.darkened(0.3))
-		# spikes: radial boxes in staggered rows (visual only - the wheel's
-		# physics radius is the bare tyre, the spikes have no hitbox)
-		var rows := maxi(2, int(round(width / SPIKE_ROW_PITCH)))
-		var per_row := int(round(TAU * r / SPIKE_PITCH))
-		var base := r * cos(PI / TYRE_SEGMENTS) - 0.005   # just inside the tyre's flats
-		var top := r + SPIKE_HEIGHT
-		for j in rows:
-			var x := (float(j) - (rows - 1) * 0.5) * width / rows
-			for k in per_row:
-				var a := TAU * (float(k) + 0.5 * (j % 2)) / per_row
-				var mid := (base + top) * 0.5
-				kit.box(Vector3(x, cos(a) * mid, sin(a) * mid), Vector3(SPIKE_SIZE, top - base, SPIKE_SIZE),
-					Palette.TYRE.lightened(0.25), Basis(Vector3.RIGHT, a))
+		_tread(kit, r, width)
 		spinner.add_child(kit.build_instance())
 		wheel_pivots.append(pivot)
 		wheel_spinners.append(spinner)
