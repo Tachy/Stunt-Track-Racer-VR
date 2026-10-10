@@ -24,6 +24,10 @@ var hang_timer := 0.0
 var left_s := -1.0          # where the car left the road (-1: still on it)
 const STUCK_TIME := 2.5
 const HANG_TIME := 2.0     # no wheel on the ground and not moving: wedged
+## Falling freely off the road the crane waits for the touchdown (and its
+## damage) - at most this long (a hole without a bottom).
+const MAX_FALL_TIME := 6.0
+var fall_timer := 0.0
 
 
 func _init(p: TrackPath, c: PlayerCar, start_s: float) -> void:
@@ -79,10 +83,17 @@ func check_off(dt: float) -> bool:
 		if not car.off_road and left_s < 0.0:
 			left_s = s
 		car.off_road = true
-	if car.on_ground_plane or below:
+	# falling freely (no wheel on anything, still moving): first the
+	# touchdown and its damage, then the crane
+	var falling := car.grounded == 0 and car.linear_velocity.length() > 1.0
+	if car.on_ground_plane or below and not falling:
 		off_timer += dt
+		fall_timer = 0.0
+	elif below:
+		fall_timer += dt        # (off_timer keeps its count: bouncing)
 	else:
 		off_timer = 0.0
+		fall_timer = 0.0
 	if car.global_transform.basis.y.y < 0.25 and car.linear_velocity.length() < 4.0:
 		flip_timer += dt
 	else:
@@ -97,8 +108,9 @@ func check_off(dt: float) -> bool:
 		hang_timer += dt
 	else:
 		hang_timer = 0.0
-	if off_timer > OFF_TRACK_TIME or flip_timer > FLIP_TIME or stuck_timer > STUCK_TIME or hang_timer > HANG_TIME:
+	if off_timer > OFF_TRACK_TIME or flip_timer > FLIP_TIME or stuck_timer > STUCK_TIME or hang_timer > HANG_TIME 			or fall_timer > MAX_FALL_TIME:
 		off_timer = 0.0
+		fall_timer = 0.0
 		flip_timer = 0.0
 		stuck_timer = 0.0
 		hang_timer = 0.0
@@ -119,6 +131,7 @@ func move_to(rs: float) -> void:
 	s = rs
 	idx = path.index_at_s(rs)
 	off_timer = 0.0
+	fall_timer = 0.0
 	flip_timer = 0.0
 	stuck_timer = 0.0
 	hang_timer = 0.0
