@@ -2235,6 +2235,13 @@ func test_speed_signs() -> void:
 	var kit := MeshKit.new()
 	SpeedSigns.plate(kit, Vector3.ZERO, Vector3.RIGHT, Vector3.UP, Vector3.BACK, 120)
 	check(kit.verts.size() > 300, "plate built")
+	check(kit.colors.has(SpeedSigns.BLUE) and not kit.colors.has(SpeedSigns.US_YELLOW), "km/h: Zeichen 380, blue")
+	var us := MeshKit.new()
+	SpeedSigns.plate(us, Vector3.ZERO, Vector3.RIGHT, Vector3.UP, Vector3.BACK, 75, null, true)
+	check(us.colors.has(SpeedSigns.US_YELLOW) and us.colors.has(SpeedSigns.US_BLACK) and not us.colors.has(SpeedSigns.BLUE), "mph: the US plaque, yellow and black")
+	check(us.verts.size() > kit.verts.size() * 0.8, "mph: figures and MPH drawn (%d vertices)" % us.verts.size())
+	for ch in "MPH":
+		check(not SpeedSigns.letter_lines(ch).is_empty(), "letter %s" % ch)
 
 
 ## Tyre squeal: friction-induced vibration per wheel - silent while

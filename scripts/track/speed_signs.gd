@@ -10,6 +10,9 @@ extends Node3D
 ## tunnel (and a cut) it is fixed to the right wall instead, as tunnel signs
 ## are, reaching over the road at a height cars pass under - in a tunnel lit
 ## from inside (its face glows).
+## With the speedometer in mph the plate is the US advisory speed plaque
+## instead (MUTCD W13-1P): yellow, a black edge band, the figures and "MPH"
+## below them in black.
 
 const SIGN_DIST := 150.0          # m before the take-off
 const SIGN_SHIFT := 80.0          # m it may move further back for room
@@ -23,6 +26,8 @@ const ARM_DROP := 0.35            # arm this far below the road's edge
 const CLEARANCE := 2.2            # m from the edge up to the plate's lower edge
 const BAR := 0.14                 # arm and post (square section)
 const BLUE := Color("#005387")    # RAL 5017 traffic blue
+const US_YELLOW := Color("#f7c600")   # US highway sign yellow
+const US_BLACK := Color("#141414")
 const STEEL := Color("#9a9ea3")
 ## On a tunnel wall: lower edge of the plate this high over the road, the
 ## plate this far off the wall (brackets).
@@ -44,6 +49,11 @@ void fragment() {
 const FIG_W := 0.56
 const STROKE := 1.0 / 7.0
 const FIG_GAP := 0.12             # between two figures
+## Width of the letters of "MPH" (height 1), in the figures' stroke.
+const LETTER_W := {"M": 0.72, "P": 0.56, "H": 0.6}
+
+## US plaque (mph) instead of Zeichen 380.
+var _us := false
 
 
 ## [sample of the sign, take-off speed (m/s)] for every sign of the track.
@@ -78,6 +88,7 @@ static func shown(v: float, kmh: bool) -> int:
 
 func build(path: TrackPath, kmh: bool) -> SpeedSigns:
 	name = "SpeedSigns"
+	_us = not kmh
 	var kit := MeshKit.new()
 	var glow := MeshKit.new()
 	for sp in spots(path):
@@ -114,7 +125,7 @@ func _on_wall(kit: MeshKit, face_kit: MeshKit, path: TrackPath, i: int, value: i
 	for k in [-0.3, 0.3]:
 		var at: Vector3 = wall + up * (mid + float(k) * PLATE) + behind
 		kit.bar(at, at - r * (WALL_GAP + PLATE * 0.3), BAR * 0.6, STEEL)
-	plate(kit, c, r, up, -fwd, value, face_kit)
+	plate(kit, c, r, up, -fwd, value, face_kit, _us)
 
 
 ## One sign at sample i: gantry and plate.
@@ -128,45 +139,59 @@ func _gantry(kit: MeshKit, path: TrackPath, i: int, value: int) -> void:
 	kit.bar(foot - Vector3.UP * BAR * 0.5, top, BAR, STEEL)
 	# the plate on the post's side facing the traffic
 	var c := foot + Vector3.UP * (ARM_DROP + CLEARANCE + PLATE * 0.5) - fwd * (BAR * 0.5 + PLATE_DEPTH * 0.5)
-	plate(kit, c, r, Vector3.UP, -fwd, value)
+	plate(kit, c, r, Vector3.UP, -fwd, value, null, _us)
 
 
-## A Zeichen 380 plate centred at c: x right (as the driver sees it), y up,
-## n its face's normal (towards the driver).
-static func plate(kit: MeshKit, c: Vector3, x: Vector3, y: Vector3, n: Vector3, value: int, face_kit: MeshKit = null) -> void:
+## A Zeichen 380 plate (us: the US plaque) centred at c: x right (as the
+## driver sees it), y up, n its face's normal (towards the driver).
+static func plate(kit: MeshKit, c: Vector3, x: Vector3, y: Vector3, n: Vector3, value: int, face_kit: MeshKit = null, us := false) -> void:
 	kit.box(c, Vector3(PLATE, PLATE, PLATE_DEPTH), STEEL, Basis(x, y, n))
 	if face_kit != null:
 		kit = face_kit
+	var bg := US_YELLOW if us else BLUE
+	var ink := US_BLACK if us else Palette.WHITE
 	var face := c + n * (PLATE_DEPTH * 0.5 + 0.005)
 	var h := PLATE * 0.5
-	_rect(kit, face, x, y, n, -h, -h, h, h, BLUE)
-	# white edge band, inset like the original
+	_rect(kit, face, x, y, n, -h, -h, h, h, bg)
+	# edge band, inset like the originals
 	var o := PLATE * 0.035
 	var b := PLATE * 0.03
 	var f2 := face + n * 0.004
-	_rect(kit, f2, x, y, n, -h + o, -h + o, h - o, -h + o + b, Palette.WHITE)
-	_rect(kit, f2, x, y, n, -h + o, h - o - b, h - o, h - o, Palette.WHITE)
-	_rect(kit, f2, x, y, n, -h + o, -h + o, -h + o + b, h - o, Palette.WHITE)
-	_rect(kit, f2, x, y, n, h - o - b, -h + o, h - o, h - o, Palette.WHITE)
-	# the figures
+	_rect(kit, f2, x, y, n, -h + o, -h + o, h - o, -h + o + b, ink)
+	_rect(kit, f2, x, y, n, -h + o, h - o - b, h - o, h - o, ink)
+	_rect(kit, f2, x, y, n, -h + o, -h + o, -h + o + b, h - o, ink)
+	_rect(kit, f2, x, y, n, h - o - b, -h + o, h - o, h - o, ink)
+	# the figures (US: higher up, "MPH" under them)
 	var text := str(value)
 	var k := text.length()
 	var span := k * FIG_W + (k - 1) * FIG_GAP
-	var fh := minf(PLATE * 0.5, PLATE * 0.78 / span)
+	var fh := minf(PLATE * (0.42 if us else 0.5), PLATE * 0.78 / span)
+	var fy := PLATE * 0.1 - fh * 0.5 if us else -fh * 0.5
 	var x0 := -span * fh * 0.5
 	for ch in text:
-		_figure(kit, f2, x, y, n, int(ch), x0, -fh * 0.5, fh)
+		_strokes(kit, f2, x, y, n, figure_lines(int(ch)), x0, fy, fh, ink)
 		x0 += (FIG_W + FIG_GAP) * fh
+	if us:
+		var lh := PLATE * 0.17
+		var lspan := 0.0
+		for ch in "MPH":
+			lspan += float(LETTER_W[ch]) + FIG_GAP
+		lspan -= FIG_GAP
+		var lx := -lspan * lh * 0.5
+		for ch in "MPH":
+			_strokes(kit, f2, x, y, n, letter_lines(ch), lx, -PLATE * 0.34, lh, ink)
+			lx += (float(LETTER_W[ch]) + FIG_GAP) * lh
 
 
 static func _rect(kit: MeshKit, o: Vector3, x: Vector3, y: Vector3, n: Vector3, x0: float, y0: float, x1: float, y1: float, col: Color) -> void:
 	kit.quad(o + x * x0 + y * y0, o + x * x1 + y * y0, o + x * x1 + y * y1, o + x * x0 + y * y1, col)
 
 
-## Figure d (0..9) with its lower left corner at (fx, fy) of the plate, height fh.
-static func _figure(kit: MeshKit, o: Vector3, x: Vector3, y: Vector3, n: Vector3, d: int, fx: float, fy: float, fh: float) -> void:
+## A glyph's stroke centre lines (figure_lines(), letter_lines()) with its
+## lower left corner at (fx, fy) of the plate, height fh, in col.
+static func _strokes(kit: MeshKit, o: Vector3, x: Vector3, y: Vector3, n: Vector3, lines: Array, fx: float, fy: float, fh: float, col: Color) -> void:
 	var w := STROKE * fh
-	for line in figure_lines(d):
+	for line in lines:
 		var pts: PackedVector2Array = line
 		var closed := pts.size() > 2 and pts[0].distance_to(pts[pts.size() - 1]) < 1e-4
 		var p3 := []
@@ -177,18 +202,18 @@ static func _figure(kit: MeshKit, o: Vector3, x: Vector3, y: Vector3, n: Vector3
 			var b: Vector3 = p3[s + 1]
 			var along := (b - a).normalized()
 			var side := n.cross(along).normalized() * (w * 0.5)
-			kit.quad(a - side, b - side, b + side, a + side, Palette.WHITE)
+			kit.quad(a - side, b - side, b + side, a + side, col)
 			# round joints (none at the open ends: DIN cuts them square)
 			if s > 0 or closed:
-				_disc(kit, a, x, y, w * 0.5)
+				_disc(kit, a, x, y, w * 0.5, col)
 
 
-static func _disc(kit: MeshKit, c: Vector3, x: Vector3, y: Vector3, r: float) -> void:
+static func _disc(kit: MeshKit, c: Vector3, x: Vector3, y: Vector3, r: float, col: Color) -> void:
 	var m := 10
 	for k in m:
 		var a0 := TAU * k / m
 		var a1 := TAU * (k + 1) / m
-		kit.tri(c, c + (x * cos(a0) + y * sin(a0)) * r, c + (x * cos(a1) + y * sin(a1)) * r, Palette.WHITE)
+		kit.tri(c, c + (x * cos(a0) + y * sin(a0)) * r, c + (x * cos(a1) + y * sin(a1)) * r, col)
 
 
 ## Points of an arc around (cx, cy), radius r, from angle a0 to a1 (deg).
@@ -198,6 +223,31 @@ static func _arc(cx: float, cy: float, r: float, a0: float, a1: float, steps := 
 		var a := deg_to_rad(lerpf(a0, a1, float(k) / steps))
 		out.append(Vector2(cx + r * cos(a), cy + r * sin(a)))
 	return out
+
+
+## The strokes of the letters of "MPH", as the figures' (box of height 1,
+## width LETTER_W).
+static func letter_lines(ch: String) -> Array:
+	var h := STROKE * 0.5
+	var w: float = LETTER_W[ch]
+	var x0 := h
+	var x1 := w - h
+	var y0 := h
+	var y1 := 1.0 - h
+	match ch:
+		"M":
+			return [PackedVector2Array([Vector2(x0, y0), Vector2(x0, y1), Vector2(w * 0.5, 0.32), Vector2(x1, y1), Vector2(x1, y0)])]
+		"P":
+			var ym := 0.47
+			var r := (y1 - ym) * 0.5
+			var p := PackedVector2Array([Vector2(x0, y0), Vector2(x0, y1), Vector2(x1 - r, y1)])
+			p.append_array(_arc(x1 - r, ym + r, r, 90.0, -90.0))
+			p.append(Vector2(x0, ym))
+			return [p]
+		"H":
+			return [PackedVector2Array([Vector2(x0, y0), Vector2(x0, y1)]), PackedVector2Array([Vector2(x1, y0), Vector2(x1, y1)]),
+				PackedVector2Array([Vector2(x0, 0.5), Vector2(x1, 0.5)])]
+	return []
 
 
 ## The strokes of DIN 1451 figure d: centre lines in a box of height 1 and
