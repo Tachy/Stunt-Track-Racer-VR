@@ -87,7 +87,7 @@ upload has no track along.
 | 29 | i8 | steering | road-wheel angle / 45° × 127 |
 | 30 | u8 | throttle | × 255 |
 | 31 | u8 | brake | × 255 |
-| 32 | u8 | flags | bit0 boosting, bit1 reverse, bit2 held (crane), bit3 airborne, bits 4–6 race state |
+| 32 | u8 | flags | bit0 boosting, bit1 reverse, bit2 held (crane), bit3 airborne, bits 4–6 race state, bit7 parachute attached (the server passes it on unread) |
 | 33 | u8 | boost units | |
 | 34 | u8 | crack | × 255 |
 | 35 | u8 | holes | |

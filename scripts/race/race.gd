@@ -79,12 +79,24 @@ var message := ""
 ## Jump assist of the player (its button held in the last metres before a
 ## take-off: steering onto the road, then straight).
 var _align: JumpAlign
-## The player's parachute (its button in the air: fired; cut away after the
-## touchdown; again on the next flight).
-var _chute: Parachute
-var _chute_fired := false        # in this flight already
-var _chute_ground := 0.0         # s on the ground since
+## The parachutes of the player (its button in the air) and the opponent
+## (the AI's rule; online: as the other game sends it).
+var _chute: ChuteSlot
+var _opp_chute: ChuteSlot
 const CHUTE_CUT_TIME := 0.3
+
+
+## A car's parachute in the race: fired once a flight, cut away
+## CHUTE_CUT_TIME after the touchdown.
+class ChuteSlot:
+	var chute: Parachute
+	var fired := false        # in this flight already
+	var ground := 0.0         # s on the ground since
+
+	func _init(c: Parachute) -> void:
+		chute = c
+
+
 ## A car this far (m) below the road beside it has fallen off it.
 const FALL_BELOW := 1.5
 var opp_finished_first := false
@@ -181,8 +193,9 @@ func _ready() -> void:
 
 	crane = Crane.new()
 	add_child(crane)
-	_chute = Parachute.new(car)
-	add_child(_chute)
+	var pc := Parachute.new(car)
+	add_child(pc)
+	_chute = ChuteSlot.new(pc)
 
 	car.verbose = true
 	var profile := AiProfile.compute(path, super_league)
@@ -223,6 +236,10 @@ func _ready() -> void:
 			opp_car.impacted.connect(func(_v: float) -> void: _stall_on_ground(opp_car, opp_track))
 		opp_crane = Crane.new()
 		add_child(opp_crane)
+		var opc := Parachute.new(opp_car)
+		opc.visual_only = online
+		add_child(opc)
+		_opp_chute = ChuteSlot.new(opc)
 		opp_track = CarTracker.new(path, opp_car, START_S)
 		if not online:
 			_crane_lift(opp_car, opp_crane, START_S, -lat, 1.0)
@@ -325,26 +342,55 @@ func _crane_step(c: PlayerCar, cr: Crane, dt: float) -> void:
 			c.engine_on = true
 
 
-## The parachute: fired in the air with its button (once a flight), cut away
-## CHUTE_CUT_TIME after the touchdown, and when the race leaves "racing"
-## (crane, finish); its line pulls the car before the car's own step.
-func _chute_step(dt: float) -> void:
-	if car.grounded > 0 or car.freeze:
-		_chute_ground += dt
-		if _chute_ground > CHUTE_CUT_TIME:
-			_chute.cut()
-			_chute_fired = false
+## Car c's parachute: fired in the air when `want` (once a flight), cut
+## away CHUTE_CUT_TIME after the touchdown, and when the car is no longer
+## `racing` (crane, finish); its line pulls the car before the car's own
+## step. True when it was fired just now.
+func _chute_step(c: PlayerCar, slot: ChuteSlot, racing: bool, want: bool, dt: float) -> bool:
+	var fired := false
+	if c.grounded > 0 or c.freeze:
+		slot.ground += dt
+		if slot.ground > CHUTE_CUT_TIME:
+			slot.chute.cut()
+			slot.fired = false
 	else:
-		_chute_ground = 0.0
-	if state != "racing":
-		_chute.cut()
-	elif not autopilot and not _chute_fired and car.grounded == 0 and not car.freeze \
-			and car.input.get("chute", false):
-		_chute.fire()
-		_chute_fired = true
-		car.engine_on = false    # on again only when the crane swings the car in
-		Sfx.play("thump", -8.0, 1.6)
-	_chute.step(dt)
+		slot.ground = 0.0
+	if not racing:
+		slot.chute.cut()
+	elif want and not slot.fired and c.grounded == 0 and not c.freeze:
+		slot.chute.fire()
+		slot.fired = true
+		c.engine_on = false    # on again only when the crane swings the car in
+		fired = true
+		if PlayerCar.debug:
+			print("[Race] %s parachute at y=%.1f vy=%.1f" % ["player" if c == car else "opponent", c.global_position.y, c.linear_velocity.y])
+	slot.chute.step(dt)
+	return fired
+
+
+## The AI (and the autopilot) fires its parachute where a player would:
+## fallen off beside the road (in the air, sinking, below the road's edge),
+## with a drop below that would land too hard. (Not by the car's off_road:
+## a jump's steep take-off lip sets that too.)
+func _ai_wants_chute(c: PlayerCar, t: CarTracker) -> bool:
+	if c.grounded != 0 or c.linear_velocity.y >= 0.0:
+		return false
+	var lat := t.lateral()
+	var y := c.global_position.y
+	return absf(lat) > path.half_width[t.idx] + 1.0 and y < path.road_height(t.idx, lat) - FALL_BELOW \
+		and ParachuteSim.needed(y, c.linear_velocity.y, c.tuning.landing_damage_speed)
+
+
+## Online: the other player's parachute, as its game sends it (drawn only).
+func _remote_chute(s: Dictionary, dt: float) -> void:
+	var on: bool = s.get("chute", false)
+	if on and not _opp_chute.chute.active():
+		_opp_chute.chute.fire()
+		if PlayerCar.debug:
+			print("[Race] remote opponent parachute at y=%.1f" % opp_car.global_position.y)
+	elif not on and _opp_chute.chute.active():
+		_opp_chute.chute.cut()
+	_opp_chute.chute.step(dt)
 
 
 ## The crane lets go: c falls with the velocity of its swing.
@@ -368,7 +414,11 @@ func _physics_process(dt: float) -> void:
 			path.forward[ptrack.idx], deg_to_rad(car.tuning.max_steer_deg))
 		if _align.mode != was:
 			message = {"align": Lang.t("ALIGN"), "straight": Lang.t("STRAIGHT ON")}.get(_align.mode, "")
-	_chute_step(dt)
+	var want_chute: bool = _ai_wants_chute(car, ptrack) if autopilot else car.input.get("chute", false)
+	if _chute_step(car, _chute, state == "racing", want_chute, dt):
+		Sfx.play("thump", -8.0, 1.6)
+	if opp_car and not online:
+		_chute_step(opp_car, _opp_chute, opp_state == "racing", _ai_wants_chute(opp_car, opp_track), dt)
 	if not online or state != "hold" or _lifting():
 		_crane_step(car, crane, dt)
 	if car.freeze:
@@ -519,6 +569,7 @@ func _update_remote(dt: float) -> void:
 		opp_crane.release()
 	# the shared clock also runs on after our own finish
 	_remote.update(s, Net.server_time() - _net_drop if _net_drop >= 0.0 else race_time, dt)
+	_remote_chute(s, dt)
 	_measure_latency(s)
 	opp_track.update_position()
 	var st: String = s["state"]

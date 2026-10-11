@@ -771,7 +771,7 @@ func test_net_roundtrip() -> void:
 		"t": 61.5, "pos": Vector3(-812.25, 33.1, 2.0), "rot": rot,
 		"vel": Vector3(-41.0, 3.33, 0.07), "angvel": Vector3(-1.5, 0.25, 9.9),
 		"steer": 1.0, "throttle": 0.0, "brake": 1.0, "boosting": false, "reverse": true,
-		"held": false, "airborne": true, "state": "wrecked", "boost": 0, "crack": 1.0, "holes": 8,
+		"held": false, "airborne": true, "chute": true, "state": "wrecked", "boost": 0, "crack": 1.0, "holes": 8,
 	}
 	var data := NetCodec.encode_state(st)
 	check(data.size() == NetCodec.STATE_SIZE, "state is %d bytes" % data.size())
@@ -783,6 +783,10 @@ func test_net_roundtrip() -> void:
 	var dq: Quaternion = d["rot"]
 	check(absf(dq.dot(rot)) > 0.99999, "rotation (dot %f)" % absf(dq.dot(rot)))
 	check(d["reverse"] and d["airborne"] and not d["boosting"] and not d["held"] and d["state"] == "wrecked" and d["holes"] == 8, "flags")
+	check(d["chute"], "parachute flag (bit 7, next to the race state)")
+	st["chute"] = false
+	b.data_array = NetCodec.encode_state(st)
+	check(not NetCodec.decode_state(b)["chute"], "no parachute")
 	check(near(d["steer"], 1.0) and near(d["brake"], 1.0) and near(d["crack"], 1.0), "inputs")
 	check(NetCodec.seq_newer(2, 65534) and not NetCodec.seq_newer(65534, 2) and not NetCodec.seq_newer(5, 5), "sequence wrap-around")
 	check(NetCodec.parse(PackedByteArray([1, 2, 3])).is_empty(), "short packet rejected")
@@ -2038,6 +2042,11 @@ func test_parachute() -> void:
 	check(max_pull < 8.0 * m * 9.81, "opening shock below 8 g (%.1f g)" % (max_pull / (m * 9.81)))
 	ps.cut = true
 	check(ps.step(dt, car_pos, car_vel) == Vector3.ZERO, "cut: no pull")
+	# when the AI fires it: a drop that would land too hard (9.5 m/s)
+	check(not ParachuteSim.needed(3.0, 0.0, 9.5), "AI: 3 m drop - no parachute")
+	check(ParachuteSim.needed(20.0, 0.0, 9.5), "AI: 20 m drop - parachute")
+	check(ParachuteSim.needed(2.0, -10.0, 9.5), "AI: already falling fast - parachute")
+	check(ParachuteSim.needed(4.0, 6.0, 9.5), "AI: still flying up, then 4 m down - parachute")
 
 
 ## Road down on the ground: the ground is left open under it (no flicker);

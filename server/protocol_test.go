@@ -69,6 +69,23 @@ func TestGolden(t *testing.T) {
 	}
 }
 
+func TestStateChuteFlag(t *testing.T) {
+	s := goldenState()
+	s.Chute = true
+	s.State = 5
+	d, err := DecodeState(EncodeState(s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.Chute || d.State != 5 {
+		t.Errorf("chute %v state %d", d.Chute, d.State)
+	}
+	s.Chute = false
+	if d, _ = DecodeState(EncodeState(s)); d.Chute {
+		t.Error("chute set without a parachute")
+	}
+}
+
 func TestStateRoundTrip(t *testing.T) {
 	s := goldenState()
 	enc := EncodeState(s)

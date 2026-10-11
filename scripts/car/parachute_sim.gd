@@ -65,6 +65,13 @@ func step(dt: float, hook_pos: Vector3, hook_vel: Vector3) -> Vector3:
 	return tension
 
 
+## Whether a car falling from `height` (m above the ground) at vertical
+## speed vy (m/s, + up) would hit the ground faster than `safe` (m/s) - the
+## AI fires its parachute then, as a player would.
+static func needed(height: float, vy: float, safe: float) -> bool:
+	return sqrt(vy * vy + 2.0 * 9.81 * maxf(height, 0.0)) > safe
+
+
 ## Sinking speed of a load of mass m under the open canopy (m/s).
 static func terminal_speed(m: float) -> float:
 	return sqrt(2.0 * (m + CANOPY_MASS) * 9.81 / (AIR_DENSITY * CD * PI * DIAMETER * DIAMETER * 0.25))

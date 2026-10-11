@@ -206,7 +206,7 @@ static func unpack_quat(bits: int) -> Quaternion:
 # --- car state ---------------------------------------------------------------------
 
 ## s: {t (s), pos, rot (Quaternion), vel, angvel, steer (-1..1), throttle,
-## brake, boosting, reverse, held, airborne (optional), state (RACE_STATES),
+## brake, boosting, reverse, held, airborne, chute (both optional), state (RACE_STATES),
 ## boost, crack, holes}
 static func encode_state(s: Dictionary) -> PackedByteArray:
 	var b := StreamPeerBuffer.new()
@@ -226,6 +226,7 @@ static func encode_state(s: Dictionary) -> PackedByteArray:
 	b.put_u8(clampi(roundi(float(s["brake"]) * 255.0), 0, 255))
 	var flags := (1 if s["boosting"] else 0) | (2 if s["reverse"] else 0) | (4 if s["held"] else 0)
 	flags |= 8 if s.get("airborne", false) else 0
+	flags |= 128 if s.get("chute", false) else 0
 	flags |= maxi(RACE_STATES.find(s["state"]), 0) << 4
 	b.put_u8(flags)
 	b.put_u8(clampi(int(s["boost"]), 0, 255))
@@ -252,6 +253,7 @@ static func decode_state(b: StreamPeerBuffer) -> Dictionary:
 	s["reverse"] = flags & 2 != 0
 	s["held"] = flags & 4 != 0
 	s["airborne"] = flags & 8 != 0
+	s["chute"] = flags & 128 != 0
 	s["state"] = RACE_STATES[mini((flags >> 4) & 7, RACE_STATES.size() - 1)]
 	s["boost"] = b.get_u8()
 	s["crack"] = b.get_u8() / 255.0

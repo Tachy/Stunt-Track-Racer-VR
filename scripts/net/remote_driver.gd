@@ -39,7 +39,7 @@ static func capture(c: PlayerCar, race_s: float, race_state: String) -> Dictiona
 		"steer": c.steer_angle / deg_to_rad(STEER_WIRE_DEG),
 		"throttle": c.input.get("throttle", 0.0), "brake": c.input.get("brake", 0.0),
 		"boosting": c.boosting, "reverse": c.reverse, "held": c.freeze,
-		"airborne": c.grounded == 0 and not c.freeze, "state": race_state,
+		"airborne": c.grounded == 0 and not c.freeze, "chute": c.chute_attached, "state": race_state,
 		"boost": c.boost_units, "crack": c.damage.crack, "holes": c.damage.holes,
 	}
 

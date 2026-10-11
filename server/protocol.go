@@ -200,6 +200,7 @@ type CarState struct {
 	Reverse  bool
 	Held     bool
 	Airborne bool
+	Chute    bool // parachute attached
 	State    byte // 0 hold .. 5 wrecked
 	Boost    byte
 	Crack    float64
@@ -296,6 +297,9 @@ func EncodeState(s CarState) []byte {
 	if s.Airborne {
 		flags |= 8
 	}
+	if s.Chute {
+		flags |= 128
+	}
 	flags |= (s.State & 7) << 4
 	w.U8(flags)
 	w.U8(s.Boost)
@@ -329,6 +333,7 @@ func DecodeState(p []byte) (CarState, error) {
 	s.Reverse = flags&2 != 0
 	s.Held = flags&4 != 0
 	s.Airborne = flags&8 != 0
+	s.Chute = flags&128 != 0
 	s.State = (flags >> 4) & 7
 	s.Boost = r.U8()
 	s.Crack = float64(r.U8()) / 255

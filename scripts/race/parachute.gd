@@ -4,7 +4,9 @@ extends Node3D
 ## high over the car as the crane's), drawn as a classic round canopy of red
 ## and white gores with its lines - four slings from the car's corners to
 ## the hook (as the crane's), the main line, the lines to the rim. Cut away
-## after the touchdown it drifts down on its own and is gone.
+## after the touchdown it drifts down on its own and is gone. The
+## opponent's too; online (visual_only) it is drawn but does not pull: that
+## car moves as the other player's game sends it.
 
 const GORES := 16
 const RIM_LINES := 8
@@ -13,6 +15,7 @@ const CUT_LIFE := 3.0            # s the cut canopy is still seen
 const RISER := 0.3               # share of the line that is the main line
 
 var sim: ParachuteSim
+var visual_only := false
 var _car: PlayerCar
 var _canopy: MeshInstance3D
 var _lines: MultiMeshInstance3D
@@ -108,7 +111,8 @@ func step(dt: float) -> void:
 	var hook := _car.global_transform * hook_local()
 	var f := sim.step(dt, hook, _hook_velocity(hook))
 	if not sim.cut:
-		_car.external_force(f, hook)
+		if not visual_only:
+			_car.external_force(f, hook)
 		return
 	_cut_time += dt
 	if _cut_time > CUT_LIFE:
