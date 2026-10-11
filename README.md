@@ -103,4 +103,4 @@ The game was developed in dialogue with an AI assistant (Claude Code): research 
 
 ## Support
 
-The game is free and stays open source. If you enjoy it, you can support its development voluntarily via [GitHub Sponsors](https://github.com/sponsors/Tachy) - one-off or monthly, without any perks in return. Thank you!
+The game is free and stays open source. If you enjoy it, you can support its development voluntarily via [GitHub Sponsors](https://github.com/sponsors/Tachy) or [Ko-fi](https://ko-fi.com/tachyAI) - one-off or monthly, without any perks in return. Thank you!

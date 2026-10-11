@@ -104,4 +104,4 @@ Das Spiel ist im Dialog mit einem KI-Assistenten (Claude Code) entstanden: Reche
 
 ## Unterstützen
 
-Das Spiel ist kostenlos und bleibt Open Source. Wenn es dir gefällt, kannst du die Entwicklung freiwillig über [GitHub Sponsors](https://github.com/sponsors/Tachy) unterstützen – einmalig oder monatlich, ohne Gegenleistung. Danke!
+Das Spiel ist kostenlos und bleibt Open Source. Wenn es dir gefällt, kannst du die Entwicklung freiwillig über [GitHub Sponsors](https://github.com/sponsors/Tachy) oder [Ko-fi](https://ko-fi.com/tachyAI) unterstützen – einmalig oder monatlich, ohne Gegenleistung. Danke!
