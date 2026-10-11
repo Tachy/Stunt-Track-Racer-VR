@@ -4,8 +4,11 @@
 #   3. the exe (PCK embedded) with the version stamped in
 #   4. build/StuntTrackRacerVR-<version>-windows.zip  (exe, start scripts, README, LICENSE)
 #   5. build/StuntTrackRacerVR-<version>-setup.exe    (Inno Setup; installed once if missing)
+#   6. build/stunt-racer-server-linux-amd64           (online server: go vet + go test, then the build)
 #
-#   powershell -ExecutionPolicy Bypass -File tools/build.ps1 [-Version 1.2.3] [-SkipTests] [-NoInstaller]
+#   powershell -ExecutionPolicy Bypass -File tools/build.ps1 [-Version 1.2.3] [-SkipTests] [-NoInstaller] [-NoServer]
+#
+# /build (.claude/commands/build.md) publishes these files as the release.
 #
 # The Godot executable comes from start.cfg (GODOT=...), as for the start
 # scripts. -Version defaults to scripts/core/version.gd (release-please
@@ -15,7 +18,8 @@
 param(
     [string]$Version = "",
     [switch]$SkipTests,
-    [switch]$NoInstaller
+    [switch]$NoInstaller,
+    [switch]$NoServer
 )
 
 $ErrorActionPreference = "Stop"
@@ -154,5 +158,34 @@ if (-not $NoInstaller) {
     Write-Host "installer: $setup"
 }
 
+# --- 6. online server (Linux) -------------------------------------------------------------------
+$serverBin = Join-Path $Build "stunt-racer-server-linux-amd64"
+if (-not $NoServer) {
+    Step "Online server (Linux)"
+    $Go = (Get-Command go -ErrorAction SilentlyContinue).Source
+    if (-not $Go) { $Go = "C:\Program Files\Go\bin\go.exe" }
+    if (-not (Test-Path $Go)) { throw "Go not found (PATH or C:\Program Files\Go\bin)." }
+    Push-Location (Join-Path $Root "server")
+    try {
+        if (-not $SkipTests) {
+            $out = Run $Go @("vet", ".")
+            if ($LASTEXITCODE -ne 0) { $out | ForEach-Object { Write-Host $_ }; throw "go vet failed." }
+            $out = Run $Go @("test", ".")
+            $out | ForEach-Object { Write-Host "   $_" }
+            if ($LASTEXITCODE -ne 0) { throw "Server tests failed." }
+        }
+        $env:GOOS = "linux"; $env:GOARCH = "amd64"; $env:CGO_ENABLED = "0"
+        try {
+            $out = Run $Go @("build", "-trimpath", "-ldflags=-s -w", "-o", $serverBin, ".")
+        } finally {
+            Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED -ErrorAction SilentlyContinue
+        }
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $serverBin)) { $out | ForEach-Object { Write-Host $_ }; throw "Server build failed." }
+        Write-Host "server: $serverBin"
+    } finally {
+        Pop-Location
+    }
+}
+
 Step "Done: $Version"
-Get-ChildItem $Build -File | Where-Object { $_.Name -like "*$Version*" -or $_.Name -eq $ExeName } | ForEach-Object { Write-Host ("  {0}  ({1:N1} MB)" -f $_.FullName, ($_.Length / 1MB)) }
+Get-ChildItem $Build -File | Where-Object { $_.Name -like "*$Version*" -or $_.Name -eq $ExeName -or $_.FullName -eq $serverBin } | ForEach-Object { Write-Host ("  {0}  ({1:N1} MB)" -f $_.FullName, ($_.Length / 1MB)) }

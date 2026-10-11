@@ -115,7 +115,6 @@ var _saved_id := ""
 ## write res://): an official track is saved back to server/official, an
 ## example track (TrackLibrary.EXAMPLES) back to examples/.
 var admin := OS.get_cmdline_user_args().has("--admin") and OS.has_feature("editor")
-var _flash_after_save := ""
 ## Admin: the example track being edited (its id; "" = none).
 var _example := ""
 
@@ -139,7 +138,9 @@ func _load_data(id: String) -> Dictionary:
 		return TrackLibrary.load_official(id) if admin else {}
 	if TrackLibrary.is_example(id):
 		return TrackLibrary.load_example(id) if admin else {}
-	return TrackLibrary.load_custom(id)
+	var data := TrackLibrary.load_custom(id)
+	data.erase("official")     # an own file is never an official track
+	return data
 
 
 func _ready() -> void:
@@ -718,13 +719,9 @@ func _act_save() -> void:
 	if _example != "" and admin:
 		_save_example()
 		return
-	if model.official != "":
-		if admin:
-			_save_official()
-			return
-		# not admin: an own copy (it keeps the theme and boost values)
-		model.official = ""
-		_flash_after_save = Lang.t("SAVED AS AN OWN COPY: %s")
+	if model.official != "":     # (loaded in admin mode only)
+		_save_official()
+		return
 	DirAccess.make_dir_recursive_absolute(TrackLibrary.CUSTOM_DIR)
 	var data := model.to_dict(track_name)
 	if model.closed:
@@ -737,8 +734,7 @@ func _act_save() -> void:
 	f.close()
 	_saved_id = _file_id()
 	_fill_load_menu()
-	_flash((_flash_after_save if _flash_after_save != "" else Lang.t("SAVED: %s")) % TrackLibrary.custom_path(_file_id()))
-	_flash_after_save = ""
+	_flash(Lang.t("SAVED: %s") % TrackLibrary.custom_path(_file_id()))
 
 
 ## Admin: an official track back to server/official/<id>.json (in the

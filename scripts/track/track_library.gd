@@ -62,9 +62,10 @@ const DIVISION_TRACKS := {
 	1: ["bridge_run", "ski_flyer"],
 }
 
-## The official tracks (the league) live in server/official/<id>.json, in the editor's format: "def" is what the
-## game builds, the rest lets the track editor load it (admin mode). The
-## online server embeds the very same files.
+## The official tracks (the league) live in server/official/<id>.json, in
+## the editor's format: "def" is what the game builds, the rest lets the
+## track editor load it (admin mode). Online each game builds them from its
+## own files (the server does not hand them out).
 const OFFICIAL_DIR := "res://server/official"
 ## Whole-number fields of a definition.
 const INT_FIELDS := ["theme", "boost", "boost_super", "division"]

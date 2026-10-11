@@ -1,6 +1,17 @@
 # Offizielle Strecken und Release-Build – Plan
 
-Stand 2026-10-09.
+Stand 2026-10-09 (Plan). Umsetzungsstand 2026-10-11 siehe unten.
+
+## Umsetzungsstand 2026-10-11
+
+Abweichend vom Plan:
+
+- **Art 2 entfällt.** `server/official/` enthält nur die 8 Liga-Strecken. Grand Tour und Loop and Jump sind **Beispielstrecken für den Editor** in `examples/`: Sie werden mit dem Spiel ausgeliefert, beim ersten Start einmal in die eigenen Strecken kopiert (`TrackLibrary.install_examples()`) und sind danach eigene Strecken wie alle anderen (Übung, online anbieten). Im Admin-Modus erscheinen sie als „BEISPIEL: …“; Speichern schreibt nach `examples/` und zugleich die spielbare Kopie in `user://tracks/`.
+- **Ohne `--admin`** lassen sich offizielle Strecken im Editor gar nicht laden (nicht mehr „als Kopie speichern“, Abschnitt 4).
+- **Abschnitt 5 (Server liefert die offiziellen Strecken) ist nicht umgesetzt.** Der Server bettet keine Strecken ein; online baut jedes Spiel die offiziellen Strecken aus seinen eigenen Dateien. Die beschriebene Lücke (veränderte Datei eines umgebauten Clients) besteht also weiter.
+- **Flags:** `gap` und `no_crane` sind entfallen, nur die Zugbrücke bleibt (Abschnitt 3).
+- **Export:** Der Filter nimmt `server/official/*.json` und `examples/*.json` mit.
+- **Release (Abschnitt 7):** Die GitHub Action pflegt nur noch den Release-PR und veröffentlicht nichts (`skip-github-release`). `/build` baut Spiel, Installer, ZIP und Linux-Server (`tools/build.ps1`, Schritt 6), merged den PR und legt Tag und Release mit allen Dateien in einem Schritt an. Zwischen zwei Releases gibt es keine weiteren Builds; der Stand des Repositorys ist der „Nightly“.
 
 ## Ziel
 
@@ -9,7 +20,7 @@ Es gibt drei Arten von Strecken:
 | Art | Heute | Künftig |
 |---|---|---|
 | 1. Liga (8 Strecken) | fest im Code (`TrackLibrary.TRACKS`) | **offiziell**: Datei im Repo, im Spiel und im Server eingebaut |
-| 2. Erweiterte Release-Strecken (Grand Tour, Loop and Jump, künftig mehr) | fest im Code | **offiziell**, wie Art 1 |
+| 2. Erweiterte Release-Strecken (Grand Tour, Loop and Jump, künftig mehr) | fest im Code | **offiziell**, wie Art 1 (umgesetzt anders: Beispielstrecken, siehe oben) |
 | 3. Eigene Strecken der Spieler | `user://tracks/*.json` | unverändert (online geht die Definition mit) |
 
 - Die offiziellen Strecken lassen sich als „Admin“ im Streckeneditor laden, feintunen und speichern.
