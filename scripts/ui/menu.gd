@@ -164,6 +164,8 @@ func _refresh() -> void:
 			_screen_online_setup(sc)
 		"edit":
 			_screen_edit(sc)
+		"credits":
+			_screen_credits(sc)
 	sel = clampi(sel, 0, maxi(items.size() - 1, 0))   # the item list can shrink
 	_update_preview()
 	_draw_items(sc)
@@ -226,10 +228,47 @@ func _screen_main(sc: PixelScreen) -> void:
 		{"label": Lang.t("TRACK EDITOR"), "do": func(): open_editor.emit()},
 		{"label": Lang.t("CALIBRATE WHEEL"), "do": func(): open("calibrate")},
 		{"label": Lang.t("SETTINGS"), "do": func(): open("settings")},
+		{"label": Lang.t("CREDITS"), "do": func(): open("credits")},
 		{"label": Lang.t("QUIT"), "do": func(): get_tree().quit()},
 	]
 	if XrManager.xr_active:
 		items = items.filter(func(it): return not it.get("desktop", false))
+
+
+## Who made the game, and how.
+func _screen_credits(sc: PixelScreen) -> void:
+	sc.text_centered(90, Lang.t("CREDITS"), Palette.LIGHT_BLUE, 4.0)
+	sc.text_centered(142, Lang.t("A GAME BY"), Palette.ROAD_DARK, 2.4)
+	sc.text_centered(172, "JOHANNES GÜNTERT", Palette.YELLOW, 3.4)
+	sc.text_centered(206, Lang.t("IDEA, DESIGN AND TEST DRIVES"), Palette.LIGHT_BLUE, 2.2)
+	sc.text_centered(240, "CLAUDE (ANTHROPIC)", Palette.YELLOW, 3.4)
+	sc.text_centered(274, Lang.t("ALL OF THE CODE, VIA CLAUDE CODE"), Palette.LIGHT_BLUE, 2.2)
+	sc.text_centered(322, Lang.t("HOW IT WAS MADE"), Palette.LIGHT_BLUE, 2.8)
+	var y := 358.0
+	for line in _wrap(Lang.t(CREDITS_STORY), PX.x - 120, 2.2):
+		sc.text_centered(y, line, Palette.WHITE, 2.2)
+		y += 26.0
+	sc.text_centered(y + 12.0, Lang.t("INSPIRED BY STUNT CAR RACER (1989) BY GEOFF CRAMMOND"), Palette.ROAD_DARK, 2.2)
+	items = [{"label": Lang.t("BACK"), "do": func(): open("main")}]
+
+
+const CREDITS_STORY := "THIS GAME WAS MADE IN CONVERSATION BETWEEN A HUMAN AND AN AI. WHAT IT SHOULD BECOME WAS DESCRIBED IN PLAIN WORDS; THE AI WROTE THE CODE - PHYSICS, TRACKS, EDITOR, NETWORK, SERVER AND TESTS, EVERY SOUND SYNTHESIZED, NO AUDIO FILES - AND CHECKED IT WITH SIMULATED RACES, SCREENSHOTS AND THOUSANDS OF TESTS. WHETHER IT FEELS RIGHT WAS DECIDED IN THE DRIVER'S SEAT, AT THE WHEEL AND IN VR."
+
+
+## text in lines at most `width` pixels wide at `scale` (split at spaces).
+static func _wrap(text: String, width: float, scale: float) -> Array:
+	var lines := []
+	var line := ""
+	for w in text.split(" ", false):
+		var t: String = w if line == "" else line + " " + w
+		if line != "" and PixelFont.text_width(t, scale) > width:
+			lines.append(line)
+			line = w
+		else:
+			line = t
+	if line != "":
+		lines.append(line)
+	return lines
 
 
 func _screen_league(sc: PixelScreen) -> void:
