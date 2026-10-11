@@ -7,6 +7,8 @@ var league: League
 ## {track, opponent (driver index or -1 for none), league (bool), super (bool), holes}
 var request := {}
 var last_result := {}
+## Practice menu choice: Super League cars (offered once unlocked).
+var practice_super := false
 
 
 func _ready() -> void:
@@ -30,17 +32,23 @@ func league_request() -> Dictionary:
 		save_game()
 	var r := league.next_race()
 	return {"track": r["track"], "opponent": r["opponent"], "league": true,
-		"super": league.super_league, "holes": league.holes, "pitch_assist": Settings.pitch_assist}
+		"super": league.super_active(), "holes": league.holes, "pitch_assist": Settings.pitch_assist}
 
 
-func practice_request(track: String, with_opponent: bool) -> Dictionary:
+## The Super League has been unlocked (won Division 1 once).
+func super_unlocked() -> bool:
+	return league != null and league.super_league
+
+
+## with_super: Super League cars, if unlocked.
+func practice_request(track: String, with_opponent: bool, with_super := false) -> Dictionary:
 	var div := TrackLibrary.division_of(track)
 	var opp := -1
 	if with_opponent:
 		# a rival from the track's division
 		opp = [9, 10, 6, 7, 3, 4, 0, 1][(4 - div) * 2 + randi() % 2]
 	return {"track": track, "opponent": opp, "league": false,
-		"super": league != null and league.super_league, "holes": 0, "pitch_assist": Settings.pitch_assist}
+		"super": with_super and super_unlocked(), "holes": 0, "pitch_assist": Settings.pitch_assist}
 
 
 ## A race against the other online player (Net.matched info).

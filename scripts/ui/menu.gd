@@ -285,7 +285,7 @@ func _screen_league(sc: PixelScreen) -> void:
 		GameState.save_game()
 	var div := lg.player_division()
 	var title := Lang.t("SEASON %d  -  DIVISION %d") % [lg.season, div]
-	if lg.super_league:
+	if lg.super_active():
 		title += "  (SUPER LEAGUE)"
 	sc.text_centered(90, title, Palette.LIGHT_BLUE, 4.0)
 	var y := 150
@@ -323,9 +323,14 @@ func _screen_practice(sc: PixelScreen) -> void:
 	items = [
 		{"label": Lang.t("TRACK: ") + TrackLibrary.display_name(id), "side": _side_track},
 		{"label": Lang.t("OPPONENT: ") + (Lang.t("YES") if _practice_opponent else Lang.t("NO")), "side": _side_opponent},
+	]
+	if GameState.super_unlocked():
+		items.append({"label": Lang.t("SUPER LEAGUE: ") + (Lang.t("YES") if GameState.practice_super else Lang.t("NO")),
+			"side": _side_super})
+	items.append_array([
 		{"label": "START", "do": _act_practice_start},
 		{"label": Lang.t("BACK"), "do": func(): open("main")},
-	]
+	])
 
 
 func _screen_settings(sc: PixelScreen) -> void:
@@ -711,7 +716,7 @@ func _act_new_league() -> void:
 
 
 func _act_practice_start() -> void:
-	start_race.emit(GameState.practice_request(_practice_ids()[_practice_track], _practice_opponent))
+	start_race.emit(GameState.practice_request(_practice_ids()[_practice_track], _practice_opponent, GameState.practice_super))
 
 
 func _practice_ids() -> Array:
@@ -735,7 +740,7 @@ func _act_offer() -> void:
 		return
 	_online_msg = ""
 	_searching = true
-	Net.offer(_online_ids()[_online_track], GameState.league != null and GameState.league.super_league, Settings.pitch_assist)
+	Net.offer(_online_ids()[_online_track], GameState.league != null and GameState.league.super_active(), Settings.pitch_assist)
 	_refresh()
 
 
@@ -933,6 +938,10 @@ func _side_track(d: int) -> void:
 
 func _side_opponent(_d: int) -> void:
 	_practice_opponent = not _practice_opponent
+
+
+func _side_super(_d: int) -> void:
+	GameState.practice_super = not GameState.practice_super
 
 
 func _side_tilt(d: int) -> void:

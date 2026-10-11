@@ -4,7 +4,8 @@ extends RefCounted
 ## division rivals on both division tracks (4 races); the rivals' race
 ## against each other and all other divisions are simulated.
 ## Win = 2 points, fastest lap = 1 point. Top driver goes up, bottom down.
-## Winning Division 1 unlocks the Super League.
+## Winning Division 1 unlocks the Super League (faster cars); league races
+## use it while the player is in Division 1, practice by choice.
 
 const PLAYER := -1
 const WIN_POINTS := 2
@@ -16,7 +17,7 @@ var points := {}
 var season := 1
 var schedule: Array = []     # [{track, opponent}]
 var race_index := 0
-var super_league := false
+var super_league := false   # unlocked (see super_active)
 var holes := 0
 var last_season_report := ""
 
@@ -33,6 +34,11 @@ func player_division() -> int:
 		if PLAYER in divisions[d]:
 			return d + 1
 	return 4
+
+
+## League races run with Super League cars: unlocked and in Division 1.
+func super_active() -> bool:
+	return super_league and player_division() == 1
 
 
 func rivals() -> Array:

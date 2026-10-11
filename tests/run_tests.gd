@@ -11,7 +11,7 @@ func _init() -> void:
 	var tests := [
 		"test_cockpit_half_pitch", "test_cockpit_half_roll", "test_cockpit_extremes",
 		"test_recenter", "test_examples_install", "test_tracks_closed", "test_track_heights", "test_track_mesh",
-		"test_lap_tracker", "test_recovery", "test_bridge", "test_fallen_on_bridge", "test_below_road", "test_damage", "test_league",
+		"test_lap_tracker", "test_recovery", "test_bridge", "test_fallen_on_bridge", "test_below_road", "test_damage", "test_league", "test_super_league_division_1",
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
@@ -351,6 +351,24 @@ func test_league() -> void:
 		l.record_player_race({"won": false, "player_fastest": false})
 	l.finish_season(rng)
 	check(l.player_division() == 4, "relegated back to div 4")
+
+
+## Super League cars only in Division 1 once unlocked.
+func test_super_league_division_1() -> void:
+	var l := League.new_game()
+	l.divisions = [[0, League.PLAYER, 2], [1, 3, 4], [5, 6, 7], [8, 9, 10]]
+	l.start_season()
+	check(not l.super_active(), "not unlocked: no Super League")
+	for i in 4:
+		l.record_player_race({"won": true, "player_fastest": true})
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 1
+	l.finish_season(rng)
+	check(l.super_league and l.super_active(), "Division 1 won: Super League")
+	for i in 4:
+		l.record_player_race({"won": false, "player_fastest": false})
+	l.finish_season(rng)
+	check(l.player_division() == 2 and l.super_league and not l.super_active(), "relegated: unlocked, but normal cars")
 
 
 func test_league_roundtrip() -> void:
