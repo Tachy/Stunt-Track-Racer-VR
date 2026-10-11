@@ -7,10 +7,10 @@ extends Node3D
 signal start_race(request: Dictionary)
 signal open_editor
 
-const PX := Vector2i(1024, 768)
-const WORLD := Vector2(2.0, 1.5)
+const PX := Vector2i(1024, 896)     # room for the eleven settings
+const WORLD := Vector2(2.0, 1.75)   # 512 pixels a metre
 const DIST := 2.2
-const PANEL_Y := 0.2              # panel centre above the eye ...
+const PANEL_Y := 0.2625           # panel centre above the eye ...
 ## ... and below it the turning view of the selected track, as wide as the
 ## panel, not as high
 const PREVIEW_WORLD := Vector2(2.0, 0.6)
@@ -252,7 +252,7 @@ func _screen_credits(sc: PixelScreen) -> void:
 	items = [{"label": Lang.t("BACK"), "do": func(): open("main")}]
 
 
-const CREDITS_STORY := "THIS GAME WAS MADE IN CONVERSATION BETWEEN A HUMAN AND AN AI. WHAT IT SHOULD BECOME WAS DESCRIBED IN PLAIN WORDS; THE AI WROTE THE CODE - PHYSICS, TRACKS, EDITOR, NETWORK, SERVER AND TESTS, EVERY SOUND SYNTHESIZED, NO AUDIO FILES - AND CHECKED IT WITH SIMULATED RACES, SCREENSHOTS AND THOUSANDS OF TESTS. WHETHER IT FEELS RIGHT WAS DECIDED IN THE DRIVER'S SEAT, AT THE WHEEL AND IN VR."
+const CREDITS_STORY := "THIS GAME WAS MADE IN CONVERSATION BETWEEN A HUMAN AND AN AI. UP TO ITS FIRST RELEASE IT TOOK 6 DAYS. WHAT IT SHOULD BECOME WAS DESCRIBED IN PLAIN WORDS; THE AI WROTE THE CODE - PHYSICS, TRACKS, EDITOR, NETWORK, SERVER AND TESTS, EVERY SOUND SYNTHESIZED, NO AUDIO FILES - AND CHECKED IT WITH SIMULATED RACES, SCREENSHOTS AND THOUSANDS OF TESTS. WHETHER IT FEELS RIGHT WAS DECIDED IN THE DRIVER'S SEAT, AT THE WHEEL AND IN VR."
 
 
 ## text in lines at most `width` pixels wide at `scale` (split at spaces).
