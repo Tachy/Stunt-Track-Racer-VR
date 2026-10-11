@@ -21,8 +21,10 @@ var shadows := true
 var language := "en"
 var seat_height := 0.0
 ## Online race server: "host" or "host:port" (default port 27015), set in
-## the ONLINE menu, as are the player's name and car colour.
-var server_address := ""
+## the ONLINE menu, as are the player's name and car colour. Not set (or
+## left empty): the game's own server.
+const DEFAULT_SERVER := "217.160.63.61"
+var server_address := DEFAULT_SERVER
 var player_name := OS.get_environment("USERNAME").to_upper().left(16) if OS.get_environment("USERNAME") != "" else "PLAYER"
 var player_color := Palette.PLAYER_BODY
 var recenter_offset := Transform3D.IDENTITY
@@ -51,6 +53,8 @@ func load_settings() -> void:
 	shadows = cfg.get_value("view", "shadows", shadows)
 	language = cfg.get_value("game", "language", language)
 	server_address = cfg.get_value("online", "server", server_address)
+	if str(server_address).strip_edges() == "":
+		server_address = DEFAULT_SERVER
 	player_name = cfg.get_value("online", "player_name", player_name)
 	player_color = cfg.get_value("online", "player_color", player_color)
 	apply_volume()

@@ -763,7 +763,7 @@ func _act_edit_name() -> void:
 
 func _act_edit_server() -> void:
 	_open_edit(Lang.t("SERVER ADDRESS"), Settings.server_address, ADDRESS_CHARS, 40, func(v: String):
-		Settings.server_address = v.strip_edges().to_lower())
+		Settings.server_address = v.strip_edges().to_lower() if v.strip_edges() != "" else Settings.DEFAULT_SERVER)
 
 
 ## Text entry: typed on the keyboard, or with the wheel (steer = change the
