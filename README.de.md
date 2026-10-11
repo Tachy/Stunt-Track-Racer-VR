@@ -89,7 +89,7 @@ Kommandozeilen-Optionen stehen nach `--`, siehe `scripts/main.gd`: `--track=<id>
 
 Das Fahrverhalten wird zentral in `scripts/car/car_tuning.gd` eingestellt, die Strecken in `scripts/track/track_library.gd`.
 
-Benutzerdaten liegen unter `%APPDATA%\Godot\app_userdata\Stunt Track Racer VR\`: `settings.cfg`, `input.cfg`, `save.json`, `logs\`, `screenshots\`.
+Benutzerdaten liegen unter `%APPDATA%\Stunt Track Racer VR\`: `settings.cfg`, `input.cfg`, `save.json`, `tracks\`, `logs\`, `screenshots\`.
 
 ## Lizenz und Herkunft
 

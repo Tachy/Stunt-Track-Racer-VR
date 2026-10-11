@@ -88,7 +88,7 @@ Command line options go after `--`, see `scripts/main.gd`: `--track=<id>`, `--op
 
 Handling is tuned centrally in `scripts/car/car_tuning.gd`, tracks live in `scripts/track/track_library.gd`. UI texts are English keys in the code (`Lang.t("...")`); the German table is in `scripts/core/lang.gd`, and a test checks that every key has a translation.
 
-User data is stored in `%APPDATA%\Godot\app_userdata\Stunt Track Racer VR\`: `settings.cfg`, `input.cfg`, `save.json`, `logs\`, `screenshots\`.
+User data is stored in `%APPDATA%\Stunt Track Racer VR\`: `settings.cfg`, `input.cfg`, `save.json`, `tracks\`, `logs\`, `screenshots\`.
 
 ## License and origin
 
