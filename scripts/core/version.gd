@@ -3,4 +3,4 @@ class_name GameVersion
 ## comment below must stay on the line); tools/build.ps1 stamps it into the
 ## exported exe.
 
-const VERSION := "0.1.0" # x-release-please-version
+const VERSION := "0.2.0" # x-release-please-version
