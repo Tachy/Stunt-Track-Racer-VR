@@ -153,7 +153,8 @@ func _ready() -> void:
 	add_child(track)
 	add_child(SpeedSigns.new().build(path, Settings.speed_kmh))
 	EnvironmentBuilder.build(self, def["theme"], path.bounds(), path.ground_holes())
-	_sun = get_tree().get_first_node_in_group("sun")
+	# our own sun (the group may still hold the menu's, freed right after)
+	_sun = get_node("Sun") as DirectionalLight3D
 	_world_env = (get_node("WorldEnvironment") as WorldEnvironment).environment
 	_sun_energy = _sun.light_energy
 	_ambient_energy = _world_env.ambient_light_energy
