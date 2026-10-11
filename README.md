@@ -1,5 +1,7 @@
 # Stunt Track Racer VR
 
+![Stunt Track Racer VR - from the cockpit, boost on, the rival alongside](docs/images/hero.jpg)
+
 **English** · [Deutsch](README.de.md)
 
 VR stunt racing on elevated tracks without guard rails, built with **Godot 4.7.2** (GDScript, OpenXR, Forward+).

@@ -1,5 +1,7 @@
 # Stunt Track Racer VR
 
+![Stunt Track Racer VR - aus dem Cockpit, Boost an, der Gegner daneben](docs/images/hero.jpg)
+
 [English](README.md) · **Deutsch**
 
 VR-Stuntrennen auf erhöhten Strecken ohne Leitplanken für **Godot 4.7.2** (GDScript, OpenXR, Forward+).
