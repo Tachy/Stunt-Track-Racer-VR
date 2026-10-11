@@ -75,8 +75,11 @@ func update_laps(race_time: float) -> bool:
 ## to call the crane.
 func check_off(dt: float) -> bool:
 	var pos := car.global_position
-	# below the surface along its normal (also correct upside down in loops)
-	var below := path.height_above(pos, idx) < -1.2 and path.loop_mask[idx] == 0
+	# below the road where the car is along the lap (TrackPath.below_road();
+	# in a loop: beside it). Not at the nearest road point: in flight that is
+	# the take-off lip for long, not the road the car flies over.
+	var under := path.index_at_s(s)
+	var below := path.loop_mask[idx] == 0 and path.below_road(pos, under)
 	if path.loop_mask[idx] == 1 and absf(lateral()) > path.half_width[idx] + 2.0:
 		below = true
 	# over the edge in the air: from here on it falls freely
@@ -84,6 +87,10 @@ func check_off(dt: float) -> bool:
 		if not car.off_road and left_s < 0.0:
 			left_s = s
 		car.off_road = true
+	elif car.off_road and car.grounded > 0 and absf(lateral()) <= path.half_width[idx]:
+		# back on the road with its wheels (landed on it after all): on it again
+		car.off_road = false
+		left_s = -1.0
 	# falling freely (no wheel on anything, still moving): first the
 	# touchdown and its damage, then the crane
 	var falling := car.grounded == 0 and car.linear_velocity.length() > 1.0

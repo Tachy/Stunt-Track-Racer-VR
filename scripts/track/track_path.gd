@@ -804,6 +804,15 @@ func lateral(pos: Vector3, i: int) -> float:
 	return (pos - center[i]).dot(right_flat[i])
 
 
+## Whether pos is more than `margin` under the road at sample i, straight
+## down from the road's height there (with its banking). Not along the
+## road's normal: a car flying on past a steep take-off lip, with the lip
+## still the nearest road point, would count as under it. (Loops: see
+## CarTracker - upside down there the car is under the road.)
+func below_road(pos: Vector3, i: int, margin := 1.2) -> bool:
+	return pos.y - road_height(i, lateral(pos, i)) < -margin
+
+
 ## Whether a car at sample i, lat beside the middle of the road, at height y
 ## has fallen off: in a pit or down on the ground floor; on a drawbridge
 ## (no road of its own: the leaves) only below the road - through the open

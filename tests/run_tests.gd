@@ -11,7 +11,7 @@ func _init() -> void:
 	var tests := [
 		"test_cockpit_half_pitch", "test_cockpit_half_roll", "test_cockpit_extremes",
 		"test_recenter", "test_examples_install", "test_tracks_closed", "test_track_heights", "test_track_mesh",
-		"test_lap_tracker", "test_recovery", "test_bridge", "test_fallen_on_bridge", "test_damage", "test_league",
+		"test_lap_tracker", "test_recovery", "test_bridge", "test_fallen_on_bridge", "test_below_road", "test_damage", "test_league",
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
@@ -243,6 +243,33 @@ func _jump_clear(p: TrackPath, jumps: Array, s: float, tolerance: float) -> bool
 		if ahead < TrackPath.JUMP_RUNUP - tolerance or p._fwd_dist(jp[0], k) <= p._fwd_dist(jp[0], jp[1]):
 			return false
 	return true
+
+
+## Below the road: straight down from the road's height (not along its
+## normal: past a steep take-off lip a flying car would count as under it -
+## The Tower's big jump switched the flight assist off that way).
+func test_below_road() -> void:
+	var p := TrackPath.new(TrackLibrary.get_def("the_tower"))
+	var lip := -1
+	for i in range(p.index_at_s(400.0), p.index_at_s(470.0)):
+		if p.forward[i].y > 0.5 and p.center[i + 1].y < p.center[i].y - 10.0:
+			lip = i
+			break
+	check(lip >= 0, "The Tower: the take-off lip found")
+	var fwd := Vector3(p.forward[lip].x, 0.0, p.forward[lip].z).normalized()
+	var flying := p.center[lip] + fwd * 26.0
+	flying.y = 52.6
+	check(p.nearest(flying, lip, 40) == lip, "in flight the lip is still the nearest road point")
+	check(p.height_above(flying, lip) < -1.2, "along the lip's normal the car seems under it (the old test)")
+	check(not p.below_road(flying, p.index_at_s(p.s_of(flying, lip))), "flying over the jump: not below the road under it")
+	# Ski Flyer: in flight below the lip's height, high over the road under it
+	var sk := TrackPath.new(TrackLibrary.get_def("ski_flyer"))
+	var k := sk.index_at_s(1263.6)
+	check(not sk.below_road(sk.center[k] + Vector3.UP * 50.0, k), "Ski Flyer: 50 m over the road in flight - not below")
+	var j := p.index_at_s(380.0)
+	var beside := p.center[j] + p.right_flat[j] * (p.half_width[j] + 3.0) + Vector3.DOWN * 5.0
+	check(p.below_road(beside, j), "beside a straight 5 m lower: below the road")
+	check(not p.below_road(p.center[j] + Vector3.UP * 0.6, j), "on the road: not below")
 
 
 ## A car on a drawbridge has not fallen off (its engine must not stall
