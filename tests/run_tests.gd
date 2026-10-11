@@ -10,12 +10,12 @@ var _current := ""
 func _init() -> void:
 	var tests := [
 		"test_cockpit_half_pitch", "test_cockpit_half_roll", "test_cockpit_extremes",
-		"test_recenter", "test_tracks_closed", "test_track_heights", "test_track_mesh",
-		"test_lap_tracker", "test_recovery", "test_bridge", "test_damage", "test_league",
+		"test_recenter", "test_examples_install", "test_tracks_closed", "test_track_heights", "test_track_mesh",
+		"test_lap_tracker", "test_recovery", "test_bridge", "test_fallen_on_bridge", "test_damage", "test_league",
 		"test_league_roundtrip", "test_input_norm", "test_ai_profile",
 		"test_custom1_layout", "test_loop_geometry", "test_tilt_rule", "test_tumble_view", "test_shifted_loop_view", "test_crane_chains",
 		"test_no_unintended_crossings", "test_legacy_save_ids", "test_translations",
-		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_crane_before_black_walls", "test_jump_align", "test_parachute", "test_road_on_ground", "test_bank_hold", "test_crane_motor_sound", "test_engine_start_stop", "test_wind_noise", "test_speed_signs", "test_tyre_squeal", "test_wall_point_roles", "test_league_pits_vertical",
+		"test_net_golden", "test_net_roundtrip", "test_title_music", "test_doppler_source", "test_doppler_listener", "test_sound_travel_time", "test_tunnel_track", "test_tunnel_mesh_and_ground", "test_editor_basics", "test_editor_closing", "test_editor_crossings", "test_editor_cut", "test_editor_move", "test_editor_move_start", "test_editor_nudge", "test_editor_reverse", "test_track_waves", "test_editor_move_points", "test_height_ribbon", "test_editor_view_dome", "test_wall_on_sample", "test_wall_mesh_upright", "test_official_in_editor", "test_loop_radius", "test_editor_heights", "test_editor_crossing_heights", "test_custom_track_delete", "test_track_share", "test_editor_deep_tunnel", "test_road_stripes", "test_steep_road_black", "test_crane_before_black_walls", "test_jump_align", "test_parachute", "test_road_on_ground", "test_bank_hold", "test_crane_motor_sound", "test_engine_start_stop", "test_wind_noise", "test_speed_signs", "test_tyre_squeal", "test_wall_point_roles", "test_league_pits_vertical",
 	]
 	for t in tests:
 		_current = t
@@ -83,6 +83,38 @@ func test_recenter() -> void:
 
 # --- tracks ---------------------------------------------------------------------------
 
+## The league tracks and the shipped example tracks.
+func _track_ids() -> Array:
+	return TrackLibrary.ORDER + TrackLibrary.EXAMPLES.map(func(e): return TrackLibrary.EXAMPLE_PREFIX + e)
+
+
+## The example tracks: shipped, copied once into the own tracks (never over
+## an own file of the same name, a deleted one does not come back).
+func test_examples_install() -> void:
+	var dir := "user://test_examples"
+	var marker := dir.path_join("installed.txt")
+	DirAccess.make_dir_recursive_absolute(dir)
+	for f in DirAccess.get_files_at(dir):
+		DirAccess.remove_absolute(dir.path_join(f))
+	for ex in TrackLibrary.EXAMPLES:
+		var d := TrackLibrary.load_example(ex)
+		check(d.get("def") is Dictionary and not d.has("official"), "example %s shipped as an own track" % ex)
+		check(not TrackLibrary.is_official(ex), "example %s is no official track" % ex)
+	# an own file of the same name stays
+	var own := FileAccess.open(dir.path_join("grand_tour.json"), FileAccess.WRITE)
+	own.store_string("{\"name\": \"mine\"}")
+	own.close()
+	var copied := TrackLibrary.install_examples(dir, marker)
+	check(copied == ["loop_and_jump"], "copied the missing example only (%s)" % [copied])
+	check(FileAccess.get_file_as_string(dir.path_join("grand_tour.json")).contains("mine"), "own file not overwritten")
+	check(FileAccess.get_file_as_string(dir.path_join("loop_and_jump.json")) == FileAccess.get_file_as_string(TrackLibrary.example_path("loop_and_jump")), "example copied as it is")
+	DirAccess.remove_absolute(dir.path_join("loop_and_jump.json"))
+	check(TrackLibrary.install_examples(dir, marker).is_empty(), "a deleted example does not come back")
+	for f in DirAccess.get_files_at(dir):
+		DirAccess.remove_absolute(dir.path_join(f))
+	DirAccess.remove_absolute(dir)
+
+
 func test_tracks_closed() -> void:
 	check(TrackLibrary.ORDER.size() == 8, "8 tracks")
 	for id in TrackLibrary.ORDER:
@@ -148,7 +180,7 @@ func test_lap_tracker() -> void:
 func test_recovery() -> void:
 	var curves := 0
 	var cuts := 0
-	for id in TrackLibrary.TRACKS:
+	for id in _track_ids():
 		var p := TrackPath.new(TrackLibrary.get_def(id))
 		var jumps := p.crane_jumps()
 		var bad := ""
@@ -179,30 +211,12 @@ func test_recovery() -> void:
 		check(behind, "%s: crane goes back, not on" % id)
 	check(curves > 0, "crane sets down in curves (%d spots)" % curves)
 	check(cuts > 0, "crane sets down in open cuts (%d spots)" % cuts)
-	# a "no crane" piece: the car goes back to before it
-	var def: Dictionary = TrackLibrary.get_def("grand_tour").duplicate(true)
-	var p0 := TrackPath.new(def)
-	var pick := -1
-	for pi_ in p0.pieces.size():
-		var mid := float(p0.pieces[pi_]["s0"]) + float(p0.pieces[pi_]["length"]) * 0.5
-		if float(p0.pieces[pi_]["length"]) > 20.0 and is_equal_approx(p0.recovery_s(mid), mid):
-			pick = pi_
-			break
-	if pick < 0:
-		check(false, "no_crane: found a piece to mark")
-		return
-	def["pieces"][pick]["no_crane"] = true
-	var p1 := TrackPath.new(def)
-	var mid := float(p1.pieces[pick]["s0"]) + float(p1.pieces[pick]["length"]) * 0.5
-	var rs := p1.recovery_s(mid)
-	check(p1.piece_at_s(rs) != pick and p1.delta_s(rs, float(p1.pieces[pick]["s0"])) > 0.0, "no_crane: set down before the marked piece (%.0f, piece from %.0f)" % [rs, p1.pieces[pick]["s0"]])
-
 
 ## Why the crane must not set a car down at sample i ("" = it may).
 func _no_crane_reason(p: TrackPath, i: int) -> String:
 	var pc: Dictionary = p.pieces[p.piece_of[i]]
-	if p.road[i] != 1 or pc["gap"]:
-		return "gap"
+	if p.road[i] != 1:
+		return "no road"
 	if p.tunnel[i] == 1:
 		return "tunnel"
 	if p.loop_mask[i] == 1:
@@ -211,8 +225,6 @@ func _no_crane_reason(p: TrackPath, i: int) -> String:
 		return "deck"
 	if pc["bridge"] or p.bridge_zone[i] == 1:
 		return "drawbridge"
-	if pc["no_crane"]:
-		return "no crane piece"
 	if (p.pit_mask.size() == p.n and p.pit_mask[i] == 1) or (p.step.size() == p.n and p.step[i] == 1):
 		return "pit"
 	for j in p.n:
@@ -231,6 +243,28 @@ func _jump_clear(p: TrackPath, jumps: Array, s: float, tolerance: float) -> bool
 		if ahead < TrackPath.JUMP_RUNUP - tolerance or p._fwd_dist(jp[0], k) <= p._fwd_dist(jp[0], jp[1]):
 			return false
 	return true
+
+
+## A car on a drawbridge has not fallen off (its engine must not stall
+## there); through the open bridge, beside or below the road it has.
+func test_fallen_on_bridge() -> void:
+	var p := TrackPath.new(TrackLibrary.get_def("example/loop_and_jump"))
+	var i := -1
+	for k in p.n:
+		if p.bridge_zone[k] == 1:
+			i = k
+			break
+	check(i >= 0, "bridge zone found")
+	var h := p.road_height(i)
+	check(not p.fallen(i, 0.0, h + 0.5), "on the bridge leaves: not fallen")
+	check(p.fallen(i, 0.0, h - 8.0), "through the open bridge: fallen")
+	var j := 0
+	while p.road[j] != 1 or p.ground_floor[j] == 1 or (p.pit_mask.size() == p.n and p.pit_mask[j] == 1):
+		j += 1
+	var hj := p.road_height(j)
+	check(not p.fallen(j, 0.0, hj + 0.5), "on the road: not fallen")
+	check(not p.fallen(j, p.half_width[j] + 2.0, hj + 0.5), "beside the road, as high: not fallen")
+	check(p.fallen(j, p.half_width[j] + 2.0, hj - 5.0), "beside and below the road: fallen")
 
 
 func test_bridge() -> void:
@@ -329,7 +363,7 @@ func test_ai_profile() -> void:
 # --- custom track, loops, underpass ------------------------------------------------------
 
 func test_custom1_layout() -> void:
-	var p := TrackPath.new(TrackLibrary.get_def("loop_and_jump"))
+	var p := TrackPath.new(TrackLibrary.get_def("example/loop_and_jump"))
 	check(p.closure_error < 0.5 and p.heading_error < 0.01, "loop_and_jump closed (err %.2f)" % p.closure_error)
 	var decks := 0
 	var lowest_under := INF
@@ -361,7 +395,7 @@ func test_custom1_layout() -> void:
 
 
 func test_loop_geometry() -> void:
-	var p := TrackPath.new(TrackLibrary.get_def("loop_and_jump"))
+	var p := TrackPath.new(TrackLibrary.get_def("example/loop_and_jump"))
 	var lp: Dictionary = {}
 	for pc in p.pieces:
 		if pc["type"] == "O":
@@ -478,7 +512,7 @@ func test_shifted_loop_view() -> void:
 	# real loops are shifted sideways: through the whole loop the view only
 	# pitches relative to the car (no roll), lag -40 (nose up) -> 0 (top) ->
 	# +40 (nose down), and it does not jump at entry or exit
-	var p := TrackPath.new(TrackLibrary.get_def("loop_and_jump"))
+	var p := TrackPath.new(TrackLibrary.get_def("example/loop_and_jump"))
 	var loops := 0
 	for pc in p.pieces:
 		if pc["type"] != "O":
@@ -628,7 +662,7 @@ func test_crane_chains() -> void:
 func test_no_unintended_crossings() -> void:
 	# two parts of a track may only overlap in plan view as an underpass
 	# (at least 7 m apart vertically)
-	for id in TrackLibrary.ORDER + TrackLibrary.CUSTOM:
+	for id in _track_ids():
 		var p := TrackPath.new(TrackLibrary.get_def(id))
 		var worst := INF
 		for i in range(0, p.n, 3):
@@ -653,7 +687,7 @@ func test_translations() -> void:
 	var re := RegEx.create_from_string("Lang\\.t\\(\"((?:[^\"\\\\]|\\\\.)*)\"\\)")
 	var missing := []
 	var count := 0
-	for dir in ["res://scripts/ui", "res://scripts/race", "res://scripts/hud", "res://scripts/league", "res://scripts/autoload"]:
+	for dir in ["res://scripts/ui", "res://scripts/race", "res://scripts/hud", "res://scripts/league", "res://scripts/autoload", "res://scripts/editor"]:
 		for f in DirAccess.get_files_at(dir):
 			if not f.ends_with(".gd"):
 				continue
@@ -663,6 +697,11 @@ func test_translations() -> void:
 				count += 1
 				if not Lang.DE.has(key):
 					missing.append(key)
+	# the editor help is a table (Lang.t() at runtime)
+	for key in EditorHelp.texts():
+		count += 1
+		if not Lang.DE.has(key):
+			missing.append(key)
 	check(count > 60, "UI texts found (%d)" % count)
 	check(missing.is_empty(), "German translation for every UI text, missing: %s" % [missing])
 	Lang.current = "de"
@@ -849,7 +888,7 @@ func test_sound_travel_time() -> void:
 # --- tunnels -------------------------------------------------------------------------
 
 func test_tunnel_track() -> void:
-	var p := TrackPath.new(TrackLibrary.get_def("grand_tour"))
+	var p := TrackPath.new(TrackLibrary.get_def("example/grand_tour"))
 	check(p.closure_error < 0.5 and p.heading_error < 0.01, "grand_tour closed (err %.3f)" % p.closure_error)
 	check(p.total_length > 3500.0, "grand_tour is long (%.0f m)" % p.total_length)
 	var covered := 0
@@ -889,7 +928,7 @@ func test_tunnel_track() -> void:
 
 
 func test_tunnel_mesh_and_ground() -> void:
-	var p := TrackPath.new(TrackLibrary.get_def("grand_tour"))
+	var p := TrackPath.new(TrackLibrary.get_def("example/grand_tour"))
 	var node := TrackNode.new().build(p)
 	check(node.has_node("TunnelMesh") and node.has_node("TunnelLamps"), "tunnel mesh and lamps")
 	var lights := 0
@@ -1520,28 +1559,54 @@ func test_wall_mesh_upright() -> void:
 			node.free()
 
 
-## An official track in the editor: its flags (no crane, gap), its theme
-## and boost values stay, and a league track gets no division of its own
-## (the league table gives it); an own file drops gaps and crane marks.
+## An official track in the editor: its theme and boost values stay, and a
+## league track gets no division of its own (the league table gives it);
+## old crane marks and gap pieces are dropped.
 func test_official_in_editor() -> void:
-	check(TrackLibrary.TRACKS.size() == TrackLibrary.ORDER.size() + TrackLibrary.CUSTOM.size(), "all official tracks loaded")
+	check(TrackLibrary.TRACKS.size() == TrackLibrary.ORDER.size(), "all official tracks loaded (the league)")
 	var raw := TrackLibrary.load_official("camel_back")
-	raw["pieces"][2]["no_crane"] = true      # a mark, whatever the file has
-	var marks: int = (raw["pieces"] as Array).filter(func(p): return p.get("no_crane", false)).size()
+	raw["pieces"][2]["no_crane"] = true      # old flags
+	raw["pieces"][3]["gap"] = true
 	var m := TrackEditorModel.from_dict(raw)
-	var nc := m.pieces.filter(func(p): return p.get("no_crane", false)).size()
-	check(m.official == "camel_back" and nc == marks, "official: kept its crane marks (%d of %d)" % [nc, marks])
+	check(m.official == "camel_back" and not m.pieces[2].has("no_crane") and not m.pieces[3].has("gap"), "old crane mark and gap dropped")
 	var def := m.to_def("Camel Back")
 	check(int(def.get("theme", -1)) == 1 and int(def.get("boost", 0)) == 40 and not def.has("division"), "official: theme / boost kept, no division (%s)" % [def])
-	check(m.toggle_flag(4, "gap") and m.pieces[4].get("gap", false), "gap toggled on")
-	check(m.toggle_flag(4, "gap") and not m.pieces[4].has("gap"), "and off again")
-	var gt := TrackEditorModel.from_dict(TrackLibrary.load_official("grand_tour"))
-	var gaps := gt.pieces.filter(func(p): return p.get("gap", false)).size()
-	check(gaps > 0, "grand tour keeps its gaps (%d)" % gaps)
-	var own := TrackLibrary.load_official("camel_back")
-	own.erase("official")
-	var mo := TrackEditorModel.from_dict(own)
-	check(mo.pieces.filter(func(p): return p.has("no_crane")).is_empty(), "own file: crane marks dropped")
+
+
+## Loop radius: set per loop in the editor (clamped, snapped, undo), carried
+## into the definition; the built loop is 2 r high.
+func test_loop_radius() -> void:
+	var m := TrackEditorModel.new()
+	m.set_start(Vector2(0, 0))
+	m.place_first(Vector2(0, -100))
+	m.place(m.loop_group(1))
+	var k := -1
+	for i in m.pieces.size():
+		if m.pieces[i].get("t", "S") == "O":
+			k = i
+	check(k >= 0 and near(TrackEditorModel.loop_radius(m.pieces[k]), TrackPath.LOOP_RADIUS), "new loop has the default radius")
+	check(not m.set_loop_radius(0, 15.0), "only a loop has a loop radius")
+	check(m.set_loop_radius(k, 16.2) and near(m.pieces[k]["r"], 16.0), "radius snapped to %.1f m (%s)" % [TrackEditorModel.LOOP_R_STEP, m.pieces[k].get("r")])
+	check(near(TrackEditorModel.piece_length(m.pieces[k]), TAU * 16.0), "loop length 2 pi r")
+	check(m.set_loop_radius(k, 99.0) and near(m.pieces[k]["r"], TrackEditorModel.LOOP_R_MAX), "clamped to the largest radius")
+	check(not m.set_loop_radius(k, 99.0), "no change: false")
+	check(m.undo_height() and near(m.pieces[k]["r"], 16.0), "undo")
+	check(m.set_loop_radius(k, TrackPath.LOOP_RADIUS) and not m.pieces[k].has("r"), "default radius not stored")
+	# the definition: TrackPath builds the loop with it
+	var def: Dictionary = TrackLibrary.get_def("example/loop_and_jump").duplicate(true)
+	var lk := -1
+	for i in (def["pieces"] as Array).size():
+		if def["pieces"][i].get("t", "S") == "O":
+			lk = i
+			break
+	def["pieces"][lk]["r"] = 17.0
+	var p := TrackPath.new(def)
+	var lp: Dictionary = p.pieces[lk]
+	var top := -INF
+	for i in range(int(lp["i0"]), int(lp["i1"])):
+		top = maxf(top, p.center[i].y)
+	check(near(top - float(lp["h0"]), 34.0, 0.3), "loop of radius 17 is 34 m high (%.2f)" % (top - float(lp["h0"])))
+	check(p.closure_error < 0.5, "the lap stays closed (err %.2f)" % p.closure_error)
 
 
 func _editor_oval() -> TrackEditorModel:
@@ -1801,7 +1866,7 @@ func test_league_pits_vertical() -> void:
 
 
 func test_road_stripes() -> void:
-	for id in ["camel_back", "grand_tour", "stone_hopper"]:
+	for id in ["camel_back", "example/grand_tour", "stone_hopper"]:
 		var p := TrackPath.new(TrackLibrary.get_def(id))
 		var node := TrackNode.new().build(p)
 		var ok_border := true

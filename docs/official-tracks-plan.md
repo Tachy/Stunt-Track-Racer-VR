@@ -38,8 +38,7 @@ Grundriss, Kurven (auch Radien und Winkel außerhalb des Katalogs), Querneigung 
 ## 3. Editor-Lücken schließen
 
 - Kurven außerhalb des Katalogs und ihre feste Querneigung bleiben beim Laden und Speichern erhalten. Neu gesetzt wird weiter nur aus dem Katalog.
-- `no_crane` bleibt erhalten und wird mit der Taste **N** am markierten Abschnitt umgeschaltet. Im Plan und in 3D wird es angezeigt.
-- `gap` (Lücke in der Bahn, nötig für Grand Tour und Loop and Jump) bleibt erhalten, Taste **G**. Bisher löscht der Editor beide Flags beim Laden.
+- Die früheren Flags `gap` (Lücke ohne Fahrbahn) und `no_crane` sind entfallen; Sprünge entstehen über die senkrechten Wände (gelbe Punkte) im Höhen-Editor.
 - Die Metadaten (siehe 1) stehen im Admin-Modus in einer kleinen Zeile: Theme, Boost, Basis.
 
 ## 4. Admin-Modus

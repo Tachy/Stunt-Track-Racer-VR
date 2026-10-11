@@ -28,7 +28,8 @@ extends Control
 ## the lap and up / down); double click on it: the camera turns around it;
 ## double click on the road: a new point; right click: remove it; C kink at the
 ## point; Up/Down (Shift: x4) its height, Left/Right 1 m back / on along the
-## lap. No slope limit: dragged at least 80 deg steep to a neighbour, a
+## lap. A loop (set in the plan) has a green mark on its top: click it, then
+## Up/Down change its radius. No slope limit: dragged at least 80 deg steep to a neighbour, a
 ## point snaps under (or over) it as a vertical wall: wall down + wall up = pit (floor on
 ## the ground: the ground), wall down alone = ski jump. Dragged away to the
 ## side again it is a spline point. A click on the road marks its piece
@@ -37,6 +38,9 @@ extends Control
 ## the plan (PlanNav): click = the piece there, the camera turns around it;
 ## right mouse = push, wheel = zoom. Esc undo.
 ## Below the ground the road becomes a cut and a tunnel by itself.
+##
+## H (or the HELP button) shows / hides the keys of the stage (EditorHelp):
+## in the plan stage under the info line, in the height stage under the plan.
 
 signal start_race(request: Dictionary)
 signal leave
@@ -59,6 +63,7 @@ const ANCHOR := Color(1.0, 0.85, 0.2)            # where a gap is closed to
 const CLICK_SLOP := 4.0                          # px a right click may move
 const MODE_BUTTON := Color("#2f6db5")   # heights / plan
 const MENU_BUTTON := Color("#a83a32")   # leave the editor
+const HELP_BUTTON := Color("#3d8a4a")   # help on / off
 
 var model := TrackEditorModel.new()
 var track_name := "MY TRACK"
@@ -98,6 +103,7 @@ var view: EditorView
 ## (empty: the whole window).
 var ui_rect := Rect2()
 var _bar: HBoxContainer
+var _help: EditorHelp
 
 var _name_edit: LineEdit
 var _load_menu: OptionButton
@@ -106,19 +112,34 @@ var _info: Label
 ## Id of the file the track was loaded from / last saved to ("" = none).
 var _saved_id := ""
 ## Admin mode (--admin, run from the project only - an exported game cannot
-## write res://): an official track is saved back to server/official.
+## write res://): an official track is saved back to server/official, an
+## example track (TrackLibrary.EXAMPLES) back to examples/.
 var admin := OS.get_cmdline_user_args().has("--admin") and OS.has_feature("editor")
 var _flash_after_save := ""
+## Admin: the example track being edited (its id; "" = none).
+var _example := ""
 
 
 func _init(file_id := "") -> void:
 	name = "TrackEditor"
-	if file_id != "":
-		var data := TrackLibrary.load_official(file_id) if TrackLibrary.is_official(file_id) else TrackLibrary.load_custom(file_id)
-		if not data.is_empty():
-			model = TrackEditorModel.from_dict(data)
-			track_name = str(data.get("name", track_name))
-			_saved_id = file_id
+	var data := _load_data(file_id)
+	if not data.is_empty():
+		model = TrackEditorModel.from_dict(data)
+		track_name = str(data.get("name", track_name))
+		_saved_id = file_id
+		_example = file_id.trim_prefix(TrackLibrary.EXAMPLE_PREFIX) if TrackLibrary.is_example(file_id) else ""
+
+
+## The editor file of track id ({}: none; official and example tracks in
+## admin mode only).
+func _load_data(id: String) -> Dictionary:
+	if id == "":
+		return {}
+	if TrackLibrary.is_official(id):
+		return TrackLibrary.load_official(id) if admin else {}
+	if TrackLibrary.is_example(id):
+		return TrackLibrary.load_example(id) if admin else {}
+	return TrackLibrary.load_custom(id)
 
 
 func _ready() -> void:
@@ -199,6 +220,7 @@ func _build_bar() -> void:
 	_mode_btn = _bar_button("", _toggle_mode, MODE_BUTTON)
 	bar.add_child(_mode_btn)
 	bar.add_child(_bar_button("TEST DRIVE", _act_test))
+	bar.add_child(_bar_button("HELP (H)", _toggle_help, HELP_BUTTON))
 	bar.add_child(_bar_button("MENU", func(): leave.emit(), MENU_BUTTON))
 	_info = Label.new()
 	add_child(_info)
@@ -212,16 +234,23 @@ func _build_bar() -> void:
 	_nav.visible = false
 	_nav.piece_clicked.connect(func(k: int): _h3d.select_piece(k, true))   # the camera goes there
 	add_child(_nav)
+	_help = EditorHelp.new()
+	add_child(_help)
 
 
-## The official tracks first (admin: to tune them; else to start an own
-## copy), then the own ones; the item's metadata is the track id.
+## Admin: the official tracks first (to tune them) and the shipped example
+## tracks; then the own ones. The item's metadata is the track id.
 func _fill_load_menu() -> void:
 	_load_menu.clear()
 	_load_menu.add_item(Lang.t("LOAD ..."))
-	for id in TrackLibrary.ORDER + TrackLibrary.CUSTOM:
-		if TrackLibrary.is_official(id):
+	for id in TrackLibrary.ORDER:
+		if admin and TrackLibrary.is_official(id):
 			_load_menu.add_item(Lang.t("OFFICIAL: %s") % TrackLibrary.display_name(id))
+			_load_menu.set_item_metadata(_load_menu.item_count - 1, id)
+	if admin:
+		for ex in TrackLibrary.EXAMPLES:
+			var id: String = TrackLibrary.EXAMPLE_PREFIX + ex
+			_load_menu.add_item(Lang.t("EXAMPLE: %s") % TrackLibrary.display_name(id))
 			_load_menu.set_item_metadata(_load_menu.item_count - 1, id)
 	if DirAccess.dir_exists_absolute(TrackLibrary.CUSTOM_DIR):
 		for f in DirAccess.get_files_at(TrackLibrary.CUSTOM_DIR):
@@ -296,6 +325,10 @@ func _input(event: InputEvent) -> void:
 	var handled := true
 	if k.keycode == KEY_TAB:
 		_toggle_mode()
+	elif k.keycode == KEY_H and not k.ctrl_pressed:
+		_toggle_help()
+	elif k.keycode == KEY_S and k.ctrl_pressed:
+		_act_save()
 	elif _mode == "height":
 		handled = _height_key(k)
 	elif k.keycode == KEY_ESCAPE:
@@ -315,8 +348,6 @@ func _input(event: InputEvent) -> void:
 		return
 	elif k.keycode == KEY_R and not k.ctrl_pressed and model.closed:
 		_act_reverse()
-	elif k.keycode == KEY_S and k.ctrl_pressed:
-		_act_save()
 	else:
 		handled = false
 	if handled:
@@ -457,13 +488,17 @@ func _update() -> void:
 	_bar.position = o + Vector2(10, 8)
 	_info.position = o + Vector2(12, 44)
 	_status.position = o + Vector2(12, us.y - 34)
+	# the help: under the plan (height stage) / the info line, down to the status line
+	var help_top := 72.0
 	if _mode == "height":
 		_nav.position = o + Vector2(10, 72)
 		_nav.size = Vector2(maxf(220.0, us.x * 0.28), maxf(160.0, us.y * 0.34))
+		help_top += _nav.size.y + 8.0
+	if _help.visible:
+		_help.place(_mode, Rect2(o + Vector2(10, help_top), Vector2(us.x - 20.0, us.y - help_top - 44.0)))
+	if _mode == "height":
 		_info.text = _height_info()
-		_status.text = Lang.t("CLICK = SELECT / DRAG POINT (SHIFT/CTRL: MORE)  DOUBLE CLICK = CAMERA TO POINT / NEW POINT ON ROAD  RIGHT CLICK / DEL = REMOVE  RIGHT MOUSE = TURN  MIDDLE MOUSE = MOVE  WHEEL = DISTANCE  C KINK  UP/DOWN HEIGHT  LEFT/RIGHT ALONG  W WAVE  U BANKING  B BRIDGE  ESC UNDO")
-		if model.official != "":
-			_status.text += "  " + Lang.t("N NO CRANE  G GAP")
+		_status.text = Lang.t("H = HELP: KEYS AND MOUSE")
 		queue_redraw()
 		return
 	_preview = []
@@ -485,12 +520,12 @@ func _update() -> void:
 	elif model.start_dir == Vector2.ZERO:
 		_status.text = Lang.t("CLICK THE END OF THE START STRAIGHT (ACROSS OR UP/DOWN)")
 	elif model.closed:
-		_status.text = Lang.t("LAP CLOSED - SAVE OR TEST DRIVE (ESC REOPENS)") + "   " \
-			+ Lang.t("CLICK = MARK (SHIFT: MORE)  DRAG / ARROWS = MOVE  RIGHT CLICK = DELETE MARKED  R = REVERSE")
+		_status.text = Lang.t("LAP CLOSED - SAVE OR TEST DRIVE (ESC REOPENS)")
 	elif model.has_gap():
 		_status.text = Lang.t("DRAW THE GAP TO THE YELLOW MARK  ESC = REMOVE LAST / UNDO THE DELETING")
 	else:
-		_status.text = Lang.t("CLICK = PLACE  ESC = REMOVE LAST  O / SHIFT+O = LOOP  WHEEL = ZOOM  RIGHT MOUSE = MOVE")
+		_status.text = Lang.t("CLICK = PLACE  ESC = REMOVE LAST")
+	_status.text += "   " + Lang.t("H = HELP: KEYS AND MOUSE")
 	queue_redraw()
 
 
@@ -519,8 +554,13 @@ static func _piece_text(p: Dictionary) -> String:
 		"S":
 			return ("%s %.0f M" if fmod(float(p["l"]), 1.0) < 0.05 else "%s %.1f M") % [Lang.t("RUN-OUT") if p.get("auto", false) else Lang.t("STRAIGHT"), float(p["l"])]
 		"O":
-			return Lang.t("LOOP")
+			return "%s R%.1f M" % [Lang.t("LOOP"), TrackEditorModel.loop_radius(p)]
 	return "%s %d° R%d (%d°)" % [p["t"], int(p["a"]), int(p["r"]), roundi(absf(float(p.get("bank", 0.0))))]
+
+
+func _toggle_help() -> void:
+	_help.visible = not _help.visible
+	_update()
 
 
 func _flash(text: String) -> void:
@@ -648,7 +688,7 @@ func _draw_piece(pos: Vector2, dir: Vector2, p: Dictionary, col: Color) -> void:
 		scr.append(to_screen(q))
 	draw_polyline(scr, col, maxf(2.0, TrackPath.ROAD_WIDTH * zoom), true)
 	if p.get("t", "S") == "O":
-		draw_circle(to_screen(pts[pts.size() / 2]), maxf(4.0, TrackPath.LOOP_RADIUS * zoom * 0.5), Color(col, 0.5))
+		draw_circle(to_screen(pts[pts.size() / 2]), maxf(4.0, TrackEditorModel.loop_radius(p) * zoom * 0.5), Color(col, 0.5))
 
 
 ## The start: the line across the road and an arrow in the direction of travel.
@@ -675,6 +715,9 @@ func _file_id() -> String:
 
 
 func _act_save() -> void:
+	if _example != "" and admin:
+		_save_example()
+		return
 	if model.official != "":
 		if admin:
 			_save_official()
@@ -720,10 +763,27 @@ func _save_official() -> void:
 	_flash(Lang.t("OFFICIAL TRACK SAVED: %s (COMMIT IT)") % TrackLibrary.official_path(id))
 
 
+## Admin: an example track back to examples/<id>.json (commit it; new
+## players get it with the next release).
+func _save_example() -> void:
+	var path := TrackLibrary.example_path(_example)
+	var data := model.to_dict(track_name)
+	if model.closed:
+		data["def"] = model.to_def(track_name)
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f == null:
+		_flash(Lang.t("COULD NOT SAVE"))
+		return
+	f.store_string(JSON.stringify(data, "  "))
+	f.close()
+	_saved_id = TrackLibrary.EXAMPLE_PREFIX + _example
+	_flash(Lang.t("EXAMPLE TRACK SAVED: %s (COMMIT IT)") % path)
+
+
 ## Renames the saved file of the loaded track to the name in the name field
 ## (the file keeps its content, unsaved changes stay in the editor).
 func _act_rename() -> void:
-	if model.official != "":
+	if model.official != "" or _example != "":
 		_flash(Lang.t("NOT FOR AN OFFICIAL TRACK"))
 		return
 	var data := TrackLibrary.load_custom(_saved_id) if _saved_id != "" else {}
@@ -755,7 +815,7 @@ func _act_rename() -> void:
 ## Deletes the saved file of the loaded track (after a question); the layout
 ## stays in the editor and can be saved again.
 func _act_delete() -> void:
-	if model.official != "":
+	if model.official != "" or _example != "":
 		_flash(Lang.t("NOT FOR AN OFFICIAL TRACK"))
 		return
 	var id := _saved_id if _saved_id != "" else _file_id()
@@ -784,7 +844,7 @@ func _act_load(index: int) -> void:
 	if index <= 0:
 		return
 	var id := str(_load_menu.get_item_metadata(index))
-	var data := TrackLibrary.load_official(id) if TrackLibrary.is_official(id) else TrackLibrary.load_custom(id)
+	var data := _load_data(id)
 	_load_menu.select(0)
 	if data.is_empty():
 		return
@@ -793,6 +853,7 @@ func _act_load(index: int) -> void:
 	track_name = str(data.get("name", track_name))
 	_name_edit.text = track_name
 	_saved_id = id
+	_example = id.trim_prefix(TrackLibrary.EXAMPLE_PREFIX) if TrackLibrary.is_example(id) else ""
 	if model.has_start:
 		view_center = model.start
 	_set_mode("plan")
@@ -803,6 +864,7 @@ func _act_new() -> void:
 	_set_mode("plan")
 	model = TrackEditorModel.new()
 	_saved_id = ""
+	_example = ""
 	_set_mode("plan")
 	_update()
 
@@ -825,8 +887,12 @@ func _act_test() -> void:
 		_flash(Lang.t("CLOSE THE LAP FIRST"))
 		return
 	_act_save()
-	# admin: the official track itself (saved just now); else the own file
-	var id := model.official if model.official != "" and admin else _file_id()
+	# admin: the official / example track itself (saved just now); else the own file
+	var id := _file_id()
+	if admin and model.official != "":
+		id = model.official
+	elif admin and _example != "":
+		id = TrackLibrary.EXAMPLE_PREFIX + _example
 	var req := {"track": id, "opponent": -1, "league": false, "super": false, "holes": 0, "from_editor": id}
 	# a point selected (blue) in the height stage: the drive starts before it
 	if _mode == "height" and _h3d.point > 0 and _h3d.point < model.points().size() - 1:
@@ -919,6 +985,12 @@ func _height_key(k: InputEventKey) -> bool:
 		KEY_LEFT, KEY_RIGHT when not _h3d.hold.is_empty():
 			var hx := model.hold_x(_h3d.hold[0], _h3d.hold[1])
 			model.move_hold(_h3d.hold[0], _h3d.hold[1], hx + (1.0 if k.keycode == KEY_RIGHT else -1.0) * (4.0 if k.shift_pressed else 1.0))
+		KEY_UP, KEY_DOWN when _h3d.loop >= 0 and _h3d.loop < model.pieces.size():
+			var step := TrackEditorModel.LOOP_R_STEP * (4.0 if k.shift_pressed else 1.0)
+			var r := TrackEditorModel.loop_radius(model.pieces[_h3d.loop]) + (step if k.keycode == KEY_UP else -step)
+			if not model.set_loop_radius(_h3d.loop, r):
+				_flash(Lang.t("LOOP RADIUS: %d TO %d M") % [int(TrackEditorModel.LOOP_R_MIN), int(TrackEditorModel.LOOP_R_MAX)])
+				return true
 		KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT when _h3d.wave >= 0 and _h3d.wave < model.waves.size():
 			var w: Array = model.waves[_h3d.wave]
 			var step := TrackEditorModel.WAVE_STEP if k.keycode in [KEY_UP, KEY_DOWN] else 1.0
@@ -964,16 +1036,11 @@ func _height_key(k: InputEventKey) -> bool:
 				_flash(Lang.t("SELECT A POINT FIRST"))
 				return true
 			model.toggle_corner(_h3d.point)
-		KEY_B, KEY_N, KEY_G:
+		KEY_B:
 			if _h3d.piece < 0:
 				_flash(Lang.t("SELECT A PIECE FIRST"))
 				return true
-			var flag: String = {KEY_B: "bridge", KEY_N: "no_crane", KEY_G: "gap"}[k.keycode]
-			if flag != "bridge" and model.official == "":
-				# own tracks keep no gaps and crane marks (see TrackEditorModel.from_dict)
-				_flash(Lang.t("ONLY FOR OFFICIAL TRACKS"))
-				return true
-			if not model.toggle_flag(_h3d.piece, flag):
+			if not model.toggle_flag(_h3d.piece, "bridge"):
 				_flash(Lang.t("NOT POSSIBLE HERE"))
 				return true
 		_:
@@ -992,7 +1059,10 @@ func _height_info() -> String:
 		t += "  " + Lang.t("TOO STEEP %d") % ns
 	var pts := model.points()
 	var pt := _h3d.point
-	if not _h3d.hold.is_empty():
+	if _h3d.loop >= 0 and _h3d.loop < model.pieces.size():
+		var r := TrackEditorModel.loop_radius(model.pieces[_h3d.loop])
+		t += "   >  " + Lang.t("LOOP RADIUS %.1f M  HEIGHT %.1f M") % [r, 2.0 * r]
+	elif not _h3d.hold.is_empty():
 		var hp: Dictionary = model.pieces[_h3d.hold[0]]
 		t += "   >  " + (Lang.t("BANKING HELD ON %d M AFTER THE CURVE") % roundi(float(hp.get("bank_out", 0.0))) if _h3d.hold[1] == "out"
 			else Lang.t("BANKING FROM %d M BEFORE THE CURVE") % roundi(float(hp.get("bank_in", 0.0))))
@@ -1013,8 +1083,4 @@ func _height_info() -> String:
 		t += "   >  #%d %s" % [_h3d.piece, _piece_text(p)]
 		if p.get("bridge", false):
 			t += "  " + Lang.t("DRAWBRIDGE")
-		if p.get("gap", false):
-			t += "  " + Lang.t("GAP")
-		if p.get("no_crane", false):
-			t += "  " + Lang.t("NO CRANE")
 	return t

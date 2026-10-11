@@ -19,6 +19,10 @@ const MIN_STRAIGHT := 10.0
 const TRANSITION_FULL := 40.0
 ## Straight run-up / run-out next to a loop.
 const LOOP_RUNWAY := 30.0
+## Loop radius (the piece's "r", set in the height stage): range and step.
+const LOOP_R_MIN := 8.0
+const LOOP_R_MAX := 30.0
+const LOOP_R_STEP := 0.5
 ## Mouse this near the start: the closing pieces are offered.
 const CLOSE_RADIUS := 60.0
 ## Curves of the radius of the latest curve win by this much (m, default of
@@ -102,7 +106,7 @@ static func sample(pos: Vector2, dir: Vector2, p: Dictionary, step := 2.0) -> Pa
 		var side := float(p.get("side", 1))
 		for k in 41:
 			var u := k / 40.0
-			var fwd := TrackPath.LOOP_RADIUS * sin(TAU * u)
+			var fwd := loop_radius(p) * sin(TAU * u)
 			var off := side * TrackPath.LOOP_SHIFT * (1.0 - cos(PI * u)) * 0.5
 			out.append(pos + dir * fwd + dir.rotated(PI * 0.5) * off)
 		return out
@@ -121,8 +125,13 @@ static func piece_length(p: Dictionary) -> float:
 	if t == "S":
 		return float(p.get("l", 40.0))
 	if t == "O":
-		return 2.0 * PI * TrackPath.LOOP_RADIUS
+		return 2.0 * PI * loop_radius(p)
 	return float(p.get("r", TrackPath.DEFAULT_RADIUS)) * deg_to_rad(float(p.get("a", 90.0)))
+
+
+## Radius of loop piece p (TrackPath.LOOP_RADIUS unless set).
+static func loop_radius(p: Dictionary) -> float:
+	return float(p.get("r", TrackPath.LOOP_RADIUS))
 
 
 static func bank_for(t: String, radius: int) -> float:
@@ -611,11 +620,10 @@ func poses() -> Array:
 	return out
 
 
-## A plain straight (no drawbridge, gap or crane mark): may be lengthened,
+## A plain straight (no drawbridge): may be lengthened,
 ## shortened, split or joined.
 static func _plain_straight(p: Dictionary) -> bool:
-	return p.get("t", "S") == "S" and not p.get("bridge", false) and not p.get("gap", false) \
-		and not p.get("no_crane", false)
+	return p.get("t", "S") == "S" and not p.get("bridge", false)
 
 
 ## The closed lap with pieces first..last moved by `offset` (plan, the
@@ -1508,9 +1516,8 @@ func toggle_corner(i: int) -> bool:
 	return true
 
 
-## Flags of piece k: "bridge" (drawbridge: straights of at least 40 m),
-## "gap" (no road: a jump) and "no_crane" (never put the car back here; any
-## piece but a loop). False if not possible there.
+## Flags of piece k: "bridge" (drawbridge: straights of at least 40 m).
+## False if not possible there.
 func toggle_flag(k: int, flag: String) -> bool:
 	var t: String = pieces[k].get("t", "S")
 	if t == "O":
@@ -1521,6 +1528,23 @@ func toggle_flag(k: int, flag: String) -> bool:
 	pieces[k][flag] = not pieces[k].get(flag, false)
 	if not pieces[k][flag]:
 		pieces[k].erase(flag)
+	return true
+
+
+## Sets the radius of loop k (snapped to LOOP_R_STEP, clamped to LOOP_R_MIN
+## .. LOOP_R_MAX; the default is not stored). False if k is no loop or the
+## radius stays as it is.
+func set_loop_radius(k: int, r: float) -> bool:
+	if k < 0 or k >= pieces.size() or pieces[k].get("t", "S") != "O":
+		return false
+	r = clampf(snappedf(r, LOOP_R_STEP), LOOP_R_MIN, LOOP_R_MAX)
+	if is_equal_approx(r, loop_radius(pieces[k])):
+		return false
+	_snapshot()
+	if is_equal_approx(r, TrackPath.LOOP_RADIUS):
+		pieces[k].erase("r")
+	else:
+		pieces[k]["r"] = r
 	return true
 
 
@@ -1651,10 +1675,9 @@ static func from_dict(d: Dictionary) -> TrackEditorModel:
 		m._heights_from_pieces()
 	m.official = str(d.get("official", ""))
 	m.meta = (d.get("meta", {}) as Dictionary).duplicate(true)
-	if m.official == "":
-		for p in m.pieces:
-			p.erase("gap")       # older own files: gap pieces are plain road now
-			p.erase("no_crane")
+	for p in m.pieces:
+		p.erase("no_crane")      # older files: crane marks and gap pieces are gone
+		p.erase("gap")
 	return m
 
 

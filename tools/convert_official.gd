@@ -28,7 +28,7 @@ const LIP_SHIFT := 0.05
 func _init() -> void:
 	var write := OS.get_cmdline_user_args().has("--write")
 	print("track           points walls  max err  mean err  steps old/new  pits old/new  tunnel old/new  len diff  problems")
-	for id in TrackLibrary.ORDER + TrackLibrary.CUSTOM:
+	for id in TrackLibrary.ORDER:
 		var data := TrackLibrary.load_official(id)
 		var old_def: Dictionary = data["def"]
 		if old_def.has("heights"):

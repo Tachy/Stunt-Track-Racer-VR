@@ -52,14 +52,15 @@ func _ready() -> void:
 		get_viewport().scaling_3d_scale = float(_args["render-scale"])
 		var vp := get_viewport()
 		print("[Main] window %s, 3D render scale %.2f -> %s px" % [DisplayServer.window_get_size(), vp.scaling_3d_scale, Vector2(DisplayServer.window_get_size()) * vp.scaling_3d_scale])
+	TrackLibrary.install_examples()     # the example tracks, once, into the own ones
 	if _args.has("vr-bench"):
 		add_child(VrBench.new())
 	if _args.has("fps-bench"):
 		add_child(FpsBench.new())     # debug: load test, VSync off
 	if _args.has("editor"):
 		var ed: String = _args["editor"]
-		# an official track by its id (admin), else an own one by its file name
-		show_editor("" if ed == "1" else (ed if TrackLibrary.is_official(ed) else TrackLibrary.CUSTOM_PREFIX + ed))
+		# an official or example track by its id (admin), else an own one by its file name
+		show_editor("" if ed == "1" else (ed if TrackLibrary.is_official(ed) or TrackLibrary.is_example(ed) else TrackLibrary.CUSTOM_PREFIX + ed))
 	elif _args.has("car-photos"):
 		_swap(CarPhotos.new())   # debug: close-ups of the car model, then quit
 	elif _args.has("online"):

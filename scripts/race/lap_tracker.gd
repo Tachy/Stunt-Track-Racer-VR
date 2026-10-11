@@ -1,7 +1,7 @@
 class_name LapTracker
 extends RefCounted
 ## Counts laps by requiring the pieces to be passed in order (no shortcuts).
-## Up to two pieces may be skipped at once (short gap pieces flown over).
+## Up to two pieces may be skipped at once (short pieces flown over).
 
 var piece_count := 1
 var next_piece := 1

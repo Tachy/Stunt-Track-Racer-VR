@@ -141,9 +141,7 @@ func _layout() -> void:
 		p["profile"] = raw.get("p", "ramp")
 		p["bump"] = float(raw.get("bump", 0.0))
 		p["bank"] = deg_to_rad(float(raw.get("bank", 0.0)))
-		p["gap"] = bool(raw.get("gap", false))
 		p["bridge"] = bool(raw.get("bridge", false))
-		p["no_crane"] = bool(raw.get("no_crane", false))
 		# a straight next to a curve: its banking held on this far into it
 		# (out: from the curve before; in: up to the curve after), then the run-out
 		p["bank_out"] = float(raw.get("bank_out", 0.0))
@@ -288,7 +286,7 @@ func _sample() -> void:
 			piece_of.append(pi_)
 			px.append(x)
 			var in_bridge: bool = p["bridge"] and u >= BRIDGE_U0 and u < BRIDGE_U1
-			road.append(0 if (p["gap"] or in_bridge) else 1)
+			road.append(0 if in_bridge else 1)
 			bridge_zone.append(1 if in_bridge else 0)
 			half_width.append(HALF_WIDTH)
 			loop_mask.append(1 if p["type"] == "O" else 0)
@@ -806,6 +804,20 @@ func lateral(pos: Vector3, i: int) -> float:
 	return (pos - center[i]).dot(right_flat[i])
 
 
+## Whether a car at sample i, lat beside the middle of the road, at height y
+## has fallen off: in a pit or down on the ground floor; on a drawbridge
+## (no road of its own: the leaves) only below the road - through the open
+## bridge, not on its leaves; elsewhere beside and below the road (sliding
+## off onto ground as high as the road is no fall).
+func fallen(i: int, lat: float, y: float, below := 1.5) -> bool:
+	if ground_floor[i] == 1 or (pit_mask.size() == n and pit_mask[i] == 1):
+		return true
+	var under := y - road_height(i, lat) < -below
+	if road[i] == 0:
+		return under
+	return absf(lat) > half_width[i] + 0.5 and under
+
+
 ## Road surface height at a lateral offset for sample i (static road only).
 func road_height(i: int, lat := 0.0) -> float:
 	var r := right[i]
@@ -913,7 +925,7 @@ func _recovery_back(r: float, jumps: Array) -> float:
 ## Whether the crane may set a car down at sample i.
 func _crane_spot(i: int) -> bool:
 	var p: Dictionary = pieces[piece_of[i]]
-	if p["gap"] or p["bridge"] or p["no_crane"]:
+	if p["bridge"]:
 		return false
 	if road[i] != 1 or tunnel[i] == 1 or loop_mask[i] == 1 or deck[i] == 1 or bridge_zone[i] == 1:
 		return false

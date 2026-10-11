@@ -672,7 +672,7 @@ func _act_practice_start() -> void:
 
 func _practice_ids() -> Array:
 	# built-in tracks, then the closed ones from the track editor
-	return TrackLibrary.ORDER + TrackLibrary.CUSTOM + TrackLibrary.custom_ids()
+	return TrackLibrary.ORDER + TrackLibrary.custom_ids()
 
 
 func _online_connect() -> void:
@@ -829,7 +829,7 @@ func _online_ids() -> Array:
 ## An open race we can take: a built-in track of ours (a newer game version
 ## may have more) or an editor track (it comes along).
 func _can_race(id: String) -> bool:
-	return TrackLibrary.is_custom(id) or (TrackLibrary.ORDER + TrackLibrary.CUSTOM).has(id)
+	return TrackLibrary.is_custom(id) or TrackLibrary.ORDER.has(id)
 
 
 ## Track of an open race: built-in by its name, an editor track by the name

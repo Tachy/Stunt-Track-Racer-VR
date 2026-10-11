@@ -8,8 +8,9 @@ extends Node3D
 ##   left click   a point: select it (blue) and drag it (along the lap and up
 ##                / down, on the vertical surface over the plan -
 ##                HeightRibbon); the road: mark its piece. The camera stays.
-##   Shift+click  a point: marked too / no longer (blue); Ctrl+click: all
-##                points from the one marked last up to it. Dragging a
+##   Shift+click  a point: all points from the one marked last up to it
+##                (as in the plan); Ctrl+click: marked too / no longer
+##                (blue). Dragging a
 ##                marked point moves all marked ones together (their
 ##                distances and heights to each other stay).
 ##   double click a point: the camera turns around it from now on;
@@ -24,6 +25,8 @@ extends Node3D
 ##                is held on up to the point under the mouse, the run-out
 ##                begins there (the nearer curve's side); its purple mark is
 ##                selected and dragged like a wave's
+##   loop mark    (green, on top of each loop) a click selects the loop;
+##                its radius: the cursor keys (TrackEditor)
 ##   wheel        camera distance
 ## The point logic is TrackEditorModel's (snapping to walls at 80 deg,
 ## undo). While a point is dragged the line follows at once, the road
@@ -40,6 +43,7 @@ const WALL_LINE := Color("#ffd400")     # vertical walls and their lower points
 const POINT_ON := Color("#4fd8ff")      # selected point
 const WAVE_MARK := Color("#ff8a3d")     # a wave on the edge of the road
 const HOLD_MARK := Color("#b46cff")     # where a held banking runs out
+const LOOP_MARK := Color("#3ddc6a")     # on top of a loop: its radius
 const PIECE_ON := Color("#e0302a")      # selected piece (also in the plan)
 const PROBLEM_CROSSING := Color(1.0, 0.25, 0.2)
 const PROBLEM_STEEP := Color(1.0, 0.6, 0.1)
@@ -71,7 +75,7 @@ var path: TrackPath
 var ribbon: HeightRibbon
 var point := -1                   # selected point (index in model.points())
 ## All marked points (indices in model.points(), with `point`); more than one:
-## they move together. _mark_anchor: where Ctrl+click marks from.
+## they move together. _mark_anchor: where Shift+click marks from.
 var marked: Array = []
 var _mark_anchor := -1
 var wave := -1                    # selected wave (index in model.waves)
@@ -79,6 +83,7 @@ var _wave_drag := false           # the selected wave follows the mouse
 ## Selected hold point of a held banking: [piece, side] ([]: none).
 var hold: Array = []
 var _hold_drag := false
+var loop := -1                    # selected loop (piece index; -1: none)
 var piece := -1                   # selected piece
 ## Problems of the built track: [{pos: plan point, kind, at: path point}].
 var problems: Array = []
@@ -286,6 +291,7 @@ func select_point(i: int, move_camera := false) -> void:
 	point = i
 	wave = -1
 	hold = []
+	loop = -1
 	marked = [i] if i >= 0 else []
 	_mark_anchor = i
 	if i >= 0:
@@ -307,6 +313,7 @@ func select_piece(k: int, move_camera := false) -> void:
 	marked = []
 	wave = -1
 	hold = []
+	loop = -1
 	if move_camera and k >= 0 and k < path.pieces.size():
 		var pc: Dictionary = path.pieces[k]
 		_pivot = path.center[(int(pc["i0"]) + int(pc["i1"])) / 2]
@@ -329,6 +336,7 @@ func _piece_at_x(x: float) -> int:
 func select_hold(h: Array) -> void:
 	hold = h
 	wave = -1
+	loop = -1
 	point = -1
 	marked = []
 	if not h.is_empty():
@@ -385,10 +393,53 @@ func _hold_to(pos: Vector2) -> void:
 	dragged.emit()
 
 
+## Selects loop k (piece index, green mark on its top; -1: none).
+func select_loop(k: int) -> void:
+	loop = k
+	wave = -1
+	hold = []
+	point = -1
+	marked = []
+	if k >= 0:
+		piece = k
+	_line_dirty = true
+	_static_dirty = true
+	selected.emit()
+
+
+## Loop pieces of the track as built (indices into path.pieces).
+func _loops() -> Array:
+	var out := []
+	for k in path.pieces.size():
+		if path.pieces[k]["type"] == "O":
+			out.append(k)
+	return out
+
+
+## 3D position of the mark of loop k: over the top of the loop (outside).
+func loop_pos(k: int) -> Vector3:
+	var pc: Dictionary = path.pieces[k]
+	var i := (int(pc["i0"]) + int(pc["i1"])) / 2
+	return path.center[i] - path.up[i] * 1.5
+
+
+## Loop mark under the screen position (-1 if none).
+func _loop_at(pos: Vector2) -> int:
+	var best := -1
+	var best_d := PICK_PX * 1.5
+	for k in _loops():
+		var sp: Variant = view.to_screen(loop_pos(k))
+		if sp != null and (sp as Vector2).distance_to(pos) < best_d:
+			best_d = (sp as Vector2).distance_to(pos)
+			best = k
+	return best
+
+
 ## Selects wave k (orange mark; -1: none).
 func select_wave(k: int) -> void:
 	wave = k
 	hold = []
+	loop = -1
 	point = -1
 	marked = []
 	if k >= 0:
@@ -450,7 +501,7 @@ func _wave_at(pos: Vector2) -> int:
 	return best
 
 
-## Shift+click (toggle) / Ctrl+click (span) on point i: marks it
+## Ctrl+click (toggle) / Shift+click (span) on point i: marks it
 ## too or no longer, or all points from the one marked last up to it. Not
 ## the start and end of the lap.
 func mark_point(i: int, span: bool) -> void:
@@ -645,6 +696,10 @@ func handle(event: InputEvent) -> bool:
 func _left_click(pos: Vector2, double: bool, shift := false, ctrl := false) -> void:
 	var i := _point_at(pos)
 	if i < 0 and not double:
+		var lk := _loop_at(pos)
+		if lk >= 0:
+			select_loop(lk)
+			return
 		var wk := _wave_at(pos)
 		if wk >= 0:
 			select_wave(wk)
@@ -659,7 +714,7 @@ func _left_click(pos: Vector2, double: bool, shift := false, ctrl := false) -> v
 			return
 	if i >= 0:
 		if (shift or ctrl) and not double:
-			mark_point(i, ctrl)
+			mark_point(i, shift)
 			if marked.has(i):
 				model.snapshot_heights()
 				_begin_drag(i, pos)
@@ -1003,6 +1058,9 @@ func _draw_points() -> void:
 		var hs := POINT_PX * view.pixel_metres(hp)
 		var on: bool = not hold.is_empty() and hold[0] == mk[0] and hold[1] == mk[1]
 		_diamond(kit, hp, hs * 0.9, POINT_ON if on else HOLD_MARK)
+	for k in _loops():
+		var lp := loop_pos(k)
+		_diamond(kit, lp, POINT_PX * view.pixel_metres(lp) * 1.3, POINT_ON if k == loop else LOOP_MARK)
 	_point_mesh.clear_surfaces()
 	kit.build(_point_mesh)
 

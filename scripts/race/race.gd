@@ -794,14 +794,10 @@ func _stall_on_ground(c: PlayerCar, t: CarTracker) -> void:
 		print("[Race] %s engine stalled on the ground at s=%.0f" % ["player" if c == car else "opponent", t.s])
 
 
-## Whether car c has fallen off: below the road beside it, or in a pit or a
-## hole.
+## Whether car c has fallen off (TrackPath.fallen(): not on a drawbridge's
+## leaves).
 func _fallen(c: PlayerCar, t: CarTracker) -> bool:
-	var i := t.idx
-	if path.road[i] == 0 or path.ground_floor[i] == 1 or (path.pit_mask.size() == path.n and path.pit_mask[i] == 1):
-		return true
-	var lat := t.lateral()
-	return absf(lat) > path.half_width[i] + 0.5 and c.global_position.y - path.road_height(i, lat) < -FALL_BELOW
+	return path.fallen(t.idx, t.lateral(), c.global_position.y, FALL_BELOW)
 
 
 func _on_landed(strength: float) -> void:
@@ -981,7 +977,7 @@ func _feature_view() -> bool:
 
 func _piece_desc(pi_: int) -> String:
 	var pc: Dictionary = path.pieces[pi_]
-	return "%s%s h%.0f->%.0f bank%.0f%s" % [pc["type"], (" l%.0f" % pc["length"]), pc["h0"], pc["h1"], rad_to_deg(pc["bank"]), " pit" if pc["no_crane"] else ""]
+	return "%s%s h%.0f->%.0f bank%.0f" % [pc["type"], (" l%.0f" % pc["length"]), pc["h0"], pc["h1"], rad_to_deg(pc["bank"])]
 
 
 

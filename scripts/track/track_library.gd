@@ -1,6 +1,7 @@
 class_name TrackLibrary
 ## The tracks: the eight league tracks (rebuilt freely in the spirit of the
-## 1989 originals), the extra release tracks and the ones from the editor.
+## 1989 originals), the example tracks for the editor and the ones from the
+## editor.
 ## Official track data: server/official/<id>.json (see OFFICIAL_DIR).
 ## No original track data is used.
 ##
@@ -13,11 +14,9 @@ class_name TrackLibrary
 ##          (steepest at the end -> take-off lip), "land" (steepest at start)
 ##   bump   extra hump amplitude (sin profile, 0 at both ends)
 ##   bank   banking peak in degrees (sin profile; + = left edge higher)
-##   gap    no road on this piece (jump!)
 ##   (pits: a short steep wall down, a pit floor, a steep wall up - see
 ##    TrackPath pit detection)
 ##   bridge drawbridge leaves on this piece
-##   no_crane  never put the car back here
 ##   (tunnels: a negative h takes the road below the ground - an open cut
 ##    first, then a covered tunnel; see TrackPath tunnel detection)
 ##
@@ -42,11 +41,19 @@ const LEGACY_IDS := {
 	"high_jump": "the_tower",
 	"draw_bridge": "bridge_run",
 	"ski_jump": "ski_flyer",
-	"custom_1": "loop_and_jump",
+	"custom_1": "custom/loop_and_jump",
 }
 
-## Extra tracks (practice only, not part of the league).
-const CUSTOM := ["loop_and_jump", "grand_tour"]
+## Example tracks for the editor (not part of the league): shipped in
+## EXAMPLES_DIR in the editor's format and copied once into the own tracks
+## (install_examples()) - from then on own tracks like any other (edit,
+## rename, delete, offer online). Admin mode edits the shipped files
+## (id "example/<id>").
+const EXAMPLES := ["loop_and_jump", "grand_tour"]
+const EXAMPLES_DIR := "res://examples"
+const EXAMPLE_PREFIX := "example/"
+## The examples copied before (one id a line): one deleted later stays gone.
+const EXAMPLES_MARKER := "user://examples_installed.txt"
 
 const DIVISION_TRACKS := {
 	4: ["first_flight", "camel_back"],
@@ -55,8 +62,7 @@ const DIVISION_TRACKS := {
 	1: ["bridge_run", "ski_flyer"],
 }
 
-## The official tracks (the league and the extra release tracks) live in
-## server/official/<id>.json, in the editor's format: "def" is what the
+## The official tracks (the league) live in server/official/<id>.json, in the editor's format: "def" is what the
 ## game builds, the rest lets the track editor load it (admin mode). The
 ## online server embeds the very same files.
 const OFFICIAL_DIR := "res://server/official"
@@ -84,7 +90,7 @@ static func is_official(id: String) -> bool:
 
 static func _load_official() -> Dictionary:
 	var out := {}
-	for id in ORDER + CUSTOM:
+	for id in ORDER:
 		var data := load_official(id)
 		if data.get("def") is Dictionary:
 			var def: Dictionary = data["def"]
@@ -138,6 +144,50 @@ static func load_custom(id: String) -> Dictionary:
 	return data if data is Dictionary else {}
 
 
+static func is_example(id: String) -> bool:
+	return id.begins_with(EXAMPLE_PREFIX)
+
+
+static func example_path(id: String) -> String:
+	return EXAMPLES_DIR.path_join(id.trim_prefix(EXAMPLE_PREFIX) + ".json")
+
+
+## The shipped editor file of an example track ({} if missing).
+static func load_example(id: String) -> Dictionary:
+	var text := FileAccess.get_file_as_string(example_path(id))
+	var data = JSON.parse_string(text) if text != "" else null
+	return data if data is Dictionary else {}
+
+
+## Copies the example tracks not copied before into dir (the own tracks).
+## An own file of the same name stays as it is; an example deleted later
+## does not come back (marker). Returns the ids copied.
+static func install_examples(dir := CUSTOM_DIR, marker := EXAMPLES_MARKER) -> Array:
+	var done: Array = Array(FileAccess.get_file_as_string(marker).split("\n", false)) if FileAccess.file_exists(marker) else []
+	var copied := []
+	for ex in EXAMPLES:
+		var text := FileAccess.get_file_as_string(example_path(ex))
+		if done.has(ex) or text == "":
+			continue
+		done.append(ex)
+		var target := dir.path_join(ex + ".json")
+		if FileAccess.file_exists(target):
+			continue
+		DirAccess.make_dir_recursive_absolute(dir)
+		var f := FileAccess.open(target, FileAccess.WRITE)
+		if f == null:
+			done.erase(ex)
+			continue
+		f.store_string(text)
+		f.close()
+		copied.append(ex)
+	var m := FileAccess.open(marker, FileAccess.WRITE)
+	if m != null:
+		m.store_string("\n".join(done))
+		m.close()
+	return copied
+
+
 ## Online: the editor track of another player, kept for this race only
 ## (never saved): {name, def}. Its id is SHARED_ID.
 const SHARED_ID := "net/shared"
@@ -176,6 +226,8 @@ static func get_def(id: String) -> Dictionary:
 	var d: Dictionary
 	if is_custom(id):
 		d = load_custom(id).get("def", {})
+	elif is_example(id):
+		d = load_example(id).get("def", {})
 	elif id == SHARED_ID:
 		d = shared.get("def", {}).duplicate(true)
 	else:
@@ -187,13 +239,15 @@ static func get_def(id: String) -> Dictionary:
 static func display_name(id: String) -> String:
 	if is_custom(id):
 		return str(load_custom(id).get("name", id.trim_prefix(CUSTOM_PREFIX)))
+	if is_example(id):
+		return str(load_example(id).get("name", id.trim_prefix(EXAMPLE_PREFIX)))
 	if id == SHARED_ID:
 		return str(shared.get("name", ""))
 	return TRACKS[id]["name"]
 
 
 static func division_of(id: String) -> int:
-	if is_custom(id) or id == SHARED_ID:
+	if is_custom(id) or is_example(id) or id == SHARED_ID:
 		return 1
 	if TRACKS.has(id) and TRACKS[id].has("division"):
 		return int(TRACKS[id]["division"])
