@@ -101,3 +101,7 @@ Benutzerdaten liegen unter `%APPDATA%\Godot\app_userdata\Stunt Track Racer VR\`:
 ## Entstehung
 
 Das Spiel ist im Dialog mit einem KI-Assistenten (Claude Code) entstanden: Recherche zum Original, Architektur, gesamter GDScript-Code, Streckenentwürfe (mit einem kleinen Python-Löser für geschlossene Rundkurse) und Tests. Geprüft wurde mit automatischen Tests (`tests/run_tests.gd`), simulierten Rennen im Headless-Modus (Autopilot gegen KI) und Screenshots. Das eigentliche Fahrgefühl in VR und mit Lenkrad wurde vom Menschen beurteilt.
+
+## Unterstützen
+
+Das Spiel ist kostenlos und bleibt Open Source. Wenn es dir gefällt, kannst du die Entwicklung freiwillig über [GitHub Sponsors](https://github.com/sponsors/Tachy) unterstützen – einmalig oder monatlich, ohne Gegenleistung. Danke!

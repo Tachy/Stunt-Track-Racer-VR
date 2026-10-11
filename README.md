@@ -100,3 +100,7 @@ User data is stored in `%APPDATA%\Godot\app_userdata\Stunt Track Racer VR\`: `se
 ## How it was made
 
 The game was developed in dialogue with an AI assistant (Claude Code): research on the original, architecture, all GDScript code, track designs (with a small Python solver for closed circuits) and tests. Verification used automated tests (`tests/run_tests.gd`), simulated headless races (autopilot against AI) and screenshots. The actual driving feel in VR and with the wheel was judged by the human.
+
+## Support
+
+The game is free and stays open source. If you enjoy it, you can support its development voluntarily via [GitHub Sponsors](https://github.com/sponsors/Tachy) - one-off or monthly, without any perks in return. Thank you!
