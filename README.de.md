@@ -1,6 +1,6 @@
 # Stunt Track Racer VR
 
-![Stunt Track Racer VR - aus dem Cockpit, Boost an, der Gegner daneben](docs/images/hero.jpg)
+![Stunt Track Racer VR - Cockpit, Menü, Kran, Tunnel und Strecken-Editor](docs/images/stunt_track_racer_vr_800.gif)
 
 [English](README.md) · **Deutsch**
 
