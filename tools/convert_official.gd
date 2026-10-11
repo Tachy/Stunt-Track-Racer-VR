@@ -1,7 +1,7 @@
 extends SceneTree
 ## One-off: turns the official tracks' heights per piece (h, profiles,
 ## bumps) into the editor's height spline, so the track editor can tune
-## them (docs/official-tracks-plan.md, step 3).
+## them.
 ##   godot --headless --xr-mode off --path . --script res://tools/convert_official.gd [-- --write]
 ## Pits (steep ramps the old build turned into steps) become spline walls
 ## right where the old steps stood; the rest of the profile gets points
