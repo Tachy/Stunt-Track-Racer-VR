@@ -764,20 +764,27 @@ func _save_official() -> void:
 
 
 ## Admin: an example track back to examples/<id>.json (commit it; new
-## players get it with the next release).
+## players get it with the next release) and the same file into the own
+## tracks (replacing the copy there): the template and the playable track
+## stay the same.
 func _save_example() -> void:
 	var path := TrackLibrary.example_path(_example)
+	var own := TrackLibrary.custom_path(TrackLibrary.CUSTOM_PREFIX + _example)
 	var data := model.to_dict(track_name)
 	if model.closed:
 		data["def"] = model.to_def(track_name)
-	var f := FileAccess.open(path, FileAccess.WRITE)
-	if f == null:
-		_flash(Lang.t("COULD NOT SAVE"))
-		return
-	f.store_string(JSON.stringify(data, "  "))
-	f.close()
+	var text := JSON.stringify(data, "  ")
+	DirAccess.make_dir_recursive_absolute(TrackLibrary.CUSTOM_DIR)
+	for p in [path, own]:
+		var f := FileAccess.open(p, FileAccess.WRITE)
+		if f == null:
+			_flash(Lang.t("COULD NOT SAVE"))
+			return
+		f.store_string(text)
+		f.close()
 	_saved_id = TrackLibrary.EXAMPLE_PREFIX + _example
-	_flash(Lang.t("EXAMPLE TRACK SAVED: %s (COMMIT IT)") % path)
+	_fill_load_menu()
+	_flash(Lang.t("EXAMPLE TRACK SAVED: %s (COMMIT IT)") % path + "  " + Lang.t("COPY: %s") % own)
 
 
 ## Renames the saved file of the loaded track to the name in the name field
