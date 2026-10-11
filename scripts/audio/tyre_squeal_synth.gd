@@ -31,6 +31,10 @@ const STATIC_LOAD := 2200.0      # N on a wheel at rest
 const TEXTURE := 0.02            # waver of the sliding speed from the road's texture
 const TEXTURE_HZ := 180.0        # how fast it wavers (texture under the slide)
 const SLIDE_MIN := 0.25          # m/s below which a wheel grips silently
+## The sliding speed under the tyre follows the wheel's with this time
+## constant (s): a sudden drop (a frame of the physics) would leave the mode
+## swinging at the old speed - a burst far louder than the squeal, clipped.
+const SLIDE_LAG := 0.04
 
 ## Per wheel: sliding speed (m/s) and load (N).
 var slide := PackedFloat32Array([0, 0, 0, 0])
@@ -45,7 +49,7 @@ var _propagation: SoundPropagation
 
 func _init() -> void:
 	for w in 4:
-		_voices.append({"x": 0.0, "xd": 0.0, "stuck": true, "v": 0.0, "k": 0.0, "g": 0.0, "tex": 0.0, "hp": 0.0})
+		_voices.append({"x": 0.0, "xd": 0.0, "stuck": true, "v": 0.0, "k": 0.0, "g": 0.0, "tex": 0.0, "hp": 0.0, "vs": 0.0})
 
 
 func setup(positional: bool, volume_db := 0.0) -> TyreSquealSynth:
@@ -104,6 +108,7 @@ func generate(frames: int) -> PackedFloat32Array:
 	out.resize(frames)
 	var dt := 1.0 / RATE
 	var tex_a := minf(TAU * TEXTURE_HZ * dt, 1.0)
+	var lag_a := 1.0 - exp(-dt / SLIDE_LAG)
 	for w in 4:
 		var vc: Dictionary = _voices[w]
 		var sl := 0.0 if muted else slide[w]
@@ -122,6 +127,7 @@ func generate(frames: int) -> PackedFloat32Array:
 			vc["x"] = 0.0
 			vc["xd"] = 0.0
 			vc["stuck"] = true
+			vc["vs"] = v1
 			continue
 		var om := TAU * float(MODE_HZ[w])
 		var om2 := om * om
@@ -131,9 +137,10 @@ func generate(frames: int) -> PackedFloat32Array:
 		var stuck: bool = vc["stuck"]
 		var tex: float = vc["tex"]
 		var hp: float = vc["hp"]
+		var vs: float = vc["vs"]
 		for i in frames:
 			var t := float(i) / frames
-			var vs := lerpf(v0, v1, t)
+			vs += (lerpf(v0, v1, t) - vs) * lag_a
 			tex += (randf() * 2.0 - 1.0 - tex) * tex_a
 			var vb := vs * (1.0 + TEXTURE * tex * 8.0)   # road speed under the mode
 			var k := lerpf(k0, k1, t)
@@ -164,4 +171,5 @@ func generate(frames: int) -> PackedFloat32Array:
 		vc["stuck"] = stuck
 		vc["tex"] = tex
 		vc["hp"] = hp
+		vc["vs"] = vs
 	return out
