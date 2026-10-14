@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0](https://github.com/Tachy/Stunt-Track-Racer-VR/compare/v0.2.0...v0.3.0) (2026-10-14)
+
+
+### Features
+
+* Loop and Jump example track retuned ([6659fd2](https://github.com/Tachy/Stunt-Track-Racer-VR/commit/6659fd2abb0bd98faf9f74bff9f18c513e8ddafa))
+* side walls follow the road stripes in two earth browns ([1e10fbb](https://github.com/Tachy/Stunt-Track-Racer-VR/commit/1e10fbb7b7777d9846d2c82d27e80b764a7814d2))
+* Super League only in Division 1, switch in the practice menu ([27871e3](https://github.com/Tachy/Stunt-Track-Racer-VR/commit/27871e3473b6067d2a3973b0bc1ee49f1580c12b))
+
+
+### Bug Fixes
+
+* no crash when quitting mid-race (sounds stopped before Godot frees them) ([1d997c9](https://github.com/Tachy/Stunt-Track-Racer-VR/commit/1d997c980183ad18cb469cbdb08f5dfd9279e1a5))
+* tunnels darken again when a race is started from the menu ([7714b01](https://github.com/Tachy/Stunt-Track-Racer-VR/commit/7714b0145a123a0c2fe38b9c65a48f275199437c))
+
 ## [0.2.0](https://github.com/Tachy/Stunt-Track-Racer-VR/compare/v0.1.0...v0.2.0) (2026-10-11)
 
 
