@@ -1,6 +1,6 @@
 # Stunt Track Racer VR
 
-### [👉 Download Latest Windows Build](https://github.com/Tachy/Stunt-Track-Racer-VR/releases)
+### [👉 Download Latest Windows Build](https://github.com/Tachy/Stunt-Track-Racer-VR/releases/latest)
 
 ![Stunt Track Racer VR - cockpit, menu, crane, tunnel and track editor](docs/images/stunt_track_racer_vr_800.gif)
 
