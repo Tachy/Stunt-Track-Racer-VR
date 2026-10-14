@@ -7,7 +7,10 @@ const GROUND := Color("#777755")
 const ROAD_DARK := Color("#999977")
 const ROAD_LIGHT := Color("#bbbb99")
 const START_LINE := Color("#ffffff")
-const WALL := Color("#773333")
+const WALL := Color("#613b25")        # under the light road stripes
+## Under the dark road stripes: as much lighter as ROAD_LIGHT is than
+## ROAD_DARK (same luminance contrast ratio, about 1.5).
+const WALL_LIGHT := Color("#7d5239")
 const WALL_EDGE := Color("#ffffff")
 const JUMP_WALL := Color("#222222")    # vertical walls of pits and ski jumps
 const YELLOW := Color("#ffff00")

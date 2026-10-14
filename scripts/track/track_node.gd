@@ -86,10 +86,17 @@ func _road_color(i: int) -> Color:
 	return Palette.ROAD_DARK if _stripe[i] == 0 else Palette.ROAD_LIGHT
 
 
-func _wall(kit: MeshKit, faces: PackedVector3Array, a: Vector3, b: Vector3) -> void:
+## Side walls follow the road stripes: lighter brown under the dark beige,
+## the darker brown under the light one. The colour changes at the same
+## sample as the road, along the wall's vertical edge there.
+func _wall_color(i: int) -> Color:
+	return Palette.WALL_LIGHT if _stripe[i] == 0 else Palette.WALL
+
+
+func _wall(kit: MeshKit, faces: PackedVector3Array, a: Vector3, b: Vector3, i: int) -> void:
 	var ag := Vector3(a.x, 0.0, a.z)
 	var bg := Vector3(b.x, 0.0, b.z)
-	kit.quad(a, b, bg, ag, Palette.WALL)
+	kit.quad(a, b, bg, ag, _wall_color(i))
 	faces.append_array([a, b, bg, a, bg, ag])
 
 
@@ -166,10 +173,10 @@ func _road_piece(kit: MeshKit, road_faces: PackedVector3Array, wall_faces: Packe
 	kit.quad(a[2], b[2], b[3], a[3], Palette.WALL_EDGE)
 	_road_faces(road_faces, a[0], b[0], b[3], a[3])
 	if path.deck[i] == 1:
-		_slab(kit, wall_faces, a[0], b[0], a[3], b[3], path.up[i], path.up[(i + 1) % path.n])
+		_slab(kit, wall_faces, a[0], b[0], a[3], b[3], path.up[i], path.up[(i + 1) % path.n], i)
 	else:
-		_wall(kit, wall_faces, a[0], b[0])
-		_wall(kit, wall_faces, a[3], b[3])
+		_wall(kit, wall_faces, a[0], b[0], i)
+		_wall(kit, wall_faces, a[3], b[3], i)
 
 
 ## The cross-sections at a wall in step segment i (a at sample i, b at
@@ -306,7 +313,7 @@ func _tunnel_piece(kit: MeshKit, road_faces: PackedVector3Array, wall_faces: Pac
 	road_faces.append_array([a[0], b[0], b[1], a[0], b[1], a[1], a[2], b[2], b[3], a[2], b[3], a[3]])
 	var wk := _glass if _glass != null else kit     # walls (see-through in the editor)
 	if inside:
-		var wall := Palette.WALL.darkened(TUNNEL_DIM)
+		var wall := _wall_color(i).darkened(TUNNEL_DIM)
 		wk.quad(a[0], b[0], b[4], a[4], wall)
 		wk.quad(a[3], b[3], b[5], a[5], wall)
 		wk.quad(a[4], b[4], b[5], a[5], _road_color(i).darkened(TUNNEL_DIM))   # ceiling
@@ -322,25 +329,25 @@ func _tunnel_piece(kit: MeshKit, road_faces: PackedVector3Array, wall_faces: Pac
 	# open cut: the tunnel walls go on, tilted with the banking as in the
 	# tunnel, and end where they reach the ground; a road edge above the
 	# ground gets a wall down to it instead
-	_cut_wall(kit, wall_faces, a[0], b[0], ua, ub)
-	_cut_wall(kit, wall_faces, a[3], b[3], ua, ub)
+	_cut_wall(kit, wall_faces, a[0], b[0], ua, ub, i)
+	_cut_wall(kit, wall_faces, a[3], b[3], ua, ub, i)
 
 
 ## Wall of an open cut from the road edge a-b along the tunnel's up vectors
 ## ua / ub up to the ground (TrackPath.to_ground), with a white band along
 ## its top; a road edge above the ground: a wall down to it. Where the edge
 ## crosses ground level the piece is split there.
-func _cut_wall(kit: MeshKit, faces: PackedVector3Array, a: Vector3, b: Vector3, ua: Vector3, ub: Vector3) -> void:
+func _cut_wall(kit: MeshKit, faces: PackedVector3Array, a: Vector3, b: Vector3, ua: Vector3, ub: Vector3, i: int) -> void:
 	if (a.y > 0.0 and b.y < 0.0) or (a.y < 0.0 and b.y > 0.0):
 		var t := a.y / (a.y - b.y)
 		var m := a.lerp(b, t)
 		m.y = 0.0
 		var um := ua.lerp(ub, t).normalized()
-		_cut_wall(kit, faces, a, m, ua, um)
-		_cut_wall(kit, faces, m, b, um, ub)
+		_cut_wall(kit, faces, a, m, ua, um, i)
+		_cut_wall(kit, faces, m, b, um, ub, i)
 		return
 	if a.y >= 0.0 and b.y >= 0.0:
-		_wall(kit, faces, a, b)
+		_wall(kit, faces, a, b, i)
 		return
 	var ga := TrackPath.to_ground(a, ua)
 	var gb := TrackPath.to_ground(b, ub)
@@ -349,7 +356,7 @@ func _cut_wall(kit: MeshKit, faces: PackedVector3Array, a: Vector3, b: Vector3, 
 	var ea := ga - ua * (minf(EDGE_BAND, -a.y) / ua.y)
 	var eb := gb - ub * (minf(EDGE_BAND, -b.y) / ub.y)
 	var wk := _glass if _glass != null else kit
-	wk.quad(a, b, eb, ea, Palette.WALL)
+	wk.quad(a, b, eb, ea, _wall_color(i))
 	wk.quad(ea, eb, gb, ga, Palette.WALL_EDGE)
 	faces.append_array([a, b, gb, a, gb, ga])
 
@@ -402,14 +409,15 @@ func _build_tunnel_lamps() -> void:
 	add_child(mi)
 
 
-func _slab(kit: MeshKit, faces: PackedVector3Array, li: Vector3, lj: Vector3, ri: Vector3, rj: Vector3, ui: Vector3, uj: Vector3) -> void:
+func _slab(kit: MeshKit, faces: PackedVector3Array, li: Vector3, lj: Vector3, ri: Vector3, rj: Vector3, ui: Vector3, uj: Vector3, i: int) -> void:
 	var lbi := li - ui * DECK_THICKNESS
 	var lbj := lj - uj * DECK_THICKNESS
 	var rbi := ri - ui * DECK_THICKNESS
 	var rbj := rj - uj * DECK_THICKNESS
-	kit.quad(li, lj, lbj, lbi, Palette.WALL)
-	kit.quad(ri, rj, rbj, rbi, Palette.WALL)
-	kit.quad(lbi, lbj, rbj, rbi, Palette.WALL.darkened(0.3))
+	var wall := _wall_color(i)
+	kit.quad(li, lj, lbj, lbi, wall)
+	kit.quad(ri, rj, rbj, rbi, wall)
+	kit.quad(lbi, lbj, rbj, rbi, wall.darkened(0.3))
 	faces.append_array([li, lj, lbj, li, lbj, lbi, ri, rj, rbj, ri, rbj, rbi, lbi, lbj, rbj, lbi, rbj, rbi])
 
 
