@@ -128,6 +128,7 @@ func _report_and_quit() -> void:
 			r.car.boost_units, r.race_time, Dashboard.fmt_time(r.ptrack.best_lap),
 			("%s laps=%d crack=%.2f best=%s" % [r.opp_state, r.opp_track.laps_done(), r.opp_car.damage.crack, Dashboard.fmt_time(r.opp_track.best_lap)]) if r.opp_car else "-"])
 		print("[Main] wheel check: rolled on radius %.1f m vs driven on ground %.1f m (%.2f %%)" % [r.car.rolled_distance, r._ground_dist, 100.0 * (r.car.rolled_distance - r._ground_dist) / maxf(r._ground_dist, 1.0)])
+	Sfx.silence()
 	get_tree().quit()
 
 

@@ -50,6 +50,21 @@ func _exit_tree() -> void:
 		_music_thread.wait_to_finish()
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		silence()
+
+
+## Stops every sound before the game quits: at quit Godot frees the players
+## while the audio thread may still be mixing their generator streams
+## (engine, tyres, wind, crane) - quitting mid-race crashed about one time
+## in eight. Stopped a frame before, nothing is left to mix.
+func silence() -> void:
+	var root := get_tree().root
+	for p in root.find_children("*", "AudioStreamPlayer", true, false) + root.find_children("*", "AudioStreamPlayer3D", true, false):
+		p.stop()
+
+
 # --- tunnel echo ---------------------------------------------------------------------
 
 ## A bus for the vehicle sounds with a reverb tuned like a long concrete
